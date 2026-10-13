@@ -30,19 +30,10 @@ Empty means go. Anything listed gets committed first — so there is always a cl
 pnpm add react-router
 ```
 
-and create `vercel.json`:
-
-```json
-{ "rewrites": [{ "source": "/(.*)", "destination": "/" }] }
-```
-
-Without that rewrite the app deploys and navigates fine, then 404s on refresh or on any shared deep link.
+Deep links then need a rewrite in `vercel.json` — the `vercel` skill writes it. Without that rewrite the app deploys and navigates fine, then 404s on refresh or on any shared deep link.
 
 ## Deploy
 
-```bash
-vercel link    # first time only
-vercel --prod
-```
+Run the `vercel` skill (`/vercel`). It writes `vercel.json` and `.vercelignore`, pins Node and pnpm so Vercel's build matches the local one, links the project, ships a preview before production, and leaves a `pnpm run deploy:prod` script behind. Once that script exists, use it.
 
 A deploy is a checkpoint — clean tree first.

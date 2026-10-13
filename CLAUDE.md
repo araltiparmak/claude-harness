@@ -1,63 +1,20 @@
 # CLAUDE.md
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+This repo holds my Claude Code setup and my general-purpose skills, one per `skills/<name>/` folder. A skill tied to my own projects, accounts or data goes in the private `~/dev/private-skills` repo instead; this repo is public. Matt Pocock's skills are not copied here: `scripts/update.sh` pulls his repo and links them. Other external skills and plugins are recorded as install commands in `HARNESS.md`.
 
-## Purpose
-
-This is a personal Claude Code configuration repository ("dotclaude") — a collection of reusable skills that can be installed at the project or user level.
-
-## Repository structure
+## Skill layout
 
 ```
-skills/
-  <skill-name>/
-    SKILL.md          ← required: skill definition and procedure
-    examples/         ← optional: worked examples referenced by SKILL.md
-    references/       ← optional: detail docs when SKILL.md body would exceed ~300 lines
-    scripts/          ← optional: scripts the skill runs repeatedly
-    assets/           ← optional: templates or fixtures used in output
+skills/<name>/
+  SKILL.md       required
+  <anything>     reference docs, scripts, profiles the skill names by path
 ```
 
-## Skills
+`SKILL.md` frontmatter needs `name` (matches the folder, kebab-case) and `description`. Write the description as the trigger: what the skill does, then the phrases or situations that should fire it, one phrase per distinct case. Add `disable-model-invocation: true` for a skill that should run only when typed by name. Add `allowed-tools` only with specific patterns (`Bash(git log *)`, not `Bash(*)`). Leave `model` unset so the skill runs on the session's model.
 
-Skills are SKILL.md files that tell Claude how to handle a specific repeatable task. They are installed either:
-- **Project-level**: `.claude/skills/<skill-name>/` inside a repo (checked into version control)
-- **User-level**: `~/.claude/skills/<skill-name>/` (private, available across all projects)
+## When a skill is added, renamed or removed
 
-### SKILL.md conventions
+1. Update the table in `README.md` so it lists exactly the folders in `skills/`.
+2. Run `scripts/update.sh` so `~/.claude/skills/` matches.
 
-Every SKILL.md requires YAML frontmatter:
-
-```yaml
----
-name: <skill-name>       # must match directory name (kebab-case)
-description: <trigger>   # third-person, 3-8 quoted trigger phrases + "use it whenever..." clause
-model: claude-sonnet-4-6 # optional: haiku for mechanical tasks, sonnet (default), opus for high-stakes
-color: green             # optional: green, blue, yellow, purple, red, orange, cyan, pink
-allowed-tools:           # whitelist only tools this skill actually invokes
-  - Read
-  - Bash(git log *)      # use specific patterns, not blanket Bash(*)
----
-```
-
-Body rules:
-- Imperative form (verb-first, no "you should")
-- Number steps when order matters
-- Include `Arguments passed: $ARGUMENTS` near the top if the skill accepts slash-command arguments
-- Reference bundled files by name so Claude knows they exist
-
-### Registering a new skill
-
-After creating a skill, add a line to this file under the **Installed skills** section below (or to the consuming project's CLAUDE.md):
-
-```
-- <skill-name>: <one-line description> (`skills/<name>/`)
-```
-
-## Installed skills
-
-- create-skill: Packages a workflow into a new reusable SKILL.md (`skills/create-skill/`)
-- git-commit: Creates a git commit — stages files, drafts a message, handles hook failures (`skills/git-commit/`)
-- create-readme: Writes or rewrites a README.md based on actual project content (`skills/create-readme/`)
-- create-pr: Creates a GitHub pull request — pushes branch, drafts title/body, returns PR URL (`skills/create-pr/`)
-- git-push: Pushes the current branch to a remote — handles new branches, warns on main, surfaces common errors (`skills/git-push/`)
+Installing or removing a skill or plugin from elsewhere means editing `HARNESS.md` instead.
