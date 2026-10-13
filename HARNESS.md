@@ -11,9 +11,11 @@ claude plugin install expo@claude-plugins-official
 
 ## Skills (skills.sh)
 
+Plugins from `claude-plugins-official` update themselves. skills.sh skills do not: `scripts/update.sh` runs `npx skills update` for them. Install with `-g` so the skill is recorded in `~/.agents/.skill-lock.json`; an untracked skill is never updated.
+
 ```bash
-npx skills add AminBlg/SimpleEnglish
-npx skills add yetone/kill-ai-slop
+npx skills add AminBlg/SimpleEnglish -g -a claude-code -s '*' -y
+npx skills add yetone/kill-ai-slop -g -a claude-code -s '*' -y
 ```
 
 ## Adding an entry

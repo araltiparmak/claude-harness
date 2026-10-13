@@ -6,6 +6,7 @@ set -euo pipefail
 # what updates them. Run it again whenever you want the latest skills, or after
 # adding, removing or renaming one of your own.
 #
+# - Also runs `npx skills update` for the skills.sh skills in HARNESS.md.
 # - Missing repos are cloned to ~/dev. private-skills is private: on a machine
 #   without access its clone fails, and the rest still links.
 # - Matt's skills: the promoted buckets (engineering/, productivity/), the same
@@ -46,6 +47,12 @@ link() {
 sync_repo "$MATT" https://github.com/mattpocock/skills.git
 sync_repo "$PRIVATE" https://github.com/araltiparmak/private-skills.git
 sync_repo "$MINE" https://github.com/araltiparmak/my-harness.git
+
+# Skills installed with skills.sh (see HARNESS.md) do not update themselves.
+if command -v npx >/dev/null; then
+  echo "== update skills.sh skills"
+  npx -y skills@latest update -g -y || echo "warn: skills.sh update failed" >&2
+fi
 
 mkdir -p "$DEST"
 
