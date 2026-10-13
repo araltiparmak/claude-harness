@@ -1,6 +1,6 @@
 ---
 name: note
-description: Appends a timestamped line to the current project's note.md, a private gitignored log of observations and decisions about that project. Use when the user says "not al", "bunu not et", or "note this down".
+description: Appends a timestamped line to the current project's note.md, a private gitignored log of observations and decisions about that project. Use when the user says "note this down", "take a note", or "add to my notes".
 allowed-tools:
   - Read
   - Write
@@ -52,10 +52,10 @@ Each note is one line: `- HH:MM — <note>` (em dash, 24-hour local time).
 # Notes
 
 ## 2026-08-01
-- 14:20 — expo router v4'e geçilecek
+- 14:20 — move to expo router v4
 
 ## 2026-08-02
-- 09:12 — redis cache TTL 300sn olacak
+- 09:12 — redis cache TTL will be 300s
 ```
 
 Multi-line input collapses into that single line; keep line breaks only when the note is a list the user wrote as a list, indenting continuation lines by two spaces.

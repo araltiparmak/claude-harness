@@ -16,7 +16,7 @@ If the user gave a project name in the invocation, kebab-case it and use it dire
 
 ## 2. Set the effort level
 
-The user may pass an effort level 1–5 in the invocation (e.g. a trailing number, or "effort 3" / "efor 3"). If none is given, default to **1**. This level frames how you approach step 6 (build v1) and everything the user directs afterward in this project — hold it in mind for the rest of the session, not just the first feature.
+The user may pass an effort level 1–5 in the invocation (e.g. a trailing number, or "effort 3"). If none is given, default to **1**. This level frames how you approach step 6 (build v1) and everything the user directs afterward in this project — hold it in mind for the rest of the session, not just the first feature.
 
 - **1 — Normal.** Build directly and efficiently. Move fast, make reasonable choices, don't over-engineer.
 - **2 — Elevated.** Take a bit more care than usual: double-check edge cases and polish the parts that will actually be seen, but keep the pace up.

@@ -1,6 +1,6 @@
 ---
 name: vercel
-description: Deploys a Vite/React project to Vercel, or repairs its deploy path. Use when the user says "deploy", "vercel'e at", "yayına al", or "ship it"; when a deployed SPA 404s on refresh; when an env var works locally but not in production; or when a build that is green locally fails on Vercel. Also the follow-up to a `react-project` scaffold.
+description: Deploys a Vite/React project to Vercel, or repairs its deploy path. Use when the user says "deploy", "make this live", or "ship it"; when a deployed SPA 404s on refresh; when an env var works locally but not in production; or when a build that is green locally fails on Vercel. Also the follow-up to a `react-project` scaffold.
 ---
 
 Takes a working Vite + React project (typically one built by the `react-project` skill) and gives it a deployment path: config files, a pinned build environment, a linked Vercel project, a preview, then production.

@@ -5,7 +5,7 @@ description: Recommends the default stack for a new Expo + React Native + TypeSc
 
 Default stance for a new Expo + TypeScript + React Native app. These are **recommendations with rationale**, not silent assumptions — walk through them one at a time using the same interview pattern as the `grilling` skill (state the recommendation and why, wait for confirmation, then move to the next), rather than applying them all at once. The user may deviate from any default; when they do, don't push back twice.
 
-These defaults were established during the tech-stack interview for the `diction-v2` project (a diction/articulation-training app with camera + audio recording). Update this file whenever a new project reveals a better default or a real exception to one of these.
+These defaults come from a real tech-stack interview for a content-heavy app with camera and audio recording. Update this file whenever a new project reveals a better default or a real exception to one of these.
 
 ## 1. Package manager → npm
 
