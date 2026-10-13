@@ -1,18 +1,23 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Pulls my-harness, private-skills and mattpocock/skills, then symlinks their
-# skills into ~/.claude/skills. Because every entry is a symlink, the pull is
-# what updates them. Run it again whenever you want the latest skills, or after
-# adding, removing or renaming one of your own.
+# Pulls claude-harness, private-skills and mattpocock/skills, then installs my
+# Claude Code setup from them: skills, settings and global instructions. Run it
+# again whenever you want the latest, or after changing anything in the repos.
 #
+# - Skills are symlinked into ~/.claude/skills, so the pull is what updates them.
+# - ~/.claude/settings.json is built from claude/settings.json plus the private
+#   overlay in private-skills/claude/settings.json (scripts/build-settings.py).
+#   If the live file was changed outside the harness, it is left alone and the
+#   difference is printed.
+# - ~/.claude/CLAUDE.md is a symlink to claude/CLAUDE.md.
 # - Also runs `npx skills update` for the skills.sh skills in HARNESS.md.
 # - Missing repos are cloned to ~/dev. private-skills is private: on a machine
 #   without access its clone fails, and the rest still links.
 # - Matt's skills: the promoted buckets (engineering/, productivity/), the same
 #   set his plugin ships. Set MATT_BUCKETS to change it, e.g.
 #   MATT_BUCKETS="engineering productivity in-progress".
-# - My skills (my-harness, private-skills) win a name clash with his.
+# - My skills (claude-harness, private-skills) win a name clash with his.
 # - Real folders in ~/.claude/skills are never touched, only reported.
 # - Links into these repos whose skill no longer exists are removed.
 
@@ -46,7 +51,7 @@ link() {
 
 sync_repo "$MATT" https://github.com/mattpocock/skills.git
 sync_repo "$PRIVATE" https://github.com/araltiparmak/private-skills.git
-sync_repo "$MINE" https://github.com/araltiparmak/my-harness.git
+sync_repo "$MINE" https://github.com/araltiparmak/claude-harness.git
 
 # Skills installed with skills.sh (see HARNESS.md) do not update themselves.
 if command -v npx >/dev/null; then
@@ -54,9 +59,23 @@ if command -v npx >/dev/null; then
   npx -y skills@latest update -g -y || echo "warn: skills.sh update failed" >&2
 fi
 
+echo "== settings"
+python3 "$MINE/scripts/build-settings.py" \
+  "$MINE/claude/settings.json" "$PRIVATE/claude/settings.json" \
+  "$HOME/.claude/settings.json" "$HOME/.claude/.harness/settings.last.json" \
+  || echo "warn: settings.json not updated (see above)" >&2
+
+if [ -L "$HOME/.claude/CLAUDE.md" ] || [ ! -e "$HOME/.claude/CLAUDE.md" ] \
+  || cmp -s "$HOME/.claude/CLAUDE.md" "$MINE/claude/CLAUDE.md"; then
+  ln -sfn "$MINE/claude/CLAUDE.md" "$HOME/.claude/CLAUDE.md"
+  echo "linked CLAUDE.md"
+else
+  echo "skip CLAUDE.md: ~/.claude/CLAUDE.md differs from claude/CLAUDE.md; merge them, then delete the live file" >&2
+fi
+
 mkdir -p "$DEST"
 
-echo "== link"
+echo "== link skills"
 mine_names=" "
 for repo in "$MINE" "$PRIVATE"; do
   [ -d "$repo/skills" ] || continue
