@@ -1,0 +1,11 @@
+%%{init: {'theme':'neutral'}}%%
+stateDiagram-v2
+  [*] --> PENDING
+  PENDING --> PAID: payment ok
+  PENDING --> CANCELLED: timeout 30m
+  PAID --> FULFILLED: invoice stored
+  PAID --> REFUNDED: refund requested
+  FULFILLED --> REFUNDED: within 14 days
+  CANCELLED --> [*]
+  REFUNDED --> [*]
+  FULFILLED --> [*]
