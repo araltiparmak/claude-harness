@@ -1,0 +1,77 @@
+{
+  "title": "Customer Support team showcase",
+  "footer": "Acme Commerce · Customer Support · Sample data",
+  "source": "Sample data for illustration, March to September 2026",
+  "theme": { "startHue": "mint" },
+  "slides": [
+    { "type": "title", "org": "Acme Commerce", "title": "Customer Support: faster answers, happier customers", "subtitle": "Q3 2026 results from the Support team", "meta": "Customer Support · Team showcase · October 2026" },
+    {
+      "type": "hero",
+      "title": "Customers now get a first reply in 35 minutes, down from 4 hours",
+      "value": "35 min",
+      "label": "typical time to first reply, September",
+      "before": "4 h", "after": "35 min", "beforeLabel": "March", "afterLabel": "September",
+      "notes": ["Suggested replies drafted from our help articles", "Chat open 7 days a week since July"],
+      "trend": {
+        "title": "Typical time to first reply, minutes",
+        "labels": ["Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep"],
+        "values": [240, 228, 196, 120, 72, 48, 35],
+        "format": { "suffix": " min" },
+        "zero": true,
+        "markers": [{ "at": "Jun", "label": "Suggested replies on" }]
+      }
+    },
+    {
+      "type": "compare",
+      "title": "Satisfaction rose to 4.7 out of 5 as replies got 71% faster",
+      "beforeLabel": "Q2 2026", "afterLabel": "Q3 2026",
+      "rows": [
+        { "label": "Time to first reply", "note": "average of monthly typical times, minutes", "before": 181, "after": 52, "format": { "suffix": " min" }, "better": "lower" },
+        { "label": "Customer satisfaction", "note": "out of 5", "before": 4.3, "after": 4.7, "format": { "decimals": 1 }, "better": "higher", "change": "diff" },
+        { "label": "Solved in the first reply", "note": "share of conversations", "before": 38, "after": 61, "format": { "suffix": "%" }, "better": "higher" },
+        { "label": "Open requests at month end", "note": "waiting for an answer", "before": 2400, "after": 650, "better": "lower" }
+      ]
+    },
+    {
+      "type": "bars",
+      "title": "Chat now scores 4.8 out of 5, the highest of any channel",
+      "subtitle": "Customer satisfaction by channel, September, out of 5",
+      "items": [
+        { "label": "Chat", "value": 4.8, "highlight": true },
+        { "label": "Email", "value": 4.6 },
+        { "label": "Phone", "value": 4.5 },
+        { "label": "Help center form", "value": 4.2 },
+        { "label": "Social media", "value": 4.0 }
+      ],
+      "format": { "decimals": 1 },
+      "side": [
+        { "value": "58%", "label": "of conversations now start in chat, up from 31%" },
+        { "value": "+0.6", "label": "chat score since Q2, when it was 4.2" }
+      ]
+    },
+    {
+      "type": "wins",
+      "title": "4 changes made the difference, all built inside the Support team",
+      "items": [
+        { "metric": "−71%", "win": "Time to first reply, Q2 to Q3, with suggested replies", "team": "Support tools squad" },
+        { "metric": "7 days", "win": "Chat open every day, not only on weekdays", "team": "Support operations" },
+        { "metric": "120", "win": "Help articles rewritten in plain language", "team": "Knowledge team" },
+        { "metric": "61%", "win": "Conversations solved in the first reply, up from 38%", "team": "Whole Support team" }
+      ]
+    },
+    {
+      "type": "next",
+      "title": "Next: first reply within 15 minutes and support in 2 more languages",
+      "priorities": [
+        { "title": "First reply under 15 minutes", "detail": "Suggested replies for the 50 most common questions.", "when": "November" },
+        { "title": "German and French support", "detail": "Ready for the new markets launching in November.", "when": "Nov to Dec" },
+        { "title": "Self-service refunds", "detail": "Customers refund simple orders without waiting for us.", "when": "December" }
+      ],
+      "asksLabel": "How other teams can help",
+      "asks": [
+        { "text": "Tell us about product changes 2 weeks before they launch", "owner": "Product and Engineering" },
+        { "text": "Mention chat support in customer emails", "owner": "Marketing" }
+      ]
+    }
+  ]
+}

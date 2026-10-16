@@ -1,0 +1,205 @@
+{
+  "title": "Q3 2026 company update",
+  "footer": "Acme Commerce · All-hands · Sample data",
+  "source": "Sample data for illustration, Q3 2026",
+  "slides": [
+    {
+      "type": "title",
+      "org": "Acme Commerce",
+      "title": "Q3 2026 company update",
+      "subtitle": "How we grew, what our teams shipped, and where we go next",
+      "meta": "All-hands · 16 October 2026"
+    },
+    {
+      "type": "summary",
+      "title": "We grew yearly revenue 24% to $48M and kept 96% of our customers",
+      "points": [
+        {
+          "value": "$48M",
+          "label": "Yearly revenue, up 24%",
+          "detail": "From $38.7M a year ago; 61% now comes from returning customers"
+        },
+        {
+          "value": "96%",
+          "label": "Customers who renewed",
+          "detail": "Up from 91%, the best rate in company history"
+        },
+        {
+          "value": "+5,800",
+          "label": "New business customers",
+          "detail": "21,400 in total, up 37% in a year"
+        }
+      ],
+      "ask": {
+        "label": "What we ask of everyone",
+        "text": "Share **one customer story** from your team in the wins channel by 30 November.",
+        "meta": "The best stories open the December all-hands."
+      }
+    },
+    {
+      "type": "kpis",
+      "title": "All 4 company goals for Q3 are met or ahead of plan",
+      "items": [
+        {
+          "label": "Yearly revenue",
+          "now": 48,
+          "before": 38.7,
+          "format": {
+            "prefix": "$",
+            "suffix": "M"
+          },
+          "vs": "vs Q3 2025",
+          "target": 46,
+          "spark": [
+            36,
+            37.5,
+            38.7,
+            40,
+            41.8,
+            43.5,
+            45.2,
+            46.6,
+            48
+          ]
+        },
+        {
+          "label": "Customers renewing",
+          "now": 96,
+          "before": 91,
+          "format": {
+            "suffix": "%"
+          },
+          "vs": "vs Q3 2025",
+          "target": 94,
+          "spark": [
+            90,
+            91,
+            91,
+            92,
+            93,
+            94,
+            95,
+            95,
+            96
+          ]
+        },
+        {
+          "label": "Customer satisfaction",
+          "value": "4.7 / 5",
+          "now": 4.7,
+          "before": 4.4,
+          "format": {
+            "decimals": 1
+          },
+          "change": "diff",
+          "vs": "vs Q3 2025",
+          "target": 4.5,
+          "spark": [
+            4.3,
+            4.4,
+            4.4,
+            4.4,
+            4.5,
+            4.6,
+            4.6,
+            4.7,
+            4.7
+          ]
+        },
+        {
+          "label": "Website uptime",
+          "now": 99.98,
+          "before": 99.93,
+          "format": {
+            "suffix": "%",
+            "decimals": 2
+          },
+          "vs": "vs Q3 2025",
+          "target": 99.95,
+          "spark": [
+            99.93,
+            99.92,
+            99.94,
+            99.95,
+            99.95,
+            99.96,
+            99.97,
+            99.98,
+            99.98
+          ]
+        }
+      ],
+      "sparkLabel": "Monthly, January to September",
+      "takeaway": "Growth came with happier customers, not at their expense."
+    },
+    {
+      "type": "wins",
+      "title": "6 teams, 6 results we can measure, all delivered in Q3",
+      "items": [
+        {
+          "metric": "+38%",
+          "win": "More large business deals closed than in Q2",
+          "team": "Sales"
+        },
+        {
+          "metric": "35 min",
+          "win": "First reply to customers, down from 4 hours",
+          "team": "Customer Support"
+        },
+        {
+          "metric": "0.8s",
+          "win": "New checkout, 3× faster than before",
+          "team": "Checkout team"
+        },
+        {
+          "metric": "2.1M",
+          "win": "Visitors to the autumn campaign site",
+          "team": "Marketing"
+        },
+        {
+          "metric": "92%",
+          "win": "Colleagues who would recommend working here",
+          "team": "People team"
+        },
+        {
+          "metric": "$1.8M",
+          "win": "Yearly cloud cost saved",
+          "team": "Infrastructure with Finance"
+        }
+      ]
+    },
+    {
+      "type": "next",
+      "title": "Q4: 2 new markets, a mobile app for business customers and 30 new colleagues",
+      "priorities": [
+        {
+          "title": "Launch in Germany and France",
+          "detail": "Local payment methods and language, starting with 40 pilot customers.",
+          "when": "November"
+        },
+        {
+          "title": "Mobile app for business customers",
+          "detail": "Order and track from a phone; the test version opens to 500 customers.",
+          "when": "December"
+        },
+        {
+          "title": "Hire 30 people",
+          "detail": "Half in Support and Sales, so customers keep getting replies within an hour.",
+          "when": "Q4"
+        }
+      ],
+      "asksLabel": "How you can help",
+      "asks": [
+        {
+          "text": "Refer people you would love to work with for the 30 open roles",
+          "owner": "Everyone, through the careers page"
+        },
+        {
+          "text": "Join one customer call this quarter",
+          "owner": "Sign up with Customer Success"
+        }
+      ]
+    }
+  ],
+  "output": "pdf,png,html"
+}

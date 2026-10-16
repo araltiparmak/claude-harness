@@ -1,0 +1,80 @@
+{
+  "title": "Mobile app launch review",
+  "footer": "Acme Commerce · Mobile team · Sample data",
+  "source": "Sample data for illustration, first 90 days after launch (July to September 2026)",
+  "theme": { "startHue": "peach" },
+  "slides": [
+    { "type": "title", "org": "Acme Commerce", "title": "Mobile app: the first 90 days", "subtitle": "Launch results, what we learned, and the decision we need", "meta": "Mobile team · Launch review · October 2026" },
+    {
+      "type": "summary",
+      "title": "The app reached 182,000 weekly users in 90 days, 21% ahead of plan",
+      "points": [
+        { "value": "182K", "label": "People using the app each week", "detail": "Plan was 150K by day 90" },
+        { "value": "+$4.2M", "label": "Yearly revenue added by the app", "detail": "Estimate at the September rate; 31% from new customers" },
+        { "value": "4.8", "label": "App store rating out of 5", "detail": "From 12,400 ratings on iPhone and Android" }
+      ],
+      "ask": { "label": "Decision needed", "text": "Move **4 engineers** from web to mobile for Q1 to build business accounts in the app.", "meta": "Web plans shift by 6 weeks. App revenue grows about 2× faster than web." }
+    },
+    {
+      "type": "trend",
+      "title": "Weekly users beat plan every week and reached 182K by day 90",
+      "subtitle": "People using the app each week, thousands",
+      "labels": ["W1", "W2", "W3", "W4", "W5", "W6", "W7", "W8", "W9", "W10", "W11", "W12", "W13"],
+      "series": [
+        { "name": "Actual", "values": [38, 61, 79, 94, 118, 129, 138, 147, 155, 163, 170, 176, 182] },
+        { "name": "Plan", "values": [30, 45, 58, 70, 82, 93, 103, 113, 122, 131, 139, 145, 150] }
+      ],
+      "format": { "suffix": "K" },
+      "markers": [{ "at": "W5", "label": "Featured in app stores" }],
+      "side": [
+        { "value": "+21%", "label": "ahead of plan at day 90" },
+        { "value": "41%", "label": "of first-week users still active in week 12" }
+      ]
+    },
+    {
+      "type": "waterfall",
+      "title": "The app added $4.2M in yearly revenue, well above a $0.4M summer dip on web",
+      "subtitle": "Yearly online revenue at the monthly rate, $ millions, June to September",
+      "start": { "label": "June", "value": 44.0 },
+      "steps": [
+        { "label": "New customers from the app", "value": 1.3 },
+        { "label": "More orders from existing customers", "value": 2.9 },
+        { "label": "Summer dip on web", "value": -0.4 }
+      ],
+      "end": { "label": "September" },
+      "format": { "prefix": "$", "suffix": "M", "decimals": 1 },
+      "better": "higher",
+      "axisFrom": 40,
+      "side": [
+        { "value": "31%", "label": "of the app's added revenue comes from new customers" },
+        { "value": "+8.6%", "label": "yearly online revenue, June to September" }
+      ]
+    },
+    {
+      "type": "scorecard",
+      "title": "5 of 6 launch goals met; app stability still needs work",
+      "periods": ["Day 30", "Day 90"],
+      "rows": [
+        { "metric": "Weekly users", "before": "94K", "now": "182K", "target": "150K", "status": "good", "spark": [38, 61, 79, 94, 118, 138, 155, 170, 182] },
+        { "metric": "App store rating", "note": "out of 5", "before": "4.6", "now": "4.8", "target": "4.5", "status": "good", "spark": [4.5, 4.6, 4.6, 4.7, 4.7, 4.8] },
+        { "metric": "Orders per week", "before": "21K", "now": "46K", "target": "40K", "status": "good", "spark": [9, 15, 21, 27, 33, 38, 42, 46] },
+        { "metric": "Repeat buyers", "note": "buy again within 30 days", "before": "28%", "now": "37%", "target": "35%", "status": "good", "spark": [28, 30, 32, 34, 36, 37] },
+        { "metric": "Checkout time", "note": "typical", "before": "1.9s", "now": "1.1s", "target": "1.2s", "status": "good", "spark": [1.9, 1.7, 1.5, 1.3, 1.2, 1.1] },
+        { "metric": "Sessions without a crash", "before": "98.9%", "now": "99.2%", "target": "99.8%", "status": "warning", "statusLabel": "At risk: fix in progress", "spark": [98.9, 99.0, 99.0, 99.1, 99.2, 99.2] }
+      ]
+    },
+    {
+      "type": "next",
+      "title": "Q1: business accounts in the app and 99.8% of sessions without a crash",
+      "priorities": [
+        { "title": "Fix the 3 biggest crash causes", "detail": "They cause 70% of crashes; fixes ship in the next 2 releases.", "when": "November" },
+        { "title": "Business accounts in the app", "detail": "Teams order with shared payment and approvals.", "when": "Q1" },
+        { "title": "Tablet layout for Android", "detail": "12% of Android users shop on a tablet.", "when": "Q1" }
+      ],
+      "asks": [
+        { "text": "Approve moving 4 engineers from web to mobile for Q1", "owner": "CTO, CPO" },
+        { "text": "Add an app download link to order confirmation emails", "owner": "Marketing" }
+      ]
+    }
+  ]
+}

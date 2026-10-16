@@ -48,6 +48,7 @@ Companion projects:
 
 | Skill | What it does |
 |---|---|
+| [deck](skills/deck/SKILL.md) | Builds premium presentation decks (PDF, PNG slides or a presentable HTML file) from a JSON spec for a company-wide audience: results, KPIs, team wins, next steps |
 | [mobile-app-stack](skills/mobile-app-stack/SKILL.md) | Recommends the default stack for a new Expo + React Native + TypeScript app, one decision at a time |
 | [note](skills/note/SKILL.md) | Appends a timestamped line to the current project's private `note.md` |
 | [react-project](skills/react-project/SKILL.md) | Scaffolds a React + Vite + TS + Tailwind prototype in `~/dev` via `cra` and builds v1 (user-invoked: `/react-project`) |
