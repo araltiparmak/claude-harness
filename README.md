@@ -51,7 +51,7 @@ Skills sit in group folders; `update.sh` links each one into `~/.claude/skills/`
 | [diagrams](skills/visuals/diagrams/SKILL.md) | Draws technical diagrams (architecture with AWS icons, message chains, sequence, ER, state, flow) as SVG and PNG with Mermaid and D2, plain or hand-drawn (whiteboard style), for PRs and docs |
 | [explain](skills/visuals/explain/SKILL.md) | Builds a one-page brief that explains a feature to developers, testers and a PM: scope, architecture (D2, whiteboard style), flow and states (Mermaid), a decision table, rules with test examples, open questions |
 | [infographics](skills/visuals/infographics/SKILL.md) | Builds process, stat-strip, timeline and funnel infographics as PNG, PDF and HTML from HTML templates, and checks the render for overflow, overlap, small text and low contrast |
-| [markmap](skills/visuals/markmap/SKILL.md) | Turns a Markdown outline into an interactive mind map (HTML) and a PNG with markmap, for topic trees and study maps |
+| [mindmap](skills/visuals/mindmap/SKILL.md) | Turns a Markdown outline into an interactive mind map (HTML) and a PNG with markmap, for topic trees and study maps |
 
 ### Dev
 

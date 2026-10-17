@@ -18,7 +18,7 @@ Write a source file, render it with `scripts/render.sh`, look at the PNG, fix, r
 | Services passing messages in a chain | `.d2` and `.mmd` | D2 route + Mermaid sequence | `d2.md` (Message chains), `mermaid.md` |
 | Hover, click, filters, animation | `.html` | D3 or Mermaid from cdnjs | Interactive output below |
 
-Read only the file for the tool you picked. A pure topic hierarchy (mind map, study map) belongs to the `markmap` skill. **Sequence diagrams are always Mermaid. Architecture diagrams are always D2**, with icons when it is AWS. Default to Mermaid for a plain flow; reach for D2 when boxes must nest. A slide, KPI tile or results visual is a `deck` job, even when it is one slide.
+Read only the file for the tool you picked. A pure topic hierarchy (mind map, study map) belongs to the `mindmap` skill. **Sequence diagrams are always Mermaid. Architecture diagrams are always D2**, with icons when it is AWS. Default to Mermaid for a plain flow; reach for D2 when boxes must nest. A slide, KPI tile or results visual is a `deck` job, even when it is one slide.
 
 ## Steps
 

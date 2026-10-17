@@ -18,7 +18,7 @@ Colours, type and spacing are CSS variables in `templates/tokens.css`, with `.h-
 | What happened and what is next, by date | `templates/timeline.html` | 4 to 6 milestones |
 | Where we lose people, stage by stage | `templates/funnel.html` | 3 to 6 stages |
 
-Series over time, bars, waterfall, KPI scorecards: `deck` has those. Boxes and arrows between systems: `diagrams`. A tree of topics: `markmap`. No template fits: say so, and build a new one from `templates/base.css` (see the end).
+Series over time, bars, waterfall, KPI scorecards: `deck` has those. Boxes and arrows between systems: `diagrams`. A tree of topics: `mindmap`. No template fits: say so, and build a new one from `templates/base.css` (see the end).
 
 ## Steps
 

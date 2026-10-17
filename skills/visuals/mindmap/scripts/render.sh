@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
 # Render a Markdown outline to an interactive mind map (HTML) and a PNG.
-# Usage: render.sh <file.md> [out-dir]   (out-dir defaults to ./markmap-out)
+# Usage: render.sh <file.md> [out-dir]   (out-dir defaults to ./mindmap-out)
 set -euo pipefail
 
 src="${1:?usage: render.sh <file.md> [out-dir]}"
-out="${2:-markmap-out}"
+out="${2:-mindmap-out}"
 mkdir -p "$out"; out="$(cd "$out" && pwd)"
 base="$(basename "${src%.*}")"
-size="${MARKMAP_SIZE:-1600x1000}"
+size="${MINDMAP_SIZE:-1600x1000}"
 
 find_chrome() {
   for c in "${CHROME:-}" \
