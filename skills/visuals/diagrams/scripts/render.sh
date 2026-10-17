@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 # Render a diagram source to PNG (and SVG where the tool supports it).
-# Usage: render.sh <file.mmd|.d2|.dot|.html> [out-dir]   (out-dir defaults to ./diagrams-out)
+# Usage: render.sh <file.mmd|.d2|.html> [out-dir]   (out-dir defaults to ./diagrams-out)
 set -euo pipefail
 
-src="${1:?usage: render.sh <file.mmd|.d2|.dot|.html> [out-dir]}"
+src="${1:?usage: render.sh <file.mmd|.d2|.html> [out-dir]}"
 out="${2:-diagrams-out}"
 mkdir -p "$out"; out="$(cd "$out" && pwd)"
 base="$(basename "${src%.*}")"
@@ -42,10 +42,6 @@ case "$ext" in
     sketch=(); [ -n "${SKETCH:-}" ] && sketch=(--sketch)   # SKETCH=1: hand-drawn look
     d2 --layout="$layout" ${sketch[@]+"${sketch[@]}"} --pad 48 "$d2src" "$out/$base.svg"
     d2 --layout="$layout" ${sketch[@]+"${sketch[@]}"} --pad 48 --scale 2 "$d2src" "$out/$base.png"
-    ;;
-  dot)
-    dot -Tsvg "$src" -o "$out/$base.svg"
-    dot -Tpng -Gdpi=200 "$src" -o "$out/$base.png"
     ;;
   html)
     chrome="$(find_chrome)"

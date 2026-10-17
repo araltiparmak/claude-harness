@@ -1,6 +1,6 @@
 ---
 name: diagrams
-description: Draws technical diagrams as SVG and PNG with Mermaid, D2 and Graphviz (architecture, sequence, ER, state, flow, gantt), optionally in a hand-drawn whiteboard style, for PR descriptions, docs and knowledge sharing. Use when the user asks for a diagram, flowchart, architecture or sequence diagram, a data model picture, a whiteboard or Excalidraw-style sketch, or a diagram image to paste into a PR or doc. Slides and results visuals belong to the deck skill.
+description: Draws technical diagrams as SVG and PNG with Mermaid and D2 (architecture, sequence, ER, state, flow, gantt), optionally in a hand-drawn whiteboard style, for PR descriptions, docs and knowledge sharing. Use when the user asks for a diagram, flowchart, architecture or sequence diagram, a data model picture, a whiteboard or Excalidraw-style sketch, or a diagram image to paste into a PR or doc. Slides and results visuals belong to the deck skill.
 allowed-tools:
   - Read
   - Write
@@ -25,14 +25,13 @@ Write a source file, render it with `scripts/render.sh`, look at the PNG, fix, r
 | AWS architecture with official service icons | `.d2` | D2 with `icon:` | `d2.md` |
 | Whiteboard look (hand-drawn, like Excalidraw), for drafts and discussions | `.d2` | D2, rendered with `SKETCH=1` | `d2.md` |
 | Services passing messages in a chain | `.d2` and `.mmd` | D2 route + Mermaid sequence | `d2.md` (Message chains), `mermaid.md` |
-| Cycles, dependency graphs, anything dense | `.dot` | Graphviz | — |
 | Hover, click, filters, animation | `.html` | D3 or Mermaid from cdnjs | Interactive output below |
 
 Read only the file for the tool you picked. A pure topic hierarchy (mind map, study map) belongs to the `markmap` skill. **Sequence diagrams are always Mermaid. Architecture diagrams are always D2**, with icons when it is AWS. Default to Mermaid for a plain flow; reach for D2 when boxes must nest. A slide, KPI tile or results visual is a `deck` job, even when it is one slide.
 
 ## Steps
 
-1. Check the tool exists (`command -v mmdc d2 dot`). Chrome is needed for `.mmd` and `.html`. Missing tools: ask before `brew install d2 graphviz`; Mermaid runs through `npx` with no install.
+1. Check the tool exists (`command -v mmdc d2`). Chrome is needed for `.mmd` and `.html`. Missing tools: ask before `brew install d2`; Mermaid runs through `npx` with no install.
 2. Write the source to `diagrams-out/<name>.<ext>` in the project, or the scratchpad when the user wants a throwaway.
 3. Run `scripts/render.sh <source> [out-dir]`.
 4. Fix every `FAIL` that `render.sh` prints (blank image, wider than 3:1; `MAX_WIDE=4` relaxes it for a gantt or timeline) in the diagram, not the check. Then read the PNG. Done means: every label legible, nothing clipped or overlapping, the picture shows the mechanism the user asked for, aspect near 16:9 or square.
