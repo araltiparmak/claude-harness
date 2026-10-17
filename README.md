@@ -35,7 +35,8 @@ flowchart LR
 - **Permissions:** auto mode, so there is no allow list: reads and edits in the project run without asking, and the classifier reviews the rest. `terraform apply`/`destroy`, `.env` and AWS credentials are denied.
 - **Hooks:** every Claude Code event goes to iTerm2's `cc-status` utility, so the terminal tab shows whether Claude is working, waiting for permission or done.
 - **Status line:** [ccstatusline](https://github.com/sirmalloc/ccstatusline).
-- **Model:** Opus at high effort, with Sonnet as the fallback model.
+- **Model:** Opus at medium effort, with Sonnet as the fallback model.
+- **Plugins:** the `design`, `engineering` and `productivity` plugins synced from claude.ai are turned off; they bring connectors (Atlassian, Figma, Slack, Datadog and more) that every session would load.
 
 ## Skills
 

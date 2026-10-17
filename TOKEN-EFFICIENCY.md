@@ -26,7 +26,10 @@ An MCP server adds all of its tool names to every session; a CLI costs nothing u
 
 ## claude.ai connectors
 
-Connectors and plugins synced from the claude.ai account load in every session and cannot be removed from config. Turn off the ones not used daily at claude.ai under Settings → Connectors, or per session with `/mcp`.
+Connectors and plugins synced from the claude.ai account load in every session.
+
+- A synced plugin turns off with `claude plugin disable <name>@synced --scope user`. That writes `"<name>@synced": false` into the live settings, so copy it into `enabledPlugins` in `claude/settings.json` before the next `update.sh`.
+- A connector (Gmail, Drive, Notion, ...) turns off only at claude.ai under Settings → Connectors, or per session with `/mcp`.
 
 ## Skills
 
@@ -44,7 +47,7 @@ Each skill puts its `description` into every session.
 
 ## Settings
 
-- Opus at high effort by default (`modelSettings`, which `/effort` writes); drop to `/effort medium` or Sonnet with `/model` for routine work.
+- Opus at medium effort by default (`modelSettings`, which `/effort` writes). Raise it with `/effort high` for hard debugging or design; switch to Sonnet with `/model` for quick questions.
 - Subagents run on the session's model: code review and other judgment work hands off to them. Give a custom search agent `model: haiku` in its own definition for cheap sweeps.
 - Keep `autoCompactEnabled` on.
 - Reads of `node_modules`, `dist`, `.next` and `coverage` are denied. Grep and Glob already skip ignored files; the rule covers repos without `.gitignore`, paths from stack traces, and minified bundles. It does not stop Bash, so keep commands narrow. To read library source on purpose, allow that one path for the session.
