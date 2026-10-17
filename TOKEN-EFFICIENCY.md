@@ -34,7 +34,7 @@ Each skill puts its `description` into every session.
 
 - Keep descriptions short; long trigger lists cost tokens on every turn.
 - Add `disable-model-invocation: true` to skills started only by hand; their description then stays out of context.
-- List only the skills you use in `external-skills.txt`, and delete the line of a skill that never fires.
+- List only the skills you use in `external-skills.yaml`, and delete the line of a skill that never fires.
 
 ## Instructions
 

@@ -16,9 +16,9 @@ set -euo pipefail
 #   If the live file was changed outside the harness, it is left alone and the
 #   difference is printed.
 # - ~/.claude/CLAUDE.md is a symlink to claude/CLAUDE.md.
-# - Skills from other GitHub repos are listed in external-skills.txt. Each repo is cloned
-#   into ~/.cache/claude-harness/repos (pulled on later runs), and the listed skills are
-#   linked by the `name:` in their SKILL.md. A skill whose line is gone is unlinked.
+# - Skills from other repos are listed in external-skills.yaml. Each repo is cloned into
+#   ~/.cache/claude-harness/repos (pulled on later runs), and the listed skills are linked
+#   by the `name:` in their SKILL.md. A skill whose line is gone is unlinked.
 # - A second repo that cannot be cloned is skipped, and the rest still links.
 # - Real folders in ~/.claude/skills are never touched, only reported.
 # - Links into these repos whose skill no longer exists are removed.
@@ -28,7 +28,7 @@ MINE="$(cd "$(dirname "$0")/.." && pwd)"
 PRIVATE="${PRIVATE_DIR:-$HOME/dev/private-skills}"
 PRIVATE_URL="${PRIVATE_URL:-}"
 DEST="$HOME/.claude/skills"
-EXTERNAL="$MINE/external-skills.txt"
+EXTERNAL="$MINE/external-skills.yaml"
 CACHE="${XDG_CACHE_HOME:-$HOME/.cache}/claude-harness/repos"
 
 sync_repo() {
@@ -110,37 +110,31 @@ for repo in "$MINE" "$PRIVATE"; do
   done < <(find "$repo/skills" -name SKILL.md | sort)
 done
 
-# external-skills.txt: an owner/repo line, then one indented skill name per line.
+# external-skills.yaml, read by scripts/external-skills.py as URL<TAB>NAME lines.
 ext_names=" "
 if [ -f "$EXTERNAL" ]; then
   echo "== link external skills"
-  repo="" repo_dir=""
-  while IFS= read -r raw || [ -n "$raw" ]; do
-    line="${raw%%#*}"
-    word="$(printf '%s' "$line" | tr -d '[:space:]')"
-    [ -n "$word" ] || continue
-    case "$line" in
-      [[:space:]]*)
-        [ -n "$repo_dir" ] || continue
-        case "$mine_names" in
-          *" $word "*) echo "skip $word: a skill of your own has that name" >&2; continue ;;
-        esac
-        src="$(skill_dir "$repo_dir" "$word")"
-        if [ -z "$src" ]; then
-          echo "warn: $repo has no skill named $word" >&2
-          continue
-        fi
-        ext_names+="$word "
-        link "$src" "$word" && echo "linked  $word ($repo)"
-        ;;
-      *)
-        repo="$word" repo_dir="$CACHE/$word"
-        mkdir -p "$(dirname "$repo_dir")"
-        sync_repo "$repo_dir" "https://github.com/$repo.git"
-        [ -d "$repo_dir/.git" ] || repo_dir=""
-        ;;
+  pairs="$(python3 -I "$MINE/scripts/external-skills.py" "$EXTERNAL")" || { echo "warn: external skills not linked (see above)" >&2; pairs=""; }
+  synced=" "
+  while IFS=$'\t' read -r url name; do
+    [ -n "$url" ] || continue
+    dir="$CACHE/${url#https://}"
+    case "$synced" in
+      *" $url "*) ;;
+      *) mkdir -p "$(dirname "$dir")"; sync_repo "$dir" "$url"; synced+="$url " ;;
     esac
-  done < "$EXTERNAL"
+    [ -d "$dir/.git" ] || continue
+    case "$mine_names" in
+      *" $name "*) echo "skip $name: a skill of your own has that name" >&2; continue ;;
+    esac
+    src="$(skill_dir "$dir" "$name")"
+    if [ -z "$src" ]; then
+      echo "warn: $url has no skill named $name" >&2
+      continue
+    fi
+    ext_names+="$name "
+    link "$src" "$name" && echo "linked  $name (${url#https://})"
+  done <<< "$pairs"
 fi
 
 # Remove links into these repos that are dangling, and external links no longer listed.

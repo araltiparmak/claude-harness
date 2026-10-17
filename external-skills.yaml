@@ -1,0 +1,34 @@
+# Skills from other repos. scripts/update.sh clones each repo, links the skills listed
+# under it into ~/.claude/skills, and unlinks a skill once its line is gone.
+#
+# Each repo is its https URL as a key; under it, one skill per line, by the `name:` in
+# that skill's SKILL.md. scripts/check.sh rejects any other shape.
+
+https://github.com/mattpocock/skills:
+  - code-review
+  - codebase-design
+  - diagnosing-bugs
+  - domain-modeling
+  - grill-me
+  - grill-with-docs
+  - grilling
+  - handoff
+  - implement
+  - improve-codebase-architecture
+  - pr
+  - prototype
+  - research
+  - retro
+  - teach
+  - to-questionnaire
+  - triage
+  - wait-what
+  - wayfinder
+  - wizard
+  - writing-for-agents
+
+https://github.com/AminBlg/SimpleEnglish:
+  - simple-english
+
+https://github.com/yetone/kill-ai-slop:
+  - kill-ai-slop

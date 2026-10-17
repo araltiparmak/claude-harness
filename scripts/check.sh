@@ -44,25 +44,16 @@ while IFS= read -r path; do
   [ -f "$path" ] || problem "README links to a missing file: $path"
 done < <(grep -oE 'skills/[a-z0-9/-]+/SKILL\.md' README.md | sort -u)
 
-# external-skills.txt: owner/repo lines, each followed by indented skill names. No name twice,
-# and none that a skill in this repo already uses.
-if [ -f external-skills.txt ]; then
-  n=0; repo=""; seen=" "
-  while IFS= read -r raw || [ -n "$raw" ]; do
-    n=$((n + 1)); line="${raw%%#*}"
-    [ -n "$(printf '%s' "$line" | tr -d '[:space:]')" ] || continue
-    if [[ "$line" =~ ^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+[[:space:]]*$ ]]; then
-      repo="$line"
-    elif [[ "$line" =~ ^[[:space:]]+([a-z0-9]+(-[a-z0-9]+)*)[[:space:]]*$ ]]; then
-      name="${BASH_REMATCH[1]}"
-      [ -n "$repo" ] || problem "external-skills.txt:$n: skill '$name' comes before any owner/repo line"
-      case "$seen" in *" $name "*) problem "external-skills.txt:$n: '$name' is listed twice" ;; esac
-      seen+="$name "
-      if printf '%s\n' "${skills[@]}" | grep -qx "$name"; then problem "external-skills.txt:$n: '$name' is also a skill in this repo"; fi
-    else
-      problem "external-skills.txt:$n: neither 'owner/repo' nor an indented kebab-case skill name: $raw"
-    fi
-  done < external-skills.txt
+# external-skills.yaml has the one shape scripts/external-skills.py reads, and lists no
+# skill that this repo already has.
+if [ -f external-skills.yaml ]; then
+  if ext="$(python3 -I scripts/external-skills.py external-skills.yaml)"; then
+    while IFS=$'\t' read -r _ name; do
+      if printf '%s\n' "${skills[@]}" | grep -qx "$name"; then problem "external-skills.yaml: '$name' is also a skill in this repo"; fi
+    done <<< "$ext"
+  else
+    problem "external-skills.yaml has the problems above"
+  fi
 fi
 
 # Settings are valid JSON, and the public file carries no machine-specific paths.
@@ -74,7 +65,7 @@ if grep -q '/Users/' claude/settings.json; then problem "claude/settings.json co
 scripts_sh=()
 while IFS= read -r f; do scripts_sh+=("$f"); done < <(find scripts skills -name '*.sh' | sort)
 for script in ${scripts_sh[@]+"${scripts_sh[@]}"}; do bash -n "$script" || problem "$script: syntax error"; done
-python3 -m py_compile scripts/build-settings.py || problem "scripts/build-settings.py: syntax error"
+for py in scripts/*.py; do python3 -m py_compile "$py" || problem "$py: syntax error"; done
 if command -v shellcheck >/dev/null; then
   shellcheck "${scripts_sh[@]}" || problem "shellcheck found issues"
 else
@@ -89,7 +80,7 @@ import sys
 import unicodedata
 from pathlib import Path
 
-roots = ["skills", "README.md", "CLAUDE.md", "external-skills.txt", "claude", "scripts"]
+roots = ["skills", "README.md", "CLAUDE.md", "external-skills.yaml", "claude", "scripts"]
 skip_dirs = {"icons", "node_modules", ".git", "__pycache__"}
 hits = []
 for root in roots:

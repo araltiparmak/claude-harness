@@ -1,6 +1,6 @@
 # CLAUDE.md
 
-This repo holds a Claude Code setup: general-purpose skills (`skills/<group>/<name>/`), settings and global instructions (`claude/`), and `scripts/update.sh`, which installs all of it into `~/.claude`. The repo is public. Anything tied to private projects, accounts or data goes in an optional second skills repo instead (`PRIVATE_DIR`, see the README): skills in its `skills/`, settings in its `claude/settings.json` overlay. Third-party skills are not copied here: `update.sh` links the ones listed in `external-skills.txt`.
+This repo holds a Claude Code setup: general-purpose skills (`skills/<group>/<name>/`), settings and global instructions (`claude/`), and `scripts/update.sh`, which installs all of it into `~/.claude`. The repo is public. Anything tied to private projects, accounts or data goes in an optional second skills repo instead (`PRIVATE_DIR`, see the README): skills in its `skills/`, settings in its `claude/settings.json` overlay. Third-party skills are not copied here: `update.sh` links the ones listed in `external-skills.yaml`.
 
 ## Language
 
@@ -28,4 +28,4 @@ Change settings in `claude/settings.json` (or the private overlay), then run `sc
 2. Run `scripts/check.sh`; CI runs the same script.
 3. Run `scripts/update.sh` so `~/.claude` matches.
 
-To take a skill from another repo, or drop one, edit `external-skills.txt`; plugins are listed in the README.
+To take a skill from another repo, or drop one, edit `external-skills.yaml`; plugins are listed in the README.
