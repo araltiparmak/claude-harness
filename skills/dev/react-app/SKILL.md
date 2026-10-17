@@ -65,8 +65,7 @@ Feature code starts after this line, so v1 is always a diff that can be thrown a
 Build the first real screen of the idea, at the effort level set in step 2. Replace `Proof.tsx` with the actual thing. Then:
 
 ```bash
-pnpm check 2>&1 | tail -30
-git add -A && git commit -m "<what v1 does>"
+set -o pipefail; pnpm check 2>&1 | tail -30 && git add -A && git commit -m "<what v1 does>"
 ```
 
 **Done when:** `pnpm check` (typecheck, lint, build) is green and the commit has landed.
@@ -75,4 +74,4 @@ git add -A && git commit -m "<what v1 does>"
 
 Start `pnpm dev` in the background and report the localhost URL — `http://localhost:<PORT>`, the port `cra.sh` picked — along with the project path and what you built. If the dev server refuses to start because the port is taken, pick a fresh one the same way `cra.sh` did and update `vite.config.ts` and `CLAUDE.md` together.
 
-When the user wants it live, `pnpm ship` checks that the git tree is clean, runs `pnpm check`, then deploys to the project's target. It needs a target first: run the `vercel` skill, or add a `cloudflare.config.ts` for Cloudflare. Without one, `ship` stops after the checks with exit code 3 and says so.
+When the user wants it live, `pnpm ship` checks that the git tree is clean, runs `pnpm check`, then deploys to the project's target. It needs a target first, and picks the first it finds: a `deploy` script in `package.json`, then a `cloudflare.config.ts` (Cloudflare), then Vercel config (the `vercel` skill writes it). Without one, `ship` stops after the checks with exit code 3 and says so.

@@ -87,11 +87,12 @@ npx skills@latest add araltiparmak/claude-harness
 ```bash
 git clone https://github.com/araltiparmak/claude-harness.git
 claude-harness/scripts/update.sh
+npm i -g ccstatusline   # the status line command in claude/settings.json
 ```
 
 Plugins are installed by hand: `claude plugin install frontend-design@claude-plugins-official`, and a plugin only one project uses with `--scope project` from that project's folder. A plugin from another marketplace declares that marketplace in the project too, so it stays out of the global settings. For Cloudflare: `claude plugin marketplace add cloudflare/skills --scope project`, then `claude plugin install cloudflare@cloudflare --scope project`. Leave Matt Pocock's `mattpocock-skills` plugin uninstalled; `external-skills.yaml` already links his skills, and the plugin would load them twice.
 
-A second skills repo is optional: point `PRIVATE_DIR` at a checkout (default `~/dev/private-skills`), and set `PRIVATE_URL` to clone it when the folder is missing. Without either, only this repo is installed. `scripts/check.sh` checks the repo's consistency and runs in CI on every push.
+A second skills repo is optional: point `PRIVATE_DIR` at a checkout (default `~/dev/private-skills`), and set `PRIVATE_URL` to clone it when the folder is missing. Without either, the second repo is skipped; this repo and the skills in `external-skills.yaml` are still installed. `scripts/check.sh` checks the repo's consistency and runs in CI on every push.
 
 ## License
 

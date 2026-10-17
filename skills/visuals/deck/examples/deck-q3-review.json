@@ -47,10 +47,10 @@
       "type": "kpis",
       "title": "All 4 platform KPIs beat target for the first time",
       "items": [
-        { "label": "Release lead time", "value": "9 min", "delta": "−79%", "good": true, "vs": "vs Q2", "target": "Target: 15 min", "spark": [44, 42, 41, 38, 30, 21, 14, 11, 9] },
-        { "label": "Releases per week", "value": "16", "delta": "+220%", "good": true, "vs": "vs Q2", "target": "Target: 12", "spark": [5, 5, 6, 6, 8, 11, 13, 15, 16] },
-        { "label": "Checkout availability", "value": "99.97%", "delta": "+0.16 pt", "good": true, "vs": "vs Q2", "target": "Target: 99.95%", "spark": [99.78, 99.81, 99.8, 99.84, 99.86, 99.93, 99.95, 99.96, 99.97] },
-        { "label": "Cost per order", "value": "$0.013", "delta": "−38%", "good": true, "vs": "vs Q2", "target": "Target: $0.015", "spark": [0.022, 0.021, 0.021, 0.02, 0.019, 0.016, 0.015, 0.014, 0.013] }
+        { "label": "Release lead time", "now": 9, "before": 42, "target": 15, "format": { "suffix": " min" }, "better": "lower", "vs": "vs Q2", "spark": [44, 42, 41, 38, 30, 21, 14, 11, 9] },
+        { "label": "Releases per week", "now": 16, "before": 5, "target": 12, "better": "higher", "vs": "vs Q2", "spark": [5, 5, 6, 6, 8, 11, 13, 15, 16] },
+        { "label": "Checkout availability", "now": 99.97, "before": 99.81, "target": 99.95, "format": { "suffix": "%", "decimals": 2 }, "better": "higher", "vs": "vs Q2", "spark": [99.78, 99.81, 99.8, 99.84, 99.86, 99.93, 99.95, 99.96, 99.97] },
+        { "label": "Cost per order", "now": 0.013, "before": 0.021, "target": 0.015, "format": { "prefix": "$", "decimals": 3 }, "better": "lower", "vs": "vs Q2", "spark": [0.022, 0.021, 0.021, 0.02, 0.019, 0.016, 0.015, 0.014, 0.013] }
       ],
       "sparkLabel": "Monthly, January to September",
       "takeaway": "Release speed and reliability improved together, which is the main risk this programme set out to remove."
@@ -133,15 +133,15 @@
     },
     {
       "type": "scorecard",
-      "title": "Q4 outlook: 4 of 6 targets on track, 2 need attention",
+      "title": "Q4 outlook: 3 of 6 targets on track, 3 need attention",
       "periods": ["Q2", "Q3"],
       "rows": [
-        { "metric": "Release lead time", "before": "42 min", "now": "9 min", "target": "8 min", "status": "good", "spark": [44, 42, 38, 30, 21, 14, 11, 9] },
-        { "metric": "Checkout availability", "before": "99.81%", "now": "99.97%", "target": "99.95%", "status": "good", "spark": [99.8, 99.84, 99.86, 99.93, 99.95, 99.96, 99.97] },
-        { "metric": "Cost per order", "before": "$0.021", "now": "$0.013", "target": "$0.012", "status": "good", "spark": [21, 20, 19, 16, 15, 14, 13] },
-        { "metric": "Conversion rate", "before": "3.10%", "now": "3.45%", "target": "3.50%", "status": "good", "spark": [3.1, 3.1, 3.2, 3.3, 3.4, 3.45] },
-        { "metric": "Search on platform", "note": "services migrated", "before": "0 of 9", "now": "2 of 9", "target": "9 of 9", "status": "warning", "statusLabel": "At risk: needs staff", "spark": [0, 0, 1, 1, 2, 2] },
-        { "metric": "Mobile checkout time", "note": "median", "before": "3.1s", "now": "2.9s", "target": "1.5s", "status": "critical", "statusLabel": "Off track", "spark": [3.1, 3.1, 3.0, 3.0, 2.9, 2.9] }
+        { "metric": "Release lead time", "before": 42, "now": 9, "target": 15, "format": { "suffix": " min" }, "better": "lower", "spark": [44, 42, 38, 30, 21, 14, 11, 9] },
+        { "metric": "Checkout availability", "before": 99.81, "now": 99.97, "target": 99.95, "format": { "suffix": "%", "decimals": 2 }, "better": "higher", "spark": [99.8, 99.84, 99.86, 99.93, 99.95, 99.96, 99.97] },
+        { "metric": "Cost per order", "before": 0.021, "now": 0.013, "target": 0.015, "format": { "prefix": "$", "decimals": 3 }, "better": "lower", "spark": [21, 20, 19, 16, 15, 14, 13] },
+        { "metric": "Conversion rate", "before": 3.1, "now": 3.45, "target": 3.5, "format": { "suffix": "%", "decimals": 2 }, "better": "higher", "spark": [3.1, 3.1, 3.2, 3.3, 3.4, 3.45] },
+        { "metric": "Search on platform", "note": "services migrated", "before": 0, "now": 2, "target": 9, "format": { "suffix": " of 9" }, "better": "higher", "statusLabel": "At risk: needs staff", "spark": [0, 0, 1, 1, 2, 2] },
+        { "metric": "Mobile checkout time", "note": "median", "before": 2.8, "now": 2.9, "target": 1.5, "format": { "suffix": "s", "decimals": 1 }, "better": "lower", "spark": [2.8, 2.8, 2.9, 2.9, 3.0, 2.9] }
       ]
     },
     {

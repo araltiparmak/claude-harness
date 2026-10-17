@@ -1,4 +1,5 @@
 <title>Unpaid Order Expiry</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="claude:viewport-fit-sides" content="cover">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Source+Sans+3:wght@400;600;700&family=Source+Code+Pro:wght@500&display=swap">
@@ -140,12 +141,13 @@ footer { color: var(--muted); font-size: 14px; border-top: 1px solid var(--line)
     <div class="head"><h2>Decision table: a paid webhook arrives</h2><div class="tags"><span class="tag qa">Test</span><span class="tag pm">PM</span><span class="tag dev">Dev</span></div></div>
     <p>What the Orders API does with a paid webhook. Read top to bottom; the first row that matches wins.</p>
     <div class="rule"><div class="table"><table>
-      <thead><tr><th>#</th><th>Event id seen before?</th><th>Order status</th><th>Outcome</th></tr></thead>
+      <thead><tr><th>#</th><th>Event id seen before?</th><th>Order status</th><th>Within 30 min of the order?</th><th>Outcome</th></tr></thead>
       <tbody>
-        <tr><td>D1</td><td>Yes</td><td>(any)</td><td>Ignore: no state change, no email, no refund</td></tr>
-        <tr><td>D2</td><td>No</td><td>PENDING</td><td>Order becomes PAID, confirmation email</td></tr>
-        <tr><td>D3</td><td>No</td><td>CANCELLED</td><td>Order stays CANCELLED, full refund</td></tr>
-        <tr><td>D4</td><td>No</td><td>PAID, FULFILLED or REFUNDED</td><td>Open question Q4</td></tr>
+        <tr><td>D1</td><td>Yes</td><td>(any)</td><td>(any)</td><td>Ignore: no state change, no email, no refund</td></tr>
+        <tr><td>D2</td><td>No</td><td>PENDING</td><td>Yes</td><td>Order becomes PAID, confirmation email</td></tr>
+        <tr><td>D3</td><td>No</td><td>PENDING</td><td>No (the expiry job has not run yet)</td><td>Order becomes CANCELLED, stock released, full refund</td></tr>
+        <tr><td>D4</td><td>No</td><td>CANCELLED</td><td>(any)</td><td>Order stays CANCELLED, full refund</td></tr>
+        <tr><td>D5</td><td>No</td><td>PAID, FULFILLED or REFUNDED</td><td>(any)</td><td>Open question Q4</td></tr>
       </tbody>
     </table></div></div>
   </section>
@@ -163,6 +165,7 @@ footer { color: var(--muted); font-size: 14px; border-top: 1px solid var(--line)
           <tr><td>R1.1</td><td>Order placed at 00:00</td><td>Paid webhook at 29:59</td><td>Order is PAID</td></tr>
           <tr><td>R1.2</td><td>Order placed at 00:00</td><td>No payment by 30:00</td><td>Order is CANCELLED within one minute (the job runs every minute)</td></tr>
           <tr><td>R1.3</td><td>Order CANCELLED at 30:00</td><td>Paid webhook at 31:00</td><td>Order stays CANCELLED, full refund is sent</td></tr>
+          <tr><td>R1.4</td><td>Order placed at 00:00, still PENDING at 30:30 (the job has not run yet)</td><td>Paid webhook at 30:30</td><td>Order becomes CANCELLED, stock is released, full refund is sent</td></tr>
         </tbody>
       </table></div>
     </div>

@@ -11,7 +11,7 @@ markmap:
 ## Measure
 - **Core Web Vitals**
   - LCP: largest paint
-  - INP: input delay
+  - INP: interaction to next paint
   - CLS: layout shift
 - Lab: [Lighthouse](https://developer.chrome.com/docs/lighthouse)
 - Field: real-user monitoring

@@ -10,6 +10,7 @@ dir="$(cd "${1:?usage: build.sh <topic-dir>}" && pwd)"
 here="$(cd -P "$(dirname "$0")" && pwd -P)"     # physical path: the skill is symlinked into ~/.claude/skills
 render="$here/../../diagrams/scripts/render.sh"  # shared with the diagrams skill
 
+rm -f "$dir"/out/*.svg "$dir"/out/*.png   # a removed source must not leave its old diagram behind
 for src in "$dir"/*.d2 "$dir"/*.mmd; do
   [ -e "$src" ] || continue
   SKETCH="${SKETCH-1}" "$render" "$src" "$dir/out"

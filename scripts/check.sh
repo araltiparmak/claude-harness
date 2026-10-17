@@ -19,6 +19,7 @@ while IFS= read -r file; do
   name="$(basename "$dir")"
   skills+=("$name"); skill_dirs+=("$dir")
   [ "$(head -1 "$file")" = "---" ] || problem "$name: SKILL.md does not start with front matter"
+  awk 'NR>1 && /^---$/ {found=1; exit} END {exit !found}' "$file" || problem "$name: front matter has no closing ---"
   front="$(awk 'NR==1{next} /^---$/{exit} {print}' "$file")"
   grep -qx "name: $name" <<<"$front" || problem "$name: front matter name is not '$name'"
   grep -qE '^description: .+' <<<"$front" || problem "$name: front matter has no description"
@@ -80,7 +81,7 @@ import sys
 import unicodedata
 from pathlib import Path
 
-roots = ["skills", "README.md", "CLAUDE.md", "external-skills.yaml", "claude", "scripts"]
+roots = ["skills", "README.md", "CLAUDE.md", "TOKEN-EFFICIENCY.md", "external-skills.yaml", "claude", "scripts", ".github"]
 skip_dirs = {"icons", "node_modules", ".git", "__pycache__"}
 hits = []
 for root in roots:

@@ -6,6 +6,7 @@ set -euo pipefail
 NODE_MAJOR=24
 PNPM_MAJOR=10
 PROJECTS_DIR="${CRA_DIR:-$HOME/dev}"   # where new projects go; set CRA_DIR to change it
+case "$PROJECTS_DIR" in /*) ;; *) PROJECTS_DIR="$PWD/$PROJECTS_DIR" ;; esac   # absolute, so the cleanup trap still works after cd
 
 die() { printf '\033[31merror:\033[0m %s\n' "$*" >&2; exit 1; }
 step() { printf '\033[36m▸\033[0m %s\n' "$*"; }

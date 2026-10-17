@@ -20,7 +20,7 @@ The file is `<root>/todo.md`, where `<root>` is the git toplevel, or the current
 
 For an add:
 
-- **Arguments given**: record them as one imperative line. Fix spelling and punctuation only; do not rephrase, expand, or append context from the conversation.
+- **Arguments given**: record them as one imperative line, unless the user wrote a list (see below). Fix spelling and punctuation only; do not rephrase, expand, or append context from the conversation.
 - **No arguments**: condense the most recent open action item in the conversation into one imperative sentence. If there is none, ask what to add instead of guessing.
 
 ## Step 3: Prepare the file

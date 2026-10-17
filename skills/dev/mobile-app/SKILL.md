@@ -54,7 +54,7 @@ Local SQLite also keeps data models consistent with a later Postgres/Supabase sy
 - **Streak / "did I do it today" logic**: store days as a local date string (`YYYY-MM-DD`), not a UTC timestamp, or late-evening users lose streaks at the UTC/local midnight gap.
 - **Locales with special casing** (dotted and dotless i): use `toLocaleLowerCase(locale)` / `toLocaleUpperCase(locale)` and `localeCompare(a, b, locale)`, and check the font renders the content's extended Latin glyphs (`latin-ext` subset).
 - **Dark mode can wait if colors are design tokens from day one**; raw hex across screens makes the retrofit a full sweep.
-- **Camera/mic apps**: permission description strings (`Info.plist` / Android manifest) and a privacy policy are mandatory for store review. Flag them early.
+- **Camera/mic apps**: iOS usage-description strings in `Info.plist`, Android manifest permissions and a privacy policy are mandatory for store review. Flag them early.
 
 ## 8. Record the decisions
 

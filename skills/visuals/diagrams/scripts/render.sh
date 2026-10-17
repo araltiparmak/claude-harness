@@ -24,7 +24,7 @@ find_chrome() {
 case "$ext" in
   mmd)
     chrome="$(find_chrome)"
-    cfg="$(mktemp -t pp).json"
+    cfg="$(mktemp -d)/puppeteer.json"   # mktemp -d: the same on macOS and Linux
     printf '{"executablePath":"%s","args":["--no-sandbox"]}' "$chrome" > "$cfg"
     if command -v mmdc >/dev/null 2>&1; then mm=(mmdc); else mm=(npx -y @mermaid-js/mermaid-cli); fi
     PUPPETEER_SKIP_DOWNLOAD=1 "${mm[@]}" -p "$cfg" -i "$src" -o "$out/$base.png" -s 2 -b white

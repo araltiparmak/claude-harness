@@ -603,7 +603,8 @@ const SCHEMA = {
   title: { req: ['title'], opt: ['org', 'meta'] },
   summary: { req: ['title', 'points'], opt: ['ask'], items: { points: { req: ['value', 'label'], opt: ['detail'] } }, objs: { ask: { req: ['text'], opt: ['label', 'meta'] } } },
   hero: { req: ['title', 'value', 'label'], opt: ['before', 'after', 'beforeLabel', 'afterLabel', 'notes', 'trend'],
-    objs: { trend: { req: ['labels'], opt: ['title', 'values', 'series', 'format', 'zero', 'markers', 'target'], nums: ['values'] } } },
+    objs: { trend: { req: ['labels'], opt: ['title', 'values', 'series', 'format', 'zero', 'markers', 'target'], nums: ['values'], oneOf: ['values', 'series'],
+      items: { series: { req: ['name', 'values'], opt: ['display'], nums: ['values'] }, markers: { req: ['at', 'label'] } }, objs: { target: { req: ['value'], opt: ['label'], nums: ['value'] } } } } },
   kpis: { req: ['title', 'items'], opt: ['sparkLabel', 'takeaway'],
     items: { items: { req: ['label'], opt: ['value', 'now', 'before', 'format', 'better', 'change', 'delta', 'good', 'vs', 'target', 'spark'], nums: ['spark'], oneOf: ['value', 'now'] } } },
   trend: { req: ['title', 'labels', 'series'], opt: ['format', 'zero', 'markers', 'target', 'side'],
@@ -655,14 +656,26 @@ function validate(deck) {
   const errs = [];
   for (const k of Object.keys(deck)) if (!DECK_KEYS.includes(k)) errs.push(`deck: unknown field "${k}"${closest(k, DECK_KEYS)}`);
   for (const k of Object.keys(deck.theme || {})) if (!THEME_KEYS.includes(k)) errs.push(`theme: unknown field "${k}"${closest(k, THEME_KEYS)}`);
+  const pal = deck.theme?.palette;
+  if (pal !== undefined) {
+    if (!Array.isArray(pal) || !pal.length) errs.push('theme: "palette" must be a non-empty array');
+    else pal.forEach((h, j) => {
+      checkFields(h, { req: ['name', 'bg', 'tint', 'mark', 'ink'] }, `theme palette[${j}]`, errs);
+      // Colours go into style attributes unescaped, so accept hex only.
+      for (const k of ['bg', 'tint', 'mark', 'ink']) if (h?.[k] !== undefined && !/^#[0-9a-f]{3,8}$/i.test(h[k])) errs.push(`theme palette[${j}]: "${k}" must be a hex colour like "#2453d6"`);
+    });
+  }
   if (!Array.isArray(deck.slides) || !deck.slides.length) return [...errs, 'deck: "slides" must be a non-empty array'];
   deck.slides.forEach((s, i) => {
     const where = `slide ${i + 1} (${s?.type ?? 'no type'})`, rule = SCHEMA[s?.type];
     if (!rule) { errs.push(`slide ${i + 1}: type "${s?.type}" is not one of ${Object.keys(SCHEMA).join(', ')}${closest(String(s?.type), Object.keys(SCHEMA))}`); return; }
     checkFields(s, rule, where, errs, COMMON);
-    if (s.type === 'trend' && Array.isArray(s.series)) s.series.forEach((se, j) => {
-      if (Array.isArray(se.values) && Array.isArray(s.labels) && se.values.length !== s.labels.length) errs.push(`${where} series[${j}]: ${se.values.length} values for ${s.labels.length} labels`);
-    });
+    // Every series has one value per label: a trend slide, or a hero slide's trend.
+    const chart = s.type === 'trend' ? s : s.type === 'hero' ? s.trend : undefined;
+    if (chart && Array.isArray(chart.labels)) {
+      const lists = Array.isArray(chart.series) ? chart.series.map((se, j) => [`series[${j}]`, se?.values]) : [['values', chart.values]];
+      for (const [name, v] of lists) if (Array.isArray(v) && v.length !== chart.labels.length) errs.push(`${where} ${s.type === 'hero' ? 'trend ' : ''}${name}: ${v.length} values for ${chart.labels.length} labels`);
+    }
   });
   return errs;
 }
