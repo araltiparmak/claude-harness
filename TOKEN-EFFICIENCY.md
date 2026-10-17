@@ -44,7 +44,7 @@ Each skill puts its `description` into every session.
 
 ## Settings
 
-- `effortLevel: medium` and Opus by default; raise effort for a hard task, switch to Sonnet with `/model` for routine work.
+- Opus at high effort by default (`modelSettings`, which `/effort` writes); drop to `/effort medium` or Sonnet with `/model` for routine work.
 - Subagents run on the session's model: code review and other judgment work hands off to them. Give a custom search agent `model: haiku` in its own definition for cheap sweeps.
 - Keep `autoCompactEnabled` on.
 - Reads of `node_modules`, `dist`, `.next` and `coverage` are denied. Grep and Glob already skip ignored files; the rule covers repos without `.gitignore`, paths from stack traces, and minified bundles. It does not stop Bash, so keep commands narrow. To read library source on purpose, allow that one path for the session.

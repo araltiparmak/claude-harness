@@ -65,7 +65,6 @@ A deck is one JSON file. The script rejects unknown fields, missing required fie
   "title": "Q3 2026 Platform Review",
   "footer": "Org · Team · Confidential",
   "source": "Finance dashboard and Datadog, Q3 2026",
-  "output": "pdf,png,html",
   "theme": { "startHue": "green" },
   "slides": [ ... ]
 }
@@ -92,7 +91,7 @@ Every non-title slide takes `title`, optional `subtitle`, optional `source` (ove
 
 ## Color
 
-The default `preset` is `bold`: six saturated hues (blue, green, orange, violet, amber, red), each with four steps.
+Six saturated hues (blue, green, orange, violet, amber, red), each with four steps.
 
 | Step | Used for |
 |---|---|
@@ -108,12 +107,10 @@ How color is assigned, so it stays meaningful:
 - **Semantic hues are fixed by name:** green means good or on track, red means bad or off track, amber means at risk, violet is the start total and the ask panel. A custom palette keeps those names for those roles.
 - **Deltas stay green or red text**, with an arrow, on any wash.
 
-`theme` options:
+`theme` takes two fields, both optional:
 
 - `"startHue": "green"` rotates the palette so the deck leads with that hue (charts, first tile, title rule).
 - `"palette": [{ "name", "bg", "tint", "mark", "ink" }, ...]` replaces the hues with a brand set. Check each `ink` reads on its `bg` and each `mark` reads on white.
-- `"preset": "classic"` switches to the restrained single-accent look (neutral panels, one `accent` color) for audiences that want it plain.
-- `font` swaps the typeface; `accent` sets the chart color in `classic`.
 
 ## Script findings
 

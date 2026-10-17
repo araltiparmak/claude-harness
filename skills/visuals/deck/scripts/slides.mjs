@@ -12,9 +12,9 @@ const W = 1280, H = 720, PAD_X = 64, PAD_TOP = 52, FOOT = 48;
 const CONTENT_W = W - 2 * PAD_X;
 
 const DEFAULT_THEME = {
-  accent: '#2a78d6', ink: '#0b0b0b', ink2: '#52514e', muted: '#898781',
-  grid: '#e1e0d9', axis: '#c3c2b7', context: '#c9c8c1', surface: '#ffffff', panel: '#f4f4f1',
-  good: '#006300', bad: '#b42318', markGood: '#0ca30c', markBad: '#d03b3b',
+  ink: '#0b0b0b', ink2: '#52514e', muted: '#898781',
+  grid: '#e8e7e1', axis: '#c3c2b7', context: '#dedcd5', contextLine: '#b5b2a9', surface: '#ffffff',
+  good: '#006300', bad: '#b42318',
   // Inter comes from `brew install --cask font-inter`; without it the system font is used and the lint says so.
   font: '"Inter", system-ui, -apple-system, "Segoe UI", Helvetica, Arial, sans-serif',
   display: '"Inter Display", "Inter", system-ui, -apple-system, "Segoe UI", Helvetica, Arial, sans-serif',
@@ -25,17 +25,14 @@ const STATUS = {
   critical: { color: '#d03b3b', glyph: 'cross', label: 'Off track' },
 };
 // Each hue has four steps: bg (card wash), tint (title slide shapes), mark (chart mark, readable on white), ink (text on bg).
-const PALETTES = {
-  bold: [
-    { name: 'blue', bg: '#dbe5ff', tint: '#2453d6', mark: '#2453d6', ink: '#0d2a7a' },
-    { name: 'green', bg: '#d2f0e2', tint: '#0e8a5f', mark: '#0e8a5f', ink: '#06523a' },
-    { name: 'orange', bg: '#ffe0cc', tint: '#e0560b', mark: '#d4520a', ink: '#7f2f00' },
-    { name: 'violet', bg: '#e5ddfd', tint: '#5b34d4', mark: '#5b34d4', ink: '#33188c' },
-    { name: 'amber', bg: '#fbe9b0', tint: '#e0a100', mark: '#b07a00', ink: '#5c3f00' },
-    { name: 'red', bg: '#fcd9e1', tint: '#d0244c', mark: '#d0244c', ink: '#850f2c' },
-  ],
-  classic: [{ name: 'neutral', bg: '#f4f4f1', tint: '#e6e6e1', mark: '#2a78d6', ink: '#0b0b0b' }],
-};
+const PALETTE = [
+  { name: 'blue', bg: '#dbe5ff', tint: '#2453d6', mark: '#2453d6', ink: '#0d2a7a' },
+  { name: 'green', bg: '#d2f0e2', tint: '#0e8a5f', mark: '#0e8a5f', ink: '#06523a' },
+  { name: 'orange', bg: '#ffe0cc', tint: '#e0560b', mark: '#d4520a', ink: '#7f2f00' },
+  { name: 'violet', bg: '#e5ddfd', tint: '#5b34d4', mark: '#5b34d4', ink: '#33188c' },
+  { name: 'amber', bg: '#fbe9b0', tint: '#e0a100', mark: '#b07a00', ink: '#5c3f00' },
+  { name: 'red', bg: '#fcd9e1', tint: '#d0244c', mark: '#d0244c', ink: '#850f2c' },
+];
 let th = DEFAULT_THEME;
 const hue = i => th.palette[((i % th.palette.length) + th.palette.length) % th.palette.length];
 // Semantic hues (good, bad, warning, emphasis) by name, falling back to the first hue.
@@ -110,8 +107,8 @@ function spark(values, w, h, c = hue(0)) {
   const pts = values.map((v, i) => `${x(i).toFixed(1)},${y(v).toFixed(1)}`).join(' ');
   const lx = x(values.length - 1), ly = y(values.at(-1));
   return `<svg class="spark" viewBox="0 0 ${w} ${h}" width="${w}" height="${h}" aria-hidden="true">
-<polyline points="${pts}" fill="none" stroke="${th.preset === 'classic' ? th.axis : c.mark}" stroke-width="2.5" stroke-linejoin="round" stroke-linecap="round"/>
-<circle cx="${lx}" cy="${ly}" r="5" fill="${th.preset === 'classic' ? th.accent : c.ink}" stroke="${th.surface}" stroke-width="2"/></svg>`;
+<polyline points="${pts}" fill="none" stroke="${c.mark}" stroke-width="2.5" stroke-linejoin="round" stroke-linecap="round"/>
+<circle cx="${lx}" cy="${ly}" r="5" fill="${c.ink}" stroke="${th.surface}" stroke-width="2"/></svg>`;
 }
 
 function statusIcon(kind, size = 20) {
@@ -121,7 +118,7 @@ function statusIcon(kind, size = 20) {
     bang: `<path d="M${c},${c - 5} V${c + 1}" stroke="#0b0b0b" stroke-width="2.2" stroke-linecap="round"/><circle cx="${c}" cy="${c + 4.6}" r="1.3" fill="#0b0b0b"/>`,
     cross: `<path d="M${c - 3.8},${c - 3.8} l7.6,7.6 M${c + 3.8},${c - 3.8} l-7.6,7.6" stroke="#fff" stroke-width="2.2" stroke-linecap="round"/>`,
   }[s.glyph];
-  return `<svg width="${size}" height="${size}" viewBox="0 0 ${size} ${size}" aria-hidden="true"><circle cx="${c}" cy="${c}" r="${c}" fill="${th.preset === 'classic' ? s.color : statusHue(kind).mark}"/>${glyph}</svg>`;
+  return `<svg width="${size}" height="${size}" viewBox="0 0 ${size} ${size}" aria-hidden="true"><circle cx="${c}" cy="${c}" r="${c}" fill="${statusHue(kind).mark}"/>${glyph}</svg>`;
 }
 
 // Target met: on track. Missed but improving: at risk. Missed and not improving: off track.
@@ -232,9 +229,7 @@ function waterfallChart({ start, steps, end, format = {}, better = 'higher', axi
   const labelRows = Math.max(...cols.map(c => wrap(c.label).length));
   const T = 40, B = 30 + labelRows * 19 + (axisFrom !== undefined ? 22 : 0), ih = h - T - B, bw = Math.min(64, slot * 0.42);
   const y = v => T + ih - (v - tk[0]) / (tk.at(-1) - tk[0]) * ih;
-  const fill = th.preset === 'classic'
-    ? { start: th.ink2, end: th.accent, good: th.markGood, bad: th.markBad }
-    : { start: role('violet').mark, end: th.accent, good: role('green').mark, bad: role('red').mark };
+  const fill = { start: role('violet').mark, end: th.accent, good: role('green').mark, bad: role('red').mark };
   const y0 = y(base);
   let g = `<line x1="0" x2="${w}" y1="${y0}" y2="${y0}" stroke="${th.axis}"/>`;
   if (axisFrom !== undefined) g += `<text x="0" y="${h - 4}" class="tick">Axis starts at ${esc(fmt(axisFrom, format))}</text>`;
@@ -271,8 +266,8 @@ const SLIDES = {
       <div class="t-main"><div class="rule"></div><h1 class="t-h">${md(s.title)}</h1>
       ${s.subtitle ? `<p class="t-sub">${md(s.subtitle)}</p>` : ''}</div>
       <div class="t-meta">${esc(s.meta || '')}</div>
-      ${th.preset === 'classic' ? '' : `<div class="t-art" aria-hidden="true">${[0, 1, 2, 3, 4, 5].map(i =>
-        `<i class="${i % 3 === 1 ? 'round' : ''}" style="background:${hue(i).tint}"></i>`).join('')}</div>`}
+      <div class="t-art" aria-hidden="true">${[0, 1, 2, 3, 4, 5].map(i =>
+        `<i class="${i % 3 === 1 ? 'round' : ''}" style="background:${hue(i).tint}"></i>`).join('')}</div>
     </div>`,
 
   summary: s => `<main class="sum">
@@ -420,7 +415,7 @@ svg text{font-family:${th.font}}
 .t-org{font-size:17px;font-weight:600;color:${th.ink2}}
 .t-main{flex:1;display:flex;flex-direction:column;justify-content:center}
 .rule{width:56px;height:5px;border-radius:3px;background:${th.accent};margin-bottom:28px}
-.t-h{margin:0;font-family:${th.display};font-size:60px;line-height:1.08;font-weight:700;letter-spacing:-0.02em;max-width:${th.preset === 'classic' ? 1000 : 740}px;text-wrap:balance}
+.t-h{margin:0;font-family:${th.display};font-size:60px;line-height:1.08;font-weight:700;letter-spacing:-0.02em;max-width:740px;text-wrap:balance}
 .t-sub{margin:20px 0 0;font-size:24px;line-height:1.4;color:${th.ink2};max-width:900px}
 .t-meta{font-size:16px;color:${th.muted}}
 .title-wrap{position:relative}
@@ -622,7 +617,8 @@ const SCHEMA = {
   wins: { req: ['title', 'items'], items: { items: { req: ['metric', 'win', 'team'] } } },
   next: { req: ['title', 'priorities'], opt: ['asks', 'asksLabel'], items: { priorities: { req: ['title'], opt: ['detail', 'when'] }, asks: { req: ['text'], opt: ['owner'] } } },
 };
-const DECK_KEYS = ['title', 'footer', 'source', 'theme', 'allowTerms', 'output', 'slides'];
+const DECK_KEYS = ['title', 'footer', 'source', 'theme', 'allowTerms', 'slides'];
+const THEME_KEYS = ['startHue', 'palette'];
 
 function closest(word, options) {
   const dist = (a, b) => {
@@ -658,6 +654,7 @@ function checkFields(obj, rule, where, errs, extra = []) {
 function validate(deck) {
   const errs = [];
   for (const k of Object.keys(deck)) if (!DECK_KEYS.includes(k)) errs.push(`deck: unknown field "${k}"${closest(k, DECK_KEYS)}`);
+  for (const k of Object.keys(deck.theme || {})) if (!THEME_KEYS.includes(k)) errs.push(`theme: unknown field "${k}"${closest(k, THEME_KEYS)}`);
   if (!Array.isArray(deck.slides) || !deck.slides.length) return [...errs, 'deck: "slides" must be a non-empty array'];
   deck.slides.forEach((s, i) => {
     const where = `slide ${i + 1} (${s?.type ?? 'no type'})`, rule = SCHEMA[s?.type];
@@ -776,17 +773,15 @@ catch (e) { console.error(`SPEC     ${specPath} is not valid JSON: ${e.message}`
 const specErrors = validate(deck);
 if (specErrors.length) { for (const e of specErrors) console.error(`SPEC     ${e}`); process.exit(2); }
 const FORMATS = ['pdf', 'png', 'html'];
-const formats = String(formatArg || deck.output || FORMATS.join(',')).split(',').map(x => x.trim().toLowerCase()).filter(Boolean);
+const formats = String(formatArg || FORMATS.join(',')).split(',').map(x => x.trim().toLowerCase()).filter(Boolean);
 for (const f of formats) if (!FORMATS.includes(f)) { console.error(`SPEC     unknown format "${f}"; use ${FORMATS.join(', ')}`); process.exit(2); }
 {
-  const t = deck.theme || {}, preset = t.preset || 'bold';
-  let palette = t.palette || PALETTES[preset] || PALETTES.bold;
+  const t = deck.theme || {};
+  let palette = t.palette || PALETTE;
   // startHue rotates the palette so a deck can lead with any hue.
   const k = palette.findIndex(h => h.name === t.startHue);
   if (k > 0) palette = [...palette.slice(k), ...palette.slice(0, k)];
-  const base = preset === 'classic' ? {} : { context: '#dedcd5', grid: '#e8e7e1', panel: palette[0].bg };
-  th = { ...DEFAULT_THEME, contextLine: '#b5b2a9', ...base, preset, palette, accent: palette[0].mark, accentInk: palette[0].ink, accentWash: palette[0].bg, ...t };
-  if (preset === 'classic') { th.accentInk = th.accent; th.accentWash = th.accent + '1a'; th.palette = [{ ...palette[0], mark: th.accent }]; }
+  th = { ...DEFAULT_THEME, palette, panel: palette[0].bg, accent: palette[0].mark, accentInk: palette[0].ink, accentWash: palette[0].bg };
 }
 const out = path.resolve(outArg || path.join(path.dirname(specPath), path.basename(specPath, '.json') + '-out'));
 fs.mkdirSync(out, { recursive: true });

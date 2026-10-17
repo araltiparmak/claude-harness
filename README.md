@@ -35,7 +35,7 @@ flowchart LR
 - **Permissions:** auto mode, so there is no allow list: reads and edits in the project run without asking, and the classifier reviews the rest. `terraform apply`/`destroy`, `.env` and AWS credentials are denied.
 - **Hooks:** every Claude Code event goes to iTerm2's `cc-status` utility, so the terminal tab shows whether Claude is working, waiting for permission or done.
 - **Status line:** [ccstatusline](https://github.com/sirmalloc/ccstatusline).
-- **Model:** Opus at medium effort, with a fallback model.
+- **Model:** Opus at high effort, with Sonnet as the fallback model.
 
 ## Skills
 
@@ -45,7 +45,7 @@ Skills sit in group folders; `update.sh` links each one into `~/.claude/skills/`
 
 | Skill | What it does |
 |---|---|
-| [deck](skills/visuals/deck/SKILL.md) | Builds premium presentation decks (PDF, PNG slides or a presentable HTML file) from a JSON spec for a company-wide audience: results, KPIs, team wins, next steps |
+| [deck](skills/visuals/deck/SKILL.md) | Builds presentation decks (PDF, PNG slides or a presentable HTML file) from a JSON spec for a company-wide audience: results, KPIs, team wins, next steps |
 | [diagrams](skills/visuals/diagrams/SKILL.md) | Draws technical diagrams (architecture with AWS icons, message chains, sequence, ER, state, flow) as SVG and PNG with Mermaid and D2, plain or hand-drawn (whiteboard style), for PRs and docs |
 | [explain](skills/visuals/explain/SKILL.md) | Builds a one-page brief that explains a feature to developers, testers and a PM: scope, architecture (D2, whiteboard style), flow and states (Mermaid), a decision table, rules with test examples, open questions |
 | [mindmap](skills/visuals/mindmap/SKILL.md) | Turns a Markdown outline into an interactive mind map (HTML) and a PNG with markmap, for topic trees and study maps |

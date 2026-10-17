@@ -16,13 +16,12 @@ Write a source file, render it with `scripts/render.sh`, look at the PNG, fix, r
 | AWS architecture with official service icons | `.d2` | D2 with `icon:` | `d2.md` |
 | Whiteboard look (hand-drawn, like Excalidraw), for drafts and discussions | `.d2` | D2, rendered with `SKETCH=1` | `d2.md` |
 | Services passing messages in a chain | `.d2` and `.mmd` | D2 route + Mermaid sequence | `d2.md` (Message chains), `mermaid.md` |
-| Hover, click, filters, animation | `.html` | D3 or Mermaid from cdnjs | Interactive output below |
 
 Read only the file for the tool you picked. A pure topic hierarchy (mind map, study map) belongs to the `mindmap` skill. **Sequence diagrams are always Mermaid. Architecture diagrams are always D2**, with icons when it is AWS. Default to Mermaid for a plain flow; reach for D2 when boxes must nest. A slide, KPI tile or results visual is a `deck` job, even when it is one slide.
 
 ## Steps
 
-1. Check the tool exists (`command -v mmdc d2`). Chrome is needed for `.mmd` and `.html`. Missing tools: ask before `brew install d2`; Mermaid runs through `npx` with no install.
+1. Check the tool exists (`command -v mmdc d2`). Chrome is needed for `.mmd`. Missing tools: ask before `brew install d2`; Mermaid runs through `npx` with no install.
 2. Write the source to `diagrams-out/<name>.<ext>` in the project, or the scratchpad when the user wants a throwaway.
 3. Run `scripts/render.sh <source> [out-dir]`.
 4. Fix every `FAIL` that `render.sh` prints (blank image, wider than 3:1; `MAX_WIDE=4` relaxes it for a gantt or timeline) in the diagram, not the check. Then read the PNG. Done means: every label legible, nothing clipped or overlapping, the picture shows the mechanism the user asked for, aspect near 16:9 or square.
@@ -34,15 +33,10 @@ Read only the file for the tool you picked. A pure topic hierarchy (mind map, st
   - D2 diagram (every AWS-icon architecture): attach the rendered SVG, which zooms without blur, plus a 2x PNG. `gh pr create|edit|comment --attach file.svg` uploads it (gh 2.99 or newer; it rewrites a `![alt](./file.svg)` reference in the body to the uploaded asset). Commit the `.d2` source, not only the image.
   - Sequence, flow, state, ER: a fenced `mermaid` block in the description. The source stays reviewable in the PR, and GitHub draws it with its own Mermaid theme, not ours.
   - Architecture that must render natively (no image): a Mermaid `flowchart` with `subgraph` groups. It has no service icons.
-- A site with light and dark themes: colours as CSS variables in the SVG. Mermaid accepts `var(--x)` directly; D2 does not (see `d2.md`).
-
-## Interactive output
-
-Ship one self-contained `.html` with libraries from `cdnjs.cloudflare.com` at pinned versions. Open it in the browser to check it. When the Artifact tool is available, `artifact-diagramming` holds the SVG mechanics.
 
 ## Environment
 
-`render.sh` finds Chrome, Edge or Chromium itself; set `CHROME=/path` to override. On a locked-down machine with no installs, HTML plus Chrome is the path that always works: write Mermaid inside an HTML page that loads it from cdnjs, then render the `.html` to PNG.
+`render.sh` finds Chrome, Edge or Chromium itself; set `CHROME=/path` to override.
 
 ## Examples
 
