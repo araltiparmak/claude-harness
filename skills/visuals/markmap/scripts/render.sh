@@ -23,9 +23,11 @@ if command -v markmap >/dev/null 2>&1; then mm=(markmap); else mm=(npx -y markma
 "${mm[@]}" "$src" --no-open --offline --no-toolbar -o "$out/$base.html" >/dev/null
 # Refit the map after every click, or an opened branch runs off the screen. markmap supports autoFit
 # but drops it from front matter (deriveOptions passes only numbers and colors), so set it here.
+# Animations default to 200 ms instead of 500, which felt slow with the refit; `duration` in the
+# front matter still wins.
 fit='(getOptions || markmap.deriveOptions)(jsonOptions)'
 grep -qF "$fit" "$out/$base.html" || { echo "render.sh: markmap init changed, autoFit not set" >&2; exit 1; }
-FIT="$fit" perl -pi -e 's/\Q$ENV{FIT}\E/{ ...$ENV{FIT}, autoFit: true }/' "$out/$base.html"
+FIT="$fit" perl -pi -e 's/\Q$ENV{FIT}\E/{ duration: 200, ...$ENV{FIT}, autoFit: true }/' "$out/$base.html"
 
 chrome="$(find_chrome)"
 shared="$(cd -P "$(dirname "$0")" && pwd -P)/../../scripts"   # physical path: the skill is symlinked into ~/.claude/skills
