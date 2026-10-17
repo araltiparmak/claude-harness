@@ -1,6 +1,6 @@
 ---
 name: diagrams
-description: Draws technical diagrams as SVG and PNG with Mermaid, D2 and Graphviz (architecture, sequence, ER, state, flow, gantt) for PR descriptions, docs and knowledge sharing. Use when the user asks for a diagram, flowchart, architecture or sequence diagram, a data model picture, or a diagram image to paste into a PR or doc. Slides and results visuals belong to the deck skill.
+description: Draws technical diagrams as SVG and PNG with Mermaid, D2 and Graphviz (architecture, sequence, ER, state, flow, gantt), optionally in a hand-drawn whiteboard style, for PR descriptions, docs and knowledge sharing. Use when the user asks for a diagram, flowchart, architecture or sequence diagram, a data model picture, a whiteboard or Excalidraw-style sketch, or a diagram image to paste into a PR or doc. Slides and results visuals belong to the deck skill.
 allowed-tools:
   - Read
   - Write
@@ -23,6 +23,7 @@ Write a source file, render it with `scripts/render.sh`, look at the PNG, fix, r
 | Flow, sequence, ER, state, gantt | `.mmd` | Mermaid | `mermaid.md` |
 | Architecture with nested groups (accounts, VPCs, services) | `.d2` | D2 | `d2.md` |
 | AWS architecture with official service icons | `.d2` | D2 with `icon:` | `d2.md` |
+| Whiteboard look (hand-drawn, like Excalidraw), for drafts and discussions | `.d2` | D2, rendered with `SKETCH=1` | `d2.md` |
 | Services passing messages in a chain | `.d2` and `.mmd` | D2 route + Mermaid sequence | `d2.md` (Message chains), `mermaid.md` |
 | Cycles, dependency graphs, anything dense | `.dot` | Graphviz | — |
 | Hover, click, filters, animation | `.html` | D3 or Mermaid from cdnjs | Interactive output below |

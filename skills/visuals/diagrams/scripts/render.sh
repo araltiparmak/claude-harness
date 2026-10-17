@@ -39,8 +39,9 @@ case "$ext" in
       d2src="$(mktemp -d)/$base.d2"
       sed "s|ICONS/|$here/../icons/|g" "$src" > "$d2src"
     fi
-    d2 --layout="$layout" --pad 48 "$d2src" "$out/$base.svg"
-    d2 --layout="$layout" --pad 48 --scale 2 "$d2src" "$out/$base.png"
+    sketch=(); [ -n "${SKETCH:-}" ] && sketch=(--sketch)   # SKETCH=1: hand-drawn look
+    d2 --layout="$layout" ${sketch[@]+"${sketch[@]}"} --pad 48 "$d2src" "$out/$base.svg"
+    d2 --layout="$layout" ${sketch[@]+"${sketch[@]}"} --pad 48 --scale 2 "$d2src" "$out/$base.png"
     ;;
   dot)
     dot -Tsvg "$src" -o "$out/$base.svg"
