@@ -1,14 +1,6 @@
 ---
 name: deck
 description: Builds premium presentation decks as PDF, PNG slides or a presentable HTML file from a JSON spec, in a strong, premium palette: team successes, quarterly results, KPIs, cost savings, before/after, roadmap and next steps, written for a company-wide audience. Use when the user wants a presentation, slides or a deck (all-hands, company update, leadership review, team showcase), or a single slide or visual that shows results and numbers.
-allowed-tools:
-  - Read
-  - Write
-  - Edit
-  - Glob
-  - Bash(node */deck/scripts/slides.mjs *)
-  - Bash(ls *)
-  - Bash(mkdir *)
 ---
 
 # Decks

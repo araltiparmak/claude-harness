@@ -1,15 +1,6 @@
 ---
 name: diagrams
 description: Draws technical diagrams as SVG and PNG with Mermaid and D2 (architecture, sequence, ER, state, flow, gantt), optionally in a hand-drawn whiteboard style, for PR descriptions, docs and knowledge sharing. Use when the user asks for a diagram, flowchart, architecture or sequence diagram, a data model picture, a whiteboard or Excalidraw-style sketch, or a diagram image to paste into a PR or doc. Slides and results visuals belong to the deck skill.
-allowed-tools:
-  - Read
-  - Write
-  - Edit
-  - Glob
-  - Bash(*/diagrams/scripts/render.sh *)
-  - Bash(command -v *)
-  - Bash(ls *)
-  - Bash(mkdir *)
 ---
 
 # Diagrams

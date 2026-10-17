@@ -34,7 +34,7 @@ flowchart LR
 
 [`claude/settings.json`](claude/settings.json) in short:
 
-- **Permissions:** auto mode by default. Read-only git, file and search commands and package-manager installs are allowed without asking. `terraform apply`/`destroy`, `.env` and AWS credentials are denied.
+- **Permissions:** auto mode, so there is no allow list: reads and edits in the project run without asking, and the classifier reviews the rest. `terraform apply`/`destroy`, `.env` and AWS credentials are denied.
 - **Hooks:** every Claude Code event goes to iTerm2's `cc-status` utility, so the terminal tab shows whether Claude is working, waiting for permission or done.
 - **Status line:** [ccstatusline](https://github.com/sirmalloc/ccstatusline).
 - **Model:** Opus at medium effort, with a fallback model.

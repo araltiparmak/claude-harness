@@ -1,15 +1,6 @@
 ---
 name: markmap
 description: Turns a Markdown outline into an interactive mind map (self-contained HTML) and a PNG with markmap. Use when the user asks for a mind map, markmap, a topic tree, a study or learning map, or a visual summary of notes or a Markdown document. Flows, sequences and architecture belong to the diagrams skill.
-allowed-tools:
-  - Read
-  - Write
-  - Edit
-  - Glob
-  - Bash(*/markmap/scripts/render.sh *)
-  - Bash(command -v *)
-  - Bash(ls *)
-  - Bash(mkdir *)
 ---
 
 # Markmap

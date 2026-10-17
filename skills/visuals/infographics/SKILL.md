@@ -1,15 +1,6 @@
 ---
 name: infographics
 description: Builds single-canvas infographics (process steps, stat strip, timeline, funnel) as PNG, PDF and standalone HTML from HTML templates, and checks the render for overflow, overlap, small text, low contrast and leftover sample data. Use when the user asks for an infographic, a process or timeline graphic, a results strip, a funnel, or a visual for a company presentation or one-pager. Technical diagrams belong to the diagrams skill, full decks to the deck skill.
-allowed-tools:
-  - Read
-  - Write
-  - Edit
-  - Glob
-  - Bash(*/infographics/scripts/render.sh *)
-  - Bash(cp *)
-  - Bash(ls *)
-  - Bash(mkdir *)
 ---
 
 # Infographics
