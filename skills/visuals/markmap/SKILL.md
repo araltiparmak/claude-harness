@@ -52,4 +52,4 @@ markmap:
 
 ## Examples
 
-`examples/learning-plan.md`: a three-branch plan with front matter.
+`examples/web-performance.md`: four branches, front matter, and inline `code`, **bold** and links.
