@@ -44,6 +44,27 @@ while IFS= read -r path; do
   [ -f "$path" ] || problem "README links to a missing file: $path"
 done < <(grep -oE 'skills/[a-z0-9/-]+/SKILL\.md' README.md | sort -u)
 
+# external-skills.txt: owner/repo lines, each followed by indented skill names. No name twice,
+# and none that a skill in this repo already uses.
+if [ -f external-skills.txt ]; then
+  n=0; repo=""; seen=" "
+  while IFS= read -r raw || [ -n "$raw" ]; do
+    n=$((n + 1)); line="${raw%%#*}"
+    [ -n "$(printf '%s' "$line" | tr -d '[:space:]')" ] || continue
+    if [[ "$line" =~ ^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+[[:space:]]*$ ]]; then
+      repo="$line"
+    elif [[ "$line" =~ ^[[:space:]]+([a-z0-9]+(-[a-z0-9]+)*)[[:space:]]*$ ]]; then
+      name="${BASH_REMATCH[1]}"
+      [ -n "$repo" ] || problem "external-skills.txt:$n: skill '$name' comes before any owner/repo line"
+      case "$seen" in *" $name "*) problem "external-skills.txt:$n: '$name' is listed twice" ;; esac
+      seen+="$name "
+      if printf '%s\n' "${skills[@]}" | grep -qx "$name"; then problem "external-skills.txt:$n: '$name' is also a skill in this repo"; fi
+    else
+      problem "external-skills.txt:$n: neither 'owner/repo' nor an indented kebab-case skill name: $raw"
+    fi
+  done < external-skills.txt
+fi
+
 # Settings are valid JSON, and the public file carries no machine-specific paths.
 python3 -m json.tool claude/settings.json >/dev/null || problem "claude/settings.json is not valid JSON"
 if grep -q '/Users/' claude/settings.json; then problem "claude/settings.json contains a /Users/ path; use \$HOME"; fi
@@ -68,7 +89,7 @@ import sys
 import unicodedata
 from pathlib import Path
 
-roots = ["skills", "README.md", "CLAUDE.md", "HARNESS.md", "claude", "scripts"]
+roots = ["skills", "README.md", "CLAUDE.md", "external-skills.txt", "claude", "scripts"]
 skip_dirs = {"icons", "node_modules", ".git", "__pycache__"}
 hits = []
 for root in roots:

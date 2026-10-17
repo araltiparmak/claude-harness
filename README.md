@@ -10,7 +10,7 @@ A Claude Code setup as code: a set of skills, settings and global instructions, 
 flowchart LR
   H["claude-harness<br/>(this repo, public)"]
   P["optional second<br/>skills repo"]
-  S["skills.sh skills"]
+  S["repos listed in<br/>external-skills.txt"]
   U(["scripts/update.sh"])
   C["~/.claude<br/>skills/ · settings.json · CLAUDE.md"]
   H --> U
@@ -24,9 +24,7 @@ flowchart LR
 - **Skills:** symlinks every skill into `~/.claude/skills/`, so a pull is all an update needs.
 - **Settings:** builds `~/.claude/settings.json` from [`claude/settings.json`](claude/settings.json) plus an optional overlay from the second repo, so private values stay out of this one. If Claude Code or you changed the live file since the last run, the script prints the difference and leaves the file alone, so no setting is lost silently.
 - **Global instructions:** links `~/.claude/CLAUDE.md` to [`claude/CLAUDE.md`](claude/CLAUDE.md).
-- **skills.sh skills:** runs `npx skills update`, because those skills do not update themselves. Matt Pocock's skills come this way, so no clone of his repo is needed.
-
-[`HARNESS.md`](HARNESS.md) records the plugins and skills.sh installs, so a new machine is two commands away.
+- **Skills from other repos:** [`external-skills.txt`](external-skills.txt) lists GitHub repos and the skills to take from each. The script clones each repo into `~/.cache/claude-harness/repos`, pulls it on later runs, and links the listed skills. Delete a line and the next run unlinks that skill. `scripts/check.sh` checks the file's format.
 
 [`TOKEN-EFFICIENCY.md`](TOKEN-EFFICIENCY.md) records how plugins, MCP servers, skills and habits are kept cheap in tokens.
 
@@ -91,6 +89,8 @@ npx skills@latest add araltiparmak/claude-harness
 git clone https://github.com/araltiparmak/claude-harness.git
 claude-harness/scripts/update.sh
 ```
+
+Plugins are installed by hand: `claude plugin install frontend-design@claude-plugins-official`, and a plugin only one project uses with `--scope project` from that project's folder. Leave Matt Pocock's `mattpocock-skills` plugin uninstalled; `external-skills.txt` already links his skills, and the plugin would load them twice.
 
 A second skills repo is optional: point `PRIVATE_DIR` at a checkout (default `~/dev/private-skills`), and set `PRIVATE_URL` to clone it when the folder is missing. Without either, only this repo is installed. `scripts/check.sh` checks the repo's consistency and runs in CI on every push.
 
