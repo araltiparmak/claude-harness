@@ -8,7 +8,7 @@ Skills and plugins that live outside this repo but are part of my Claude Code se
 claude plugin install frontend-design@claude-plugins-official
 ```
 
-Project-scope plugins go in from that project's folder: `claude plugin install expo@claude-plugins-official --scope project` in `diction-app` and `diction-v2`.
+Project-scope plugins go in from that project's folder: `claude plugin install <name>@claude-plugins-official --scope project`.
 
 ## Skills (skills.sh)
 
