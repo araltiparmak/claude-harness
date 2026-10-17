@@ -75,4 +75,4 @@ git add -A && git commit -m "<what v1 does>"
 
 Start `pnpm dev` in the background and report the localhost URL — `http://localhost:<PORT>`, the port `cra.sh` picked — along with the project path and what you built. If the dev server refuses to start because the port is taken, pick a fresh one the same way `cra.sh` did and update `vite.config.ts` and `CLAUDE.md` together.
 
-When the user wants it live, `pnpm ship` checks that the git tree is clean, runs `pnpm check`, then deploys to the project's target. It needs a target first: run the `cloudflare` or `vercel` skill. Without one, `ship` stops after the checks with exit code 3 and says so.
+When the user wants it live, `pnpm ship` checks that the git tree is clean, runs `pnpm check`, then deploys to the project's target. It needs a target first: run the `vercel` skill, or add a `cloudflare.config.ts` for Cloudflare. Without one, `ship` stops after the checks with exit code 3 and says so.

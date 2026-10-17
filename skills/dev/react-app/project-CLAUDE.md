@@ -46,4 +46,4 @@ Deep links then need an SPA fallback on the host (the `vercel` skill writes it i
 
 ## Deploy
 
-Set up a target once with the `vercel` or `cloudflare` skill; after that `pnpm ship` deploys to production.
+Set up a target once (the `vercel` skill, or a `cloudflare.config.ts` for Cloudflare); after that `pnpm ship` deploys to production.

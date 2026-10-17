@@ -54,7 +54,6 @@ Skills sit in group folders; `update.sh` links each one into `~/.claude/skills/`
 
 | Skill | What it does |
 |---|---|
-| [cloudflare](skills/dev/cloudflare/SKILL.md) | Deploys a project to Cloudflare Workers with the cf CLI (no Wrangler file), and uses cf for any other Cloudflare task unless the project has a Wrangler file |
 | [mobile-app](skills/dev/mobile-app/SKILL.md) | Recommends the default stack for a new Expo + React Native + TypeScript app, one decision at a time |
 | [react-app](skills/dev/react-app/SKILL.md) | Scaffolds a React + Vite + TS + Tailwind prototype via `cra` (project scripts `check` and `ship` included) and builds v1 (user-invoked: `/react-app`) |
 | [vercel](skills/dev/vercel/SKILL.md) | Deploys a Vite/React project to Vercel, or repairs its deploy path |
