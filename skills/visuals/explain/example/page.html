@@ -1,0 +1,191 @@
+<title>Unpaid Order Expiry</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Source+Sans+3:wght@400;600;700&family=Source+Code+Pro:wght@500&display=swap">
+<style>
+/* Layout: one reading column; each section carries a tag naming who it is for; diagrams sit on white paper in both themes. */
+:root {
+  --bg: #f6f7f9; --surface: #ffffff; --fg: #1b2330; --muted: #5a6575; --line: #dde2e8;
+  --accent: #1d5fd1; --accent-wash: #e6eefc;
+  --pm: #7a3fd0; --pm-wash: #f1e9fc; --dev: #1d5fd1; --dev-wash: #e6eefc; --qa: #13804a; --qa-wash: #e3f4ea;
+  --warn: #9a5b00; --warn-wash: #fdf1dc;
+  --paper: #ffffff;
+  --font-body: "Source Sans 3", "Segoe UI", system-ui, sans-serif;
+  --font-mono: "Source Code Pro", ui-monospace, Menlo, monospace;
+}
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
+  --bg: #11151b; --surface: #181e26; --fg: #e4e8ee; --muted: #9aa5b4; --line: #2a323d;
+  --accent: #7aa7ff; --accent-wash: #1a2740;
+  --pm: #c4a2ff; --pm-wash: #2a1f3d; --dev: #7aa7ff; --dev-wash: #1a2740; --qa: #6fd39d; --qa-wash: #15301f;
+  --warn: #f0b860; --warn-wash: #33260f;
+  color-scheme: dark } }
+:root[data-theme="dark"] {
+  --bg: #11151b; --surface: #181e26; --fg: #e4e8ee; --muted: #9aa5b4; --line: #2a323d;
+  --accent: #7aa7ff; --accent-wash: #1a2740;
+  --pm: #c4a2ff; --pm-wash: #2a1f3d; --dev: #7aa7ff; --dev-wash: #1a2740; --qa: #6fd39d; --qa-wash: #15301f;
+  --warn: #f0b860; --warn-wash: #33260f;
+  color-scheme: dark }
+
+body { background: var(--bg); color: var(--fg); font: 17px/1.55 var(--font-body);
+  padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); padding-block: 40px 64px; }
+.wrap { max-width: 860px; margin: 0 auto; display: flex; flex-direction: column; gap: 48px; }
+h1, h2, h3 { text-wrap: balance; line-height: 1.2; margin: 0; }
+h1 { font-size: 40px; font-weight: 700; letter-spacing: -0.01em; }
+h2 { font-size: 26px; font-weight: 700; }
+h3 { font-size: 18px; font-weight: 700; }
+p { margin: 0; max-width: 68ch; }
+code, .mono { font-family: var(--font-mono); font-size: 0.88em; }
+a { color: var(--accent); }
+
+header { display: flex; flex-direction: column; gap: 14px; }
+.meta { display: flex; flex-wrap: wrap; gap: 8px 16px; color: var(--muted); font-size: 15px; }
+.status { color: var(--warn); background: var(--warn-wash); padding: 2px 10px; border-radius: 4px; font-weight: 600; }
+.lede { font-size: 20px; color: var(--fg); }
+
+.guide { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
+.guide div { background: var(--surface); border: 1px solid var(--line); border-radius: 6px; padding: 12px 14px; font-size: 15px; color: var(--muted); }
+.guide b { display: block; color: var(--fg); margin-bottom: 2px; }
+
+section { display: flex; flex-direction: column; gap: 16px; }
+.head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 10px 14px; }
+.tags { display: flex; gap: 6px; }
+.tag { font-size: 13px; font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase; padding: 2px 8px; border-radius: 4px; }
+.tag.pm { color: var(--pm); background: var(--pm-wash); }
+.tag.dev { color: var(--dev); background: var(--dev-wash); }
+.tag.qa { color: var(--qa); background: var(--qa-wash); }
+
+.scope { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
+.scope div { min-width: 0; }
+.scope ul { margin: 6px 0 0; padding-left: 20px; }
+.scope li + li { margin-top: 4px; }
+
+figure { margin: 0; display: flex; flex-direction: column; gap: 8px; }
+.paper { background: var(--paper); border: 1px solid var(--line); border-radius: 8px; padding: 12px; overflow-x: auto; }
+.paper img { display: block; margin: 0 auto; height: auto; }
+figcaption { font-size: 15px; color: var(--muted); }
+
+.rule { background: var(--surface); border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
+.rule h3 { padding: 14px 16px 4px; display: flex; gap: 10px; align-items: baseline; }
+.rule h3 .mono { color: var(--muted); font-weight: 500; }
+.rule > p { padding: 0 16px 12px; color: var(--muted); font-size: 16px; }
+.table { overflow-x: auto; }
+table { width: 100%; min-width: 560px; border-collapse: collapse; font-size: 15.5px; table-layout: fixed; }
+th:nth-child(1) { width: 12%; } th:nth-child(2) { width: 30%; } th:nth-child(3) { width: 26%; }
+th, td { text-align: left; vertical-align: top; padding: 9px 16px; border-top: 1px solid var(--line); }
+th { font-size: 13px; text-transform: uppercase; letter-spacing: 0.04em; color: var(--muted); font-weight: 600; }
+td:first-child { font-family: var(--font-mono); font-size: 14px; color: var(--muted); white-space: nowrap; }
+
+.questions { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 10px; }
+.questions li { background: var(--surface); border: 1px solid var(--line); border-radius: 8px; padding: 12px 16px; display: flex; gap: 14px; align-items: baseline; }
+.questions .mono { color: var(--warn); font-weight: 500; flex: none; }
+.questions .who { margin-left: auto; flex: none; }
+
+footer { color: var(--muted); font-size: 14px; border-top: 1px solid var(--line); padding-top: 16px; }
+
+@media (max-width: 640px) {
+  h1 { font-size: 32px; }
+  .guide, .scope { grid-template-columns: minmax(0, 1fr); }
+  .questions li { flex-wrap: wrap; }
+  .questions .who { margin-left: 0; }
+}
+</style>
+
+<div class="wrap">
+  <header>
+    <div class="meta"><span class="status">Draft for review</span><span>Checkout team</span><span>Example feature</span></div>
+    <h1>Unpaid orders expire after 30 minutes</h1>
+    <p class="lede">An order that is not paid within 30 minutes is cancelled and its stock goes back on sale. A payment that arrives after that is refunded automatically.</p>
+  </header>
+
+  <div class="guide" aria-label="Who reads what">
+    <div><b><span class="tag pm">PM</span></b>Summary, rules and open questions</div>
+    <div><b><span class="tag dev">Dev</span></b>Where it lives and the flow</div>
+    <div><b><span class="tag qa">Test</span></b>States, rules and examples</div>
+  </div>
+
+  <section id="summary">
+    <div class="head"><h2>Summary</h2><div class="tags"><span class="tag pm">PM</span></div></div>
+    <p>Today an unpaid order holds its stock forever, so popular items show as sold out while nobody pays for them. With this change, stock is held for 30 minutes at most.</p>
+    <div class="scope">
+      <div><h3>In scope</h3><ul><li>Cancel unpaid orders after 30 minutes</li><li>Release reserved stock on cancel</li><li>Refund payments that arrive late</li></ul></div>
+      <div><h3>Out of scope</h3><ul><li>Reminder emails before expiry</li><li>Different timeouts per product</li><li>Changes to the refund policy</li></ul></div>
+    </div>
+  </section>
+
+  <section id="architecture">
+    <div class="head"><h2>Where it lives</h2><div class="tags"><span class="tag pm">PM</span><span class="tag dev">Dev</span><span class="tag qa">Test</span></div></div>
+    <figure>
+      <div class="paper"><img src="<!--svg:architecture-->" width="860" alt="Customer checks out in the web shop, which calls the Orders API and redirects to the payment provider. The provider sends a paid webhook to the Orders API. An expiry job runs every minute and asks the Orders API to expire old orders. The Orders API publishes order events that the stock service uses to release or confirm stock."></div>
+      <figcaption>The expiry job is the only new part. Everything else exists today. Source: <code>architecture.d2</code> (D2)</figcaption>
+    </figure>
+  </section>
+
+  <section id="flow">
+    <div class="head"><h2>The flow</h2><div class="tags"><span class="tag dev">Dev</span><span class="tag qa">Test</span></div></div>
+    <figure>
+      <div class="paper"><img src="<!--svg:checkout-->" width="780" alt="Sequence: the customer places an order, the Orders API saves it as pending and reserves stock, the customer is redirected to pay. Either the paid webhook arrives within 30 minutes and the order is paid, or the expiry job cancels it and releases stock; a payment that arrives after that is refunded in full."></div>
+      <figcaption>Steps 9 and 10 are the case most likely to be missed: the customer paid, but too late. Source: <code>checkout.mmd</code> (Mermaid)</figcaption>
+    </figure>
+  </section>
+
+  <section id="states">
+    <div class="head"><h2>Order states</h2><div class="tags"><span class="tag qa">Test</span><span class="tag dev">Dev</span></div></div>
+    <figure>
+      <div class="paper"><img src="<!--svg:order-states-->" width="460" alt="States: pending goes to paid on the webhook, or to cancelled after 30 minutes or when the customer cancels. Paid goes to fulfilled when shipped, or to refunded. Fulfilled goes to refunded within 14 days."></div>
+      <figcaption>Every arrow is at least one test case. Any move the picture does not show, such as CANCELLED to PAID, must be rejected. Source: <code>order-states.mmd</code> (Mermaid)</figcaption>
+    </figure>
+  </section>
+
+  <section id="rules">
+    <div class="head"><h2>Rules and examples</h2><div class="tags"><span class="tag qa">Test</span><span class="tag pm">PM</span></div></div>
+    <p>Each example is a test case. Times are minutes after the order was placed.</p>
+
+    <div class="rule">
+      <h3><span class="mono">R1</span>An order waits 30 minutes for payment</h3>
+      <p>The 30 minutes start when the order is saved, not when the customer opens the payment page.</p>
+      <div class="table"><table>
+        <thead><tr><th>ID</th><th>Given</th><th>When</th><th>Then</th></tr></thead>
+        <tbody>
+          <tr><td>R1.1</td><td>Order placed at 00:00</td><td>Paid webhook at 29:59</td><td>Order is PAID</td></tr>
+          <tr><td>R1.2</td><td>Order placed at 00:00</td><td>No payment by 30:00</td><td>Order is CANCELLED within one minute (the job runs every minute)</td></tr>
+          <tr><td>R1.3</td><td>Order CANCELLED at 30:00</td><td>Paid webhook at 31:00</td><td>Order stays CANCELLED, full refund is sent</td></tr>
+        </tbody>
+      </table></div>
+    </div>
+
+    <div class="rule">
+      <h3><span class="mono">R2</span>Stock is held only while an order is pending</h3>
+      <p>Reserved stock goes back on sale the moment the order is cancelled.</p>
+      <div class="table"><table>
+        <thead><tr><th>ID</th><th>Given</th><th>When</th><th>Then</th></tr></thead>
+        <tbody>
+          <tr><td>R2.1</td><td>1 item left, customer A has it in a PENDING order</td><td>Customer B opens the product</td><td>B sees "sold out"</td></tr>
+          <tr><td>R2.2</td><td>Same as R2.1</td><td>A's order expires</td><td>B can buy the item</td></tr>
+        </tbody>
+      </table></div>
+    </div>
+
+    <div class="rule">
+      <h3><span class="mono">R3</span>A payment is processed once</h3>
+      <p>Payment providers can send the same webhook more than once.</p>
+      <div class="table"><table>
+        <thead><tr><th>ID</th><th>Given</th><th>When</th><th>Then</th></tr></thead>
+        <tbody>
+          <tr><td>R3.1</td><td>Order PAID</td><td>The same paid webhook arrives again</td><td>No second confirmation email, no state change</td></tr>
+          <tr><td>R3.2</td><td>Order CANCELLED</td><td>The same late webhook arrives twice</td><td>Exactly one refund</td></tr>
+        </tbody>
+      </table></div>
+    </div>
+  </section>
+
+  <section id="questions">
+    <div class="head"><h2>Open questions</h2><div class="tags"><span class="tag pm">PM</span></div></div>
+    <ol class="questions">
+      <li><span class="mono">Q1</span><span>What does the customer see when their late payment is refunded: an email, a message on the order page, or both?</span><span class="tag pm who">PM</span></li>
+      <li><span class="mono">Q2</span><span>Does the timer pause while the bank's 3-D Secure check is open? A slow check could push a paying customer past 30 minutes.</span><span class="tag dev who">Dev</span></li>
+      <li><span class="mono">Q3</span><span>Should support be able to extend the 30 minutes for one order, for example on a phone order?</span><span class="tag pm who">PM</span></li>
+    </ol>
+  </section>
+
+  <footer>Example page: the feature, rules and team are sample content. Diagrams are rendered from the D2 and Mermaid sources named under each picture.</footer>
+</div>
