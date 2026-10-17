@@ -1,1 +1,0 @@
-digraph { rankdir=LR; node[shape=box,style="rounded,filled",fillcolor="#eef"]; Plan->Build->Test->Deploy; Test->Build[label="fail"]; }

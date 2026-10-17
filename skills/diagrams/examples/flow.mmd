@@ -1,8 +1,0 @@
-flowchart LR
-  U[User] --> CF[CloudFront]
-  CF --> API[API Gateway]
-  API --> L[Lambda]
-  L --> DDB[(DynamoDB)]
-  L --> Q[[SQS]]
-  Q --> W[Worker Lambda]
-  W --> S3[(S3)]

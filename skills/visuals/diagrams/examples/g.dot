@@ -1,0 +1,7 @@
+digraph {
+  node [shape=box, style="rounded,filled", fillcolor="#eef"];
+  { rank=same; Plan; Build; }
+  { rank=same; Test; Deploy; }
+  Plan -> Build -> Test -> Deploy;
+  Test -> Build [label="fail"];
+}

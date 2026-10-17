@@ -1,0 +1,70 @@
+/* Colours, type scale, spacing and hue helpers for the infographic templates. */
+:root {
+  --accent: #2a78d6;
+  --ink: #0b0b0b;
+  --ink2: #52514e;
+  --muted: #898781;
+  --grid: #e1e0d9;
+  --axis: #c3c2b7;
+  --context: #c9c8c1;
+  --surface: #ffffff;
+  --panel: #f4f4f1;
+  --good: #006300;
+  --bad: #b42318;
+  --muted-text: #6b6a65;
+  --status-good: #0ca30c;
+  --status-warning: #fab219;
+  --status-critical: #d03b3b;
+  --blue-bg: #dbe5ff;
+  --blue-tint: #2453d6;
+  --blue-mark: #2453d6;
+  --blue-ink: #0d2a7a;
+  --green-bg: #d2f0e2;
+  --green-tint: #0e8a5f;
+  --green-mark: #0e8a5f;
+  --green-ink: #06523a;
+  --orange-bg: #ffe0cc;
+  --orange-tint: #e0560b;
+  --orange-mark: #d4520a;
+  --orange-ink: #7f2f00;
+  --violet-bg: #e5ddfd;
+  --violet-tint: #5b34d4;
+  --violet-mark: #5b34d4;
+  --violet-ink: #33188c;
+  --amber-bg: #fbe9b0;
+  --amber-tint: #e0a100;
+  --amber-mark: #b07a00;
+  --amber-ink: #5c3f00;
+  --red-bg: #fcd9e1;
+  --red-tint: #d0244c;
+  --red-mark: #d0244c;
+  --red-ink: #850f2c;
+  --font: "Inter", system-ui, -apple-system, "Segoe UI", Helvetica, Arial, sans-serif;
+  --font-display: "Inter Display", "Inter", system-ui, -apple-system, "Segoe UI", Helvetica, Arial, sans-serif;
+  --text-caption: 13px;
+  --text-small: 14px;
+  --text-body: 17px;
+  --text-lead: 20px;
+  --text-sub: 24px;
+  --text-title: 36px;
+  --text-stat: 46px;
+  --text-display: 60px;
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 24px;
+  --space-6: 32px;
+  --space-7: 48px;
+  --space-8: 64px;
+  --radius-card: 14px;
+  --radius-pill: 999px;
+}
+
+/* Hue helpers: put .h-blue on an element and its children read --bg, --tint, --mark, --ink. */
+.h-blue { --bg: var(--blue-bg); --tint: var(--blue-tint); --mark: var(--blue-mark); --ink: var(--blue-ink); }
+.h-green { --bg: var(--green-bg); --tint: var(--green-tint); --mark: var(--green-mark); --ink: var(--green-ink); }
+.h-orange { --bg: var(--orange-bg); --tint: var(--orange-tint); --mark: var(--orange-mark); --ink: var(--orange-ink); }
+.h-violet { --bg: var(--violet-bg); --tint: var(--violet-tint); --mark: var(--violet-mark); --ink: var(--violet-ink); }
+.h-amber { --bg: var(--amber-bg); --tint: var(--amber-tint); --mark: var(--amber-mark); --ink: var(--amber-ink); }
+.h-red { --bg: var(--red-bg); --tint: var(--red-tint); --mark: var(--red-mark); --ink: var(--red-ink); }

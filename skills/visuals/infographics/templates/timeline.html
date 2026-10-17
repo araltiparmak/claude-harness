@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Timeline</title>
+<!-- Sample content: replace every number, label and the source line. -->
+<!--base-->
+<style>
+  .tl { position: relative; width: 100%; padding-top: 28px; }
+  .tl::before { content: ""; position: absolute; left: 0; right: 0; top: 36px; height: 3px; background: var(--axis); border-radius: 2px; }
+  .ms-row { display: grid; grid-template-columns: repeat(5, 1fr); gap: var(--space-4); position: relative; }
+  .ms { display: flex; flex-direction: column; gap: var(--space-2); }
+  .ms .dot { width: 20px; height: 20px; border-radius: 50%; background: var(--mark); border: 4px solid var(--surface); box-shadow: 0 0 0 2px var(--mark); margin: 0 0 var(--space-4) 2px; }
+  .ms.next .dot { background: var(--surface); }
+  .ms .when { font-size: var(--text-small); font-weight: 600; color: var(--mark); }
+  .ms h2 { font-size: var(--text-lead); font-weight: 600; line-height: 1.25; }
+  .ms p { font-size: var(--text-small); line-height: 1.45; color: var(--ink2); }
+  .ms.next h2 { color: var(--ink); }
+  .key { margin-top: var(--space-6); display: flex; gap: var(--space-5); font-size: var(--text-small); color: var(--ink2); }
+  .key span { display: inline-flex; align-items: center; gap: var(--space-2); }
+  .key i { width: 12px; height: 12px; border-radius: 50%; background: var(--blue-mark); box-shadow: 0 0 0 2px var(--blue-mark); border: 3px solid var(--surface); }
+  .key i.o { background: var(--surface); }
+</style>
+</head>
+<body>
+<div class="canvas">
+  <header>
+    <h1>Three of five migration milestones are done; cutover is next</h1>
+    <p class="lede">The plan is on schedule, with the last two milestones planned for Q4.</p>
+  </header>
+  <main>
+    <div style="width:100%">
+      <div class="tl">
+        <div class="ms-row h-blue">
+          <div class="ms"><div class="dot"></div><div class="when">Jan 2026</div><h2>Design approved</h2><p>Target architecture signed off by all teams.</p></div>
+          <div class="ms"><div class="dot"></div><div class="when">Mar 2026</div><h2>Queues moved</h2><p>All order events run on SQS.</p></div>
+          <div class="ms"><div class="dot"></div><div class="when">Jun 2026</div><h2>Services retired</h2><p>Two legacy services switched off.</p></div>
+          <div class="ms next"><div class="dot"></div><div class="when">Oct 2026</div><h2>Data cutover</h2><p>Orders table becomes the source of truth.</p></div>
+          <div class="ms next"><div class="dot"></div><div class="when">Dec 2026</div><h2>Decommission</h2><p>Old cluster removed, savings booked.</p></div>
+        </div>
+      </div>
+      <div class="key"><span><i></i>Done</span><span><i class="o"></i>Planned</span></div>
+    </div>
+  </main>
+  <footer>Sample data: replace with the real source</footer>
+</div>
+<!--checks-->
+</body>
+</html>

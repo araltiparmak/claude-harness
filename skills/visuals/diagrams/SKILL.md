@@ -1,0 +1,64 @@
+---
+name: diagrams
+description: Draws technical diagrams as SVG and PNG with Mermaid, D2 and Graphviz (architecture, sequence, ER, state, flow, gantt) for PR descriptions, docs and knowledge sharing. Use when the user asks for a diagram, flowchart, architecture or sequence diagram, a data model picture, or a diagram image to paste into a PR or doc. Slides and results visuals belong to the deck skill.
+allowed-tools:
+  - Read
+  - Write
+  - Edit
+  - Glob
+  - Bash(*/diagrams/scripts/render.sh *)
+  - Bash(command -v *)
+  - Bash(ls *)
+  - Bash(mkdir *)
+---
+
+# Diagrams
+
+Write a source file, render it with `scripts/render.sh`, look at the PNG, fix, repeat. The source file is the deliverable alongside the image: it stays editable and diffable.
+
+## Pick the tool
+
+| Job | Source | Tool | Read |
+|---|---|---|---|
+| Flow, sequence, ER, state, gantt | `.mmd` | Mermaid | `mermaid.md` |
+| Architecture with nested groups (accounts, VPCs, services) | `.d2` | D2 | `d2.md` |
+| AWS architecture with official service icons | `.d2` | D2 with `icon:` | `d2.md` |
+| Services passing messages in a chain | `.d2` and `.mmd` | D2 route + Mermaid sequence | `d2.md` (Message chains), `mermaid.md` |
+| Cycles, dependency graphs, anything dense | `.dot` | Graphviz | — |
+| Hover, click, filters, animation | `.html` | D3 or Mermaid from cdnjs | Interactive output below |
+
+Read only the file for the tool you picked. A pure topic hierarchy (mind map, study map) belongs to the `markmap` skill. **Sequence diagrams are always Mermaid. Architecture diagrams are always D2**, with icons when it is AWS. Default to Mermaid for a plain flow; reach for D2 when boxes must nest. A slide, KPI tile or results visual is a `deck` job, even when it is one slide.
+
+## Steps
+
+1. Check the tool exists (`command -v mmdc d2 dot`). Chrome is needed for `.mmd` and `.html`. Missing tools: ask before `brew install d2 graphviz`; Mermaid runs through `npx` with no install.
+2. Write the source to `diagrams-out/<name>.<ext>` in the project, or the scratchpad when the user wants a throwaway.
+3. Run `scripts/render.sh <source> [out-dir]`.
+4. Read the PNG. Done means: every label legible, nothing clipped or overlapping, the picture shows the mechanism the user asked for. Aim for an aspect ratio near 16:9 or square, never wider than 3:1. Fix and re-render until that holds.
+   `render.sh` also checks the PNG and prints `ok`, `WARN` or `FAIL`: blank image, aspect ratio over 3:1 (`MAX_WIDE=4` relaxes it for a gantt or a timeline), resolution under 1000px (warning only). A `FAIL` means the diagram is wrong: fix the diagram, not the check. The check cannot see a wrong mechanism or an unreadable label, so still read the PNG.
+5. Report the paths of the PNG and the source.
+
+## Not used
+
+- Python `diagrams` (mingrammer): tested, it works, but it needs a Python venv, its SVG links the icon files by absolute path so the SVG breaks when moved (D2 embeds them), Graphviz decides the layout and floats edge labels away from their edges, and the default PNG is only 1634px wide. Its one strength is hundreds of ready icons (GCP, Azure, Kubernetes, on-prem). If a diagram needs those, add the icons to `scripts/icons.tsv` or a sibling table instead of adopting the library.
+- `go-diagrams`: same idea in Go, and the same trade-offs.
+
+## Delivery
+
+- Pull requests: GitHub renders fenced `mermaid` blocks natively (its docs list four syntaxes: mermaid, geoJSON, topoJSON, ASCII STL), but not D2. So:
+  - D2 diagram (every AWS-icon architecture): attach the rendered SVG, which zooms without blur, plus a 2x PNG. `gh pr create|edit|comment --attach file.svg` uploads it (gh 2.99 or newer; it rewrites a `![alt](./file.svg)` reference in the body to the uploaded asset). Commit the `.d2` source, not only the image.
+  - Sequence, flow, state, ER: a fenced `mermaid` block in the description. The source stays reviewable in the PR, and GitHub draws it with its own Mermaid theme, not ours.
+  - Architecture that must render natively (no image): a Mermaid `flowchart` with `subgraph` groups. It has no service icons.
+- A site with light and dark themes: colours as CSS variables in the SVG. Mermaid accepts `var(--x)` directly; D2 does not (see `d2.md`).
+
+## Interactive output
+
+Ship one self-contained `.html` with libraries from `cdnjs.cloudflare.com` at pinned versions. Open it in the browser to check it. When the Artifact tool is available, `artifact-diagramming` holds the SVG mechanics.
+
+## Environment
+
+`render.sh` finds Chrome, Edge or Chromium itself; set `CHROME=/path` to override. On a locked-down machine with no installs, HTML plus Chrome is the path that always works: write Mermaid inside an HTML page that loads it from cdnjs, then render the `.html` to PNG.
+
+## Examples
+
+`examples/`: `aws-icons.d2`, `message-chain.d2`, `order-system.d2` (D2); `message-chain-sequence.mmd`, `pr-sequence.mmd`, `order-states.mmd`, `orders-er.mmd`, `roadmap.mmd`, `flow.mmd` (Mermaid); `g.dot` (Graphviz).
