@@ -2,7 +2,8 @@
 title: Web performance
 markmap:
   colorFreezeLevel: 2
-  initialExpandLevel: -1
+  initialExpandLevel: 2
+  spacingVertical: 14
 ---
 
 # Web performance

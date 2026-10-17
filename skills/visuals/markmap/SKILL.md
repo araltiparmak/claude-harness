@@ -31,18 +31,21 @@ Content with arrows, order or cycles is a `diagrams` job.
 - One `#` root. `##` gives the main branches, then nested `-` lists. Aim for 3 to 7 branches and at most 4 levels.
 - Keep each node to a few words. Put the detail in the list below it, not in a long sentence.
 - Inline Markdown works in a node: `**bold**`, `` `code` ``, `[links](url)`, and `$math$`.
-- Front matter sets the look. Always set `initialExpandLevel: -1`, or deep nodes stay collapsed in the PNG:
+- Front matter sets the look. Start from this:
 
 ```
 ---
 title: Name
 markmap:
   colorFreezeLevel: 2
-  initialExpandLevel: -1
+  initialExpandLevel: 2
+  spacingVertical: 14
 ---
 ```
 
 - `colorFreezeLevel: 2` gives each main branch one colour for its whole subtree.
+- `initialExpandLevel: 2` opens the HTML with the root and its main branches; the reader clicks a dot to open the rest. Use `-1` when the user wants everything open from the start. The PNG always shows every branch.
+- `spacingVertical: 14` keeps sibling nodes readable (markmap's default of 5 crowds them).
 
 ## Environment
 
