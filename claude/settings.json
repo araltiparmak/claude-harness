@@ -51,19 +51,30 @@
       "Bash(pnpm:*)",
       "Bash(yarn:*)",
       "Bash(bun:*)",
-      "Bash(tsc:*)"
+      "Bash(tsc:*)",
+      "Bash(npx tsc:*)",
+      "Bash(npx prettier:*)",
+      "Bash(npx eslint:*)",
+      "Bash(npx vitest:*)"
     ],
     "deny": [
       "Bash(terraform apply:*)",
       "Bash(terraform destroy:*)",
       "Read(./.env)",
+      "Read(./node_modules/**)",
+      "Read(./dist/**)",
+      "Read(./.next/**)",
+      "Read(./coverage/**)",
       "Read(~/.aws/credentials)"
     ],
     "defaultMode": "auto"
   },
+  "env": {
+    "CLAUDE_CODE_SUBAGENT_MODEL": "sonnet"
+  },
   "model": "opus",
   "fallbackModel": [
-    "claude-opus-4-8"
+    "claude-sonnet-5-5"
   ],
   "hooks": {
     "Notification": [
@@ -169,22 +180,28 @@
   },
   "statusLine": {
     "type": "command",
-    "command": "npx -y ccstatusline@latest",
+    "command": "ccstatusline",
     "padding": 0,
     "refreshInterval": 10
   },
   "enabledPlugins": {
-    "expo@claude-plugins-official": true,
     "frontend-design@claude-plugins-official": true
   },
-  "extraKnownMarketplaces": {},
-  "effortLevel": "high",
+  "extraKnownMarketplaces": {
+    "cloudflare": {
+      "source": {
+        "source": "github",
+        "repo": "cloudflare/skills"
+      }
+    }
+  },
+  "effortLevel": "medium",
   "modelSettings": {
-    "claude-opus-5": {
-      "effortLevel": "high"
-    },
     "claude-opus-5-5": {
-      "effortLevel": "high"
+      "effortLevel": "medium"
+    },
+    "claude-sonnet-5-5": {
+      "effortLevel": "medium"
     }
   },
   "tui": "fullscreen",

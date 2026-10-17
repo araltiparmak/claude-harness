@@ -1,30 +1,30 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Pulls claude-harness, private-skills and mattpocock/skills, then installs my
+# Pulls this repo (and an optional second skills repo), then installs the
 # Claude Code setup from them: skills, settings and global instructions. Run it
 # again whenever you want the latest, or after changing anything in the repos.
 #
 # - Skills are symlinked into ~/.claude/skills, so the pull is what updates them.
-# - ~/.claude/settings.json is built from claude/settings.json plus the private
-#   overlay in private-skills/claude/settings.json (scripts/build-settings.py).
+#   Every folder that holds a SKILL.md is a skill, at any depth (skills/<group>/<name>/);
+#   it is linked by its folder name, so names must be unique.
+# - An optional second repo (for example one with private skills) is read from
+#   PRIVATE_DIR (default ~/dev/private-skills). Set PRIVATE_URL to clone it when the
+#   folder is missing. With neither, only this repo is installed.
+# - ~/.claude/settings.json is built from claude/settings.json plus an optional overlay
+#   in <second repo>/claude/settings.json (scripts/build-settings.py).
 #   If the live file was changed outside the harness, it is left alone and the
 #   difference is printed.
 # - ~/.claude/CLAUDE.md is a symlink to claude/CLAUDE.md.
-# - Also runs `npx skills update` for the skills.sh skills in HARNESS.md.
-# - Missing repos are cloned to ~/dev. private-skills is private: on a machine
-#   without access its clone fails, and the rest still links.
-# - Matt's skills: the promoted buckets (engineering/, productivity/), the same
-#   set his plugin ships. Set MATT_BUCKETS to change it, e.g.
-#   MATT_BUCKETS="engineering productivity in-progress".
-# - My skills (claude-harness, private-skills) win a name clash with his.
+# - Also runs `npx skills update` for the skills.sh skills in HARNESS.md
+#   (Matt Pocock's skills come from there, not from a clone).
+# - A second repo that cannot be cloned is skipped, and the rest still links.
 # - Real folders in ~/.claude/skills are never touched, only reported.
 # - Links into these repos whose skill no longer exists are removed.
 
 MINE="$(cd "$(dirname "$0")/.." && pwd)"
 PRIVATE="${PRIVATE_DIR:-$HOME/dev/private-skills}"
-MATT="${MATT_DIR:-$HOME/dev/mattpocock-skills}"
-MATT_BUCKETS="${MATT_BUCKETS:-engineering productivity}"
+PRIVATE_URL="${PRIVATE_URL:-}"
 DEST="$HOME/.claude/skills"
 
 sync_repo() {
@@ -32,9 +32,11 @@ sync_repo() {
   if [ -d "$dir/.git" ]; then
     echo "== pull $dir"
     git -C "$dir" pull --ff-only --quiet || echo "warn: could not fast-forward $dir; linking what is there" >&2
-  else
+  elif [ -n "$url" ]; then
     echo "== clone $url into $dir"
     git clone --quiet "$url" "$dir" || echo "warn: could not clone $url; skipping it" >&2
+  else
+    echo "== skip $dir: not a git checkout and no URL to clone"
   fi
 }
 
@@ -49,9 +51,8 @@ link() {
   ln -sfn "$src" "$target"
 }
 
-sync_repo "$MATT" https://github.com/mattpocock/skills.git
-sync_repo "$PRIVATE" https://github.com/araltiparmak/private-skills.git
-sync_repo "$MINE" https://github.com/araltiparmak/claude-harness.git
+sync_repo "$PRIVATE" "$PRIVATE_URL"
+sync_repo "$MINE" ""
 
 # Skills installed with skills.sh (see HARNESS.md) do not update themselves.
 if command -v npx >/dev/null; then
@@ -79,49 +80,38 @@ echo "== link skills"
 mine_names=" "
 for repo in "$MINE" "$PRIVATE"; do
   [ -d "$repo/skills" ] || continue
-  for src in "$repo"/skills/*/; do
-    src="${src%/}"
-    [ -f "$src/SKILL.md" ] || continue
+  # A folder with SKILL.md is a skill, at any depth; a folder without one is a group.
+  # Sorted, so a skill comes before anything nested inside it, and nested SKILL.md files
+  # (examples, fixtures) are not linked as skills of their own.
+  linked_dirs=()
+  while IFS= read -r file; do
+    src="$(dirname "$file")"
+    inside=0
+    for parent in ${linked_dirs[@]+"${linked_dirs[@]}"}; do
+      case "$src/" in "$parent"/*) inside=1 ;; esac
+    done
+    [ "$inside" = 0 ] || continue
     name="$(basename "$src")"
     case "$mine_names" in
-      *" $name "*) echo "skip $repo/$name: another of my repos already has $name" >&2; continue ;;
+      *" $name "*) echo "skip $src: another skills repo already has $name" >&2; continue ;;
     esac
     mine_names+="$name "
+    linked_dirs+=("$src")
     link "$src"
-    echo "mine  $name ($(basename "$repo"))"
-  done
+    echo "linked  $name ($(basename "$repo"))"
+  done < <(find "$repo/skills" -name SKILL.md | sort)
 done
 
-for bucket in $MATT_BUCKETS; do
-  for src in "$MATT/skills/$bucket"/*/; do
-    src="${src%/}"
-    [ -f "$src/SKILL.md" ] || continue
-    name="$(basename "$src")"
-    case "$mine_names" in
-      *" $name "*) echo "skip matt/$name: you have your own $name" >&2; continue ;;
-    esac
-    link "$src"
-    echo "matt  $name"
-  done
-done
-
-# Remove links into these repos that are dangling, or that point at a Matt
-# bucket no longer selected.
+# Remove links into these repos that are dangling.
 for entry in "$DEST"/*; do
   [ -L "$entry" ] || continue
   dest="$(readlink "$entry")"
   case "$dest" in
-    "$MINE"/skills/*|"$PRIVATE"/skills/*|"$MATT"/skills/*) ;;
+    "$MINE"/skills/*|"$PRIVATE"/skills/*) ;;
     *) continue ;;
   esac
   keep=1
   [ -e "$entry" ] || keep=0
-  case "$dest" in
-    "$MATT"/skills/*)
-      bucket="${dest#"$MATT"/skills/}"; bucket="${bucket%%/*}"
-      case " $MATT_BUCKETS " in *" $bucket "*) ;; *) keep=0 ;; esac
-      ;;
-  esac
   if [ "$keep" = 0 ]; then
     rm "$entry"
     echo "removed $(basename "$entry")"
