@@ -16,7 +16,7 @@ allowed-tools:
 
 A template is an HTML file on a 1280x720 canvas. Copy it, replace the content, render with `scripts/render.sh`, read the checks and the PNG, fix, repeat. The HTML source is the deliverable next to the images: it stays editable and diffable.
 
-Colours, type and spacing are CSS variables in `templates/tokens.css`, with `.h-blue`, `.h-green` and so on as colour helpers. Icons are the Lucide files in `icons/lucide/`. Add a colour or an icon when a visual needs one.
+Colours, type and spacing are CSS variables in `templates/tokens.css`, with `.h-blue`, `.h-green` and so on as colour helpers. Add a colour when a visual needs one.
 
 ## Pick the template
 
@@ -44,7 +44,6 @@ Series over time, bars, waterfall, KPI scorecards: `deck` has those. Boxes and a
 - Every number is checked: a percentage, a total or a difference you show must follow from the numbers beside it. Recompute before you render.
 - A visual encoding must be honest. Funnel bar width is value divided by the first stage, never smoothed. Do not shorten an axis or round up to look better.
 - Text is short: a label is one to four words, a detail line is one sentence. Under 120 words on the canvas.
-- Icons: write `<!--icon:name-->` and the build inlines it. Names are the files in `icons/lucide/` (licence in `icons/lucide/LICENSE`). No match: no icon.
 - Results visuals carry a source line with the period.
 
 ## What the render checks
@@ -67,7 +66,7 @@ For a web-style result run the `kill-ai-slop` skill as the last pass.
 
 - `.pdf`: vector, one 1280x720 page. This is the sharp output for slides and print.
 - `.png`: 1280x720, a review copy.
-- `.html`: standalone, with tokens and icons inlined. It opens in any browser.
+- `.html`: standalone, with the styles inlined. It opens in any browser.
 
 ## Building a new template
 

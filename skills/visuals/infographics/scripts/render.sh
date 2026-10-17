@@ -25,7 +25,7 @@ chrome="$(find_chrome)"
 tmp="$(mktemp -d)"
 trap 'rm -rf "$tmp"' EXIT
 python3 -I "$here/build.py" "$src" "$tmp/$base.html"
-cp "$tmp/$base.html" "$out/$base.html"   # the expanded file opens on its own, with tokens and icons inlined
+cp "$tmp/$base.html" "$out/$base.html"   # the expanded file opens on its own, with the styles inlined
 
 # 1. Checks run inside the page; read their JSON from the dumped DOM.
 dom="$("$chrome" --headless --disable-gpu --virtual-time-budget=5000 --dump-dom "file://$tmp/$base.html" 2>/dev/null)"

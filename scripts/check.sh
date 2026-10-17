@@ -88,7 +88,7 @@ for h in hits[:10]:
 sys.exit(1 if hits else 0)
 PY
 
-# Every infographic template expands (markers and icon names resolve).
+# Every infographic template expands (its markers resolve).
 while IFS= read -r tpl; do
   builder="$(dirname "$(dirname "$tpl")")/scripts/build.py"
   python3 -I "$builder" "$tpl" "$(mktemp)" || problem "$tpl: does not build"

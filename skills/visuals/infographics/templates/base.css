@@ -25,6 +25,5 @@ strong { font-weight: 600; }
 
 /* A card takes its colours from a hue class (.h-blue ...). */
 .card { background: var(--bg); color: var(--ink); border-radius: var(--radius-card); padding: var(--space-5); }
-.ico { width: 32px; height: 32px; flex: none; color: var(--mark); display: block; }
 .num { font-variant-numeric: tabular-nums; }
 .unit { font-size: .5em; font-weight: 600; margin-left: 4px; letter-spacing: 0; }
