@@ -1,0 +1,23 @@
+%%{init: {'theme':'neutral','themeVariables':{'fontSize':'16px'}}}%%
+sequenceDiagram
+  autonumber
+  participant C as Customer
+  participant W as Web shop
+  participant A as Orders API
+  participant P as Payment provider
+  participant J as Expiry job
+  C->>W: Place order
+  W->>A: POST /orders
+  A-->>W: 201 order PENDING, stock reserved
+  W->>P: Redirect to payment
+  alt Paid within 30 min
+    P->>A: Webhook: paid
+    A-->>C: Order PAID, confirmation email
+  else No payment after 30 min
+    J->>A: Expire PENDING orders
+    A-->>C: Order CANCELLED, stock released
+    opt Payment arrives late
+      P->>A: Webhook: paid
+      A->>P: Refund in full
+    end
+  end

@@ -1,15 +1,15 @@
 ---
 name: vercel
-description: Deploys a Vite/React project to Vercel, or repairs its deploy path. Use when the user says "deploy", "make this live", or "ship it"; when a deployed SPA 404s on refresh; when an env var works locally but not in production; or when a build that is green locally fails on Vercel. Also the follow-up to a `react-project` scaffold.
+description: Deploys a Vite/React project to Vercel, or repairs its deploy path. Use when the user asks to deploy or ship a project that has no cloudflare.config.ts; when a deployed SPA 404s on refresh; when an env var works locally but not in production; or when a build that is green locally fails on Vercel.
 ---
 
-Takes a working Vite + React project (typically one built by the `react-project` skill) and gives it a deployment path: config files, a pinned build environment, a linked Vercel project, a preview, then production.
+Takes a working Vite + React project (typically one built by the `react-app` skill) and gives it a deployment path: config files, a pinned build environment, a linked Vercel project, a preview, then production.
 
 **The mental model that explains every step below:** you are not uploading `dist/`. You upload *source*, and Vercel runs the build on its own machine. That is why the Node version has to be pinned (step 2), why `dist` belongs in `.vercelignore` (step 4), and why an env var in `.env.local` is invisible in production (step 5). A local build being green proves nothing about Vercel's build until those three match.
 
-**Don't read files to "check" the project.** Step 1 tells you the handful of things worth looking at. Step 8 is the verification — trust it over inspection.
+Look only at what step 1 lists; step 8 is the verification.
 
-If `vercel` is not on `PATH`, do not install it globally; prefix every command below with `npx` (`npx vercel …`). If `vercel whoami` says you are not logged in, that login is interactive — ask the user to run `! vercel login` themselves and wait.
+If `vercel` is not on `PATH`, prefix every command below with `npx` (`npx vercel …`) rather than installing it globally. If `vercel whoami` says you are not logged in, that login is interactive — ask the user to run `! vercel login` themselves and wait.
 
 ## 1. Check the ground
 
@@ -22,7 +22,7 @@ node -p "JSON.stringify(require('./package.json').scripts,null,1)"
 
 Decide from the output, in this order:
 
-- **The repo already documents its own deploy command** (a `deploy:*` script, a `scripts/deploy*.sh`, a line in `CLAUDE.md`) — run that, report the result, and stop. This skill builds a deploy path where there is none; it does not replace one that exists.
+- **The repo already documents its own deploy command** (a `ship` or `deploy:*` script, a `scripts/deploy*.sh`, a line in `CLAUDE.md`) — run that, report the result, and stop. This skill builds a deploy path where there is none; it does not replace one that exists. A `ship` script that stops with "no deploy target" (exit code 3) means there is none yet: continue with this skill, and `pnpm ship` will find `vercel.json` afterwards.
 - **A dirty tree** — commit first. A deploy is a checkpoint: there must be a clean commit to roll back to and to match against what went live.
 - **`vercel.ts` exists** — put the configuration there instead of `vercel.json`. Vercel permits exactly one config file; shipping both is a build error. `vercel.ts` is only worth it when config must be *computed* at build time (env-dependent routes, generated headers); for everything else `vercel.json` is the default.
 - **`vercel.json` / `.vercelignore` already exist** — read them and merge, don't overwrite. Someone put those rules there for a reason.
@@ -74,17 +74,14 @@ The classic first-deploy failure is a green local build and a red Vercel build, 
 }
 ```
 
-What each line is doing, so you can drop the ones that don't apply:
+- **`framework` / `outputDirectory`** make CLI deploys deterministic instead of dependent on what the dashboard inferred.
+- **`rewrites`** is the one line an SPA cannot ship without: without it every refresh and shared deep link 404s. The destination is `/index.html`, not `/` (`/` is only correct with `cleanUrls: true`). Vercel checks the filesystem before rewrites, so real files under `/assets/` still serve.
+- **Asset caching**: Vite content-hashes everything in `dist/assets/`, so a one-year `immutable` is safe. Leave `index.html` at Vercel's default so a new deploy shows up immediately.
+- **Security headers**: drop `X-Frame-Options` if the app is meant to be embedded in an iframe.
 
-- **`$schema`** — gives the editor autocomplete and catches typo'd keys, which otherwise fail silently at deploy time.
-- **`framework` / `outputDirectory`** — auto-detection usually gets these right; stating them makes CLI deploys deterministic instead of dependent on what the dashboard inferred.
-- **`rewrites`** — the one line an SPA cannot ship without. Client-side routing works fine while navigating, then every page refresh and every shared deep link 404s, because those paths don't exist as files. The destination is `/index.html`, not `/` — `/` is only correct when `cleanUrls: true`. Vercel checks the filesystem *before* rewrites, so real files under `/assets/` still serve normally.
-- **Asset caching** — Vite content-hashes everything it emits into `dist/assets/`, so the filename changes whenever the content does and a one-year `immutable` is safe. Never put a long `max-age` on `index.html`; leave it at Vercel's default so a new deploy is visible immediately instead of after a cache expiry.
-- **Security headers** — cheap and always applicable. Drop `X-Frame-Options` if the app is meant to be embedded in an iframe.
+Tradeoff to state to the user: the catch-all rewrite returns unknown paths as `index.html` with HTTP **200**, not 404. If real 404s matter (crawlers), narrow `source` to the route prefixes the app owns.
 
-One tradeoff to state out loud rather than discover later: the catch-all rewrite makes unknown paths return `index.html` with HTTP **200**, not 404. That is correct for an app and wrong for a crawler. If real 404 statuses matter, narrow `source` to the route prefixes the app actually owns.
-
-**Done when:** the file is written and `pnpm build` still passes (it is untouched by this, but a syntax-broken JSON is worth catching now).
+**Done when:** the file is written and parses: `node -e "JSON.parse(require('fs').readFileSync('vercel.json','utf8'))"`.
 
 ## 4. Write `.vercelignore`
 
@@ -191,13 +188,15 @@ Reading failures:
 
 ## 9. Make the next deploy one command
 
+If the project has a `ship` script, it now finds `vercel.json` and deploys to production: that is the command. Otherwise add one:
+
 ```json
 "scripts": { "deploy:prod": "vercel deploy --prod" }
 ```
 
 Name it **`deploy:prod`**, not `deploy` — `pnpm deploy` is a built-in pnpm command and will run that instead of the script.
 
-Then record it where the next session will look, and commit:
+Then record the command where the next session will look, and commit:
 
 ```bash
 # add a Deploy section to CLAUDE.md: the command, the live URL, the project name

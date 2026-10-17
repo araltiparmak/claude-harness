@@ -1,0 +1,36 @@
+# Message chain: services hand a message along, each hop through a queue or topic.
+# Number the edges in hop order, so the reader follows the chain without arrows crossing.
+direction: right
+
+classes: {
+  svc: {
+    style: { fill: "#dbeafe"; stroke: "#2563eb"; font-size: 24; border-radius: 8 }
+  }
+  q: {
+    shape: image
+    width: 64
+    height: 64
+    style.font-size: 20
+  }
+  dead: {
+    style: { fill: "#fee2e2"; stroke: "#dc2626"; font-size: 20; border-radius: 8; stroke-dash: 4 }
+  }
+  hop: {
+    style: { font-size: 20; stroke-width: 2 }
+  }
+}
+
+orders: Orders { class: svc }
+q1: orders-events { class: q; icon: ICONS/aws/sqs.svg }
+billing: Billing { class: svc }
+t1: billing-events { class: q; icon: ICONS/aws/sns.svg }
+shipping: Shipping { class: svc }
+notify: Notifications { class: svc }
+dlq: billing-dlq { class: dead }
+
+orders -> q1: "1 order.created" { class: hop }
+q1 -> billing: "2 consume" { class: hop }
+billing -> t1: "3 invoice.paid" { class: hop }
+t1 -> shipping: "4 fan-out" { class: hop }
+t1 -> notify: "4 fan-out" { class: hop }
+q1 -> dlq: "after 3 failures" { class: hop; style.stroke-dash: 4 }

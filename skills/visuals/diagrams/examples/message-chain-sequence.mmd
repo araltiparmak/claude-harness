@@ -1,0 +1,12 @@
+sequenceDiagram
+  autonumber
+  participant O as Orders
+  participant Q as orders-events (SQS)
+  participant B as Billing
+  participant T as billing-events (SNS)
+  participant S as Shipping
+  O->>Q: order.created
+  Q->>B: deliver
+  B->>T: invoice.paid
+  T-->>S: deliver
+  Note over B: failure: 3 tries, then DLQ

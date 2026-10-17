@@ -1,0 +1,50 @@
+# Order system, prod. Layout: ELK. Classes keep one color per component type.
+direction: right
+
+classes: {
+  group: {
+    style: { fill: "#f1f5f9"; stroke: "#cbd5e1"; font-size: 28; border-radius: 10 }
+  }
+  compute: {
+    style: { fill: "#dbeafe"; stroke: "#2563eb"; font-size: 24; border-radius: 8 }
+  }
+  data: {
+    shape: cylinder
+    style: { fill: "#dcfce7"; stroke: "#16a34a"; font-size: 24 }
+  }
+  msg: {
+    shape: queue
+    style: { fill: "#fef3c7"; stroke: "#d97706"; font-size: 24 }
+  }
+  edge: {
+    style: { font-size: 20; stroke-width: 2 }
+  }
+}
+
+user: Customer { shape: person; style.font-size: 24 }
+
+edge: Edge { class: group
+  direction: down
+  waf: WAF { class: compute }
+  cdn: CloudFront { class: compute }
+  waf -> cdn
+}
+
+aws: AWS account (prod) { class: group
+  direction: down
+  api: API Gateway { class: compute }
+  orders: Orders Lambda { class: compute }
+  db: Orders table { class: data }
+  queue: Order events { class: msg }
+  worker: Fulfilment Lambda { class: compute }
+  files: Invoices bucket { class: data }
+
+  api -> orders: invoke { class: edge }
+  orders -> db: write { class: edge }
+  orders -> queue: publish { class: edge }
+  queue -> worker: consume { class: edge }
+  worker -> files: PDF invoice { class: edge }
+}
+
+user -> edge.waf: HTTPS { class: edge }
+edge.cdn -> aws.api { class: edge }

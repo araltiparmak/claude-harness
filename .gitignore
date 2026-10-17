@@ -2,3 +2,5 @@
 .idea/
 .claude/settings.local.json
 __pycache__/
+skills/visuals/diagrams/icons/
+todo.md
