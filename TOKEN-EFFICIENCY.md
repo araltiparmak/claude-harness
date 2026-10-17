@@ -32,8 +32,8 @@ Connectors and plugins synced from the claude.ai account load in every session a
 
 Each skill puts its `description` into every session.
 
-- Keep descriptions short; long trigger lists cost tokens on every turn.
-- Add `disable-model-invocation: true` to skills started only by hand; their description then stays out of context.
+- Keep one trigger phrase per distinct case and cut the synonyms. A description too short to fire costs more than its tokens.
+- Add `disable-model-invocation: true` only to skills you always type by name: their description stays out of context, and Claude never starts them on its own.
 - List only the skills you use in `external-skills.yaml`, and delete the line of a skill that never fires.
 
 ## Instructions
@@ -45,7 +45,7 @@ Each skill puts its `description` into every session.
 ## Settings
 
 - `effortLevel: medium` and Opus by default; raise effort for a hard task, switch to Sonnet with `/model` for routine work.
-- `CLAUDE_CODE_SUBAGENT_MODEL=sonnet`: subagents need good judgment (code review starts some), so not Haiku. Give a custom search agent `model: haiku` in its own definition for cheap sweeps.
+- Subagents run on the session's model: code review and other judgment work hands off to them. Give a custom search agent `model: haiku` in its own definition for cheap sweeps.
 - Keep `autoCompactEnabled` on.
 - Reads of `node_modules`, `dist`, `.next` and `coverage` are denied. Grep and Glob already skip ignored files; the rule covers repos without `.gitignore`, paths from stack traces, and minified bundles. It does not stop Bash, so keep commands narrow. To read library source on purpose, allow that one path for the session.
 - The status line runs the globally installed `ccstatusline` (`npm i -g ccstatusline`), not `npx -y ...@latest`, so a refresh makes no network lookup.
@@ -54,7 +54,6 @@ Each skill puts its `description` into every session.
 
 - `/clear` between unrelated tasks; a long thread is re-sent on every turn.
 - `/compact` with a focus note at natural breakpoints, before the context is full.
-- Ask for a plan or a file list first, then read only those files.
 - Use a subagent for broad searches and noisy output; only its summary returns.
 - Give exact file paths and line ranges when you know them.
 

@@ -7,4 +7,3 @@
 - When interacting with Cloudflare, use the cf CLI unless the project has a Wrangler configuration file.
 
 - After a change, run the project's typecheck and tests, and read the output before saying it works. For a large or unclear task, propose a plan and wait for my go-ahead before editing.
-- Keep command output small: pipe long output through `head`, `tail` or `grep`, and read files by line range when I give one.

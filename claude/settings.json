@@ -16,9 +16,6 @@
     ],
     "defaultMode": "auto"
   },
-  "env": {
-    "CLAUDE_CODE_SUBAGENT_MODEL": "sonnet"
-  },
   "model": "opus",
   "fallbackModel": [
     "claude-sonnet-5-5"
