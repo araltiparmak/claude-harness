@@ -22,7 +22,7 @@ node -p "JSON.stringify(require('./package.json').scripts,null,1)"
 
 Decide from the output, in this order:
 
-- **The repo already documents its own deploy command** (a `deploy:*` script, a `scripts/deploy*.sh`, a line in `CLAUDE.md`) — run that, report the result, and stop. This skill builds a deploy path where there is none; it does not replace one that exists.
+- **The repo already documents its own deploy command** (a `ship` or `deploy:*` script, a `scripts/deploy*.sh`, a line in `../../../../CLAUDE.md`) — run that, report the result, and stop. This skill builds a deploy path where there is none; it does not replace one that exists. A `ship` script that stops with "no deploy target" (exit code 3) means there is none yet: continue with this skill, and `pnpm ship` will find `vercel.json` afterwards.
 - **A dirty tree** — commit first. A deploy is a checkpoint: there must be a clean commit to roll back to and to match against what went live.
 - **`vercel.ts` exists** — put the configuration there instead of `vercel.json`. Vercel permits exactly one config file; shipping both is a build error. `vercel.ts` is only worth it when config must be *computed* at build time (env-dependent routes, generated headers); for everything else `vercel.json` is the default.
 - **`vercel.json` / `.vercelignore` already exist** — read them and merge, don't overwrite. Someone put those rules there for a reason.
@@ -141,7 +141,7 @@ vercel deploy --prod -b VITE_LANG=de
 vercel link
 ```
 
-First time only. It writes `.vercel/project.json` (org id + project id) and adds `.vercel` to `.gitignore` — leave it out of the repo; it is machine state, not source. Non-interactive variants: `vercel link --yes` accepts the detected defaults, `--project <name>` targets an existing project instead of creating one.
+First time only. It writes `.vercel/project.json` (org id + project id) and adds `.vercel` to `../../../../.gitignore` — leave it out of the repo; it is machine state, not source. Non-interactive variants: `vercel link --yes` accepts the detected defaults, `--project <name>` targets an existing project instead of creating one.
 
 Skip `vercel dev`. For a static SPA it is slower than and identical to `pnpm dev`; it only starts to matter once there are Vercel Functions under `api/`.
 
@@ -204,6 +204,6 @@ Then record it where the next session will look, and commit:
 git add -A && git commit -m "Add Vercel config and deploy"
 ```
 
-**Done when:** `git status --porcelain` is empty and `CLAUDE.md` names the deploy command and the live URL.
+**Done when:** `git status --porcelain` is empty and `../../../../CLAUDE.md` names the deploy command and the live URL.
 
 A custom domain, if wanted, goes in the dashboard (Project → Domains) or `vercel domains add <domain>`. DNS propagation is the slow part, not the deploy.
