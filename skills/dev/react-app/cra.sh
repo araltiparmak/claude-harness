@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # cra — React + Vite + TS + Tailwind v4 scaffolder (pnpm). Step 3 of the
-# react-project skill; alias it in your shell to run it from anywhere.
+# react-app skill; alias it in your shell to run it from anywhere.
 set -euo pipefail
 
 NODE_MAJOR=24

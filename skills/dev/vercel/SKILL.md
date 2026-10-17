@@ -3,7 +3,7 @@ name: vercel
 description: Deploys a Vite/React project to Vercel, or repairs its deploy path. Use when the user asks to deploy or ship a project that has no cloudflare.config.ts; when a deployed SPA 404s on refresh; when an env var works locally but not in production; or when a build that is green locally fails on Vercel.
 ---
 
-Takes a working Vite + React project (typically one built by the `react-project` skill) and gives it a deployment path: config files, a pinned build environment, a linked Vercel project, a preview, then production.
+Takes a working Vite + React project (typically one built by the `react-app` skill) and gives it a deployment path: config files, a pinned build environment, a linked Vercel project, a preview, then production.
 
 **The mental model that explains every step below:** you are not uploading `dist/`. You upload *source*, and Vercel runs the build on its own machine. That is why the Node version has to be pinned (step 2), why `dist` belongs in `.vercelignore` (step 4), and why an env var in `.env.local` is invisible in production (step 5). A local build being green proves nothing about Vercel's build until those three match.
 

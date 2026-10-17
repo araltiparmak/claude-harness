@@ -1,5 +1,5 @@
 ---
-name: mobile-app-stack
+name: mobile-app
 description: Recommends the default stack for a new Expo + React Native + TypeScript app (package manager, styling, animation, navigation, state, storage, dev workflow), one decision at a time. Use when the user starts a new mobile app, or asks which package manager, UI library, or dev workflow to use with Expo.
 ---
 

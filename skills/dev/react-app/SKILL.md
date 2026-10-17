@@ -1,5 +1,5 @@
 ---
-name: react-project
+name: react-app
 description: Scaffold a new React + Vite + TS + Tailwind prototype via `cra` (in `CRA_DIR`, default ~/dev), then build the user's directives into it at a requested effort level.
 disable-model-invocation: true
 ---
@@ -29,7 +29,7 @@ The user may pass an effort level 1–5 in the invocation (e.g. a trailing numbe
 ## 3. Scaffold with `cra`
 
 ```bash
-~/.claude/skills/react-project/cra.sh <name>
+~/.claude/skills/react-app/cra.sh <name>
 ```
 
 This creates `$CRA_DIR/<name>` (default `~/dev`) with a free port pinned in `vite.config.ts`, the `@/` alias, a `Proof.tsx` placeholder, the scripts `typecheck`, `check`, `clean` and `ship`, and an initial commit. If `cra.sh` fails (wrong Node version, name collision, bad name), relay its error plainly and stop.
@@ -51,7 +51,7 @@ grep -q 'justify-content' dist/assets/*.css && echo "PROOF OK"
 ```bash
 cd <project path>
 PORT=$(grep -oE 'port: [0-9]+' vite.config.ts | grep -oE '[0-9]+')
-sed "s/<PORT>/$PORT/g" ~/.claude/skills/react-project/project-CLAUDE.md > CLAUDE.md
+sed "s/<PORT>/$PORT/g" ~/.claude/skills/react-app/project-CLAUDE.md > CLAUDE.md
 git add -A
 git commit -m "Add project CLAUDE.md"
 ```

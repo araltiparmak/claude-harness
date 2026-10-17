@@ -56,8 +56,8 @@ Skills sit in group folders; `update.sh` links each one into `~/.claude/skills/`
 | Skill | What it does |
 |---|---|
 | [cloudflare](skills/dev/cloudflare/SKILL.md) | Deploys a project to Cloudflare Workers with the cf CLI (no Wrangler file) |
-| [mobile-app-stack](skills/dev/mobile-app-stack/SKILL.md) | Recommends the default stack for a new Expo + React Native + TypeScript app, one decision at a time |
-| [react-project](skills/dev/react-project/SKILL.md) | Scaffolds a React + Vite + TS + Tailwind prototype via `cra` (project scripts `check` and `ship` included) and builds v1 (user-invoked: `/react-project`) |
+| [mobile-app](skills/dev/mobile-app/SKILL.md) | Recommends the default stack for a new Expo + React Native + TypeScript app, one decision at a time |
+| [react-app](skills/dev/react-app/SKILL.md) | Scaffolds a React + Vite + TS + Tailwind prototype via `cra` (project scripts `check` and `ship` included) and builds v1 (user-invoked: `/react-app`) |
 | [vercel](skills/dev/vercel/SKILL.md) | Deploys a Vite/React project to Vercel, or repairs its deploy path |
 
 ### Todo
@@ -69,7 +69,7 @@ Skills sit in group folders; `update.sh` links each one into `~/.claude/skills/`
 A typical run, from idea to live URL:
 
 ```text
-/react-project habit-tracker 3    scaffold with cra, verify Tailwind, commit, build v1 at effort 3
+/react-app habit-tracker 3        scaffold with cra, verify Tailwind, commit, build v1 at effort 3
 /vercel                           pin Node and pnpm, write vercel.json, preview, then production
 ```
 
@@ -81,7 +81,7 @@ Install any of the skills above with [skills.sh](https://skills.sh):
 npx skills@latest add araltiparmak/claude-harness
 ```
 
-`react-project` ships its own scaffolder, [`cra.sh`](skills/dev/react-project/cra.sh). It needs Node 24, and creates projects in the folder named by `CRA_DIR` (default `~/dev`).
+`react-app` ships its own scaffolder, [`cra.sh`](skills/dev/react-app/cra.sh). It needs Node 24, and creates projects in the folder named by `CRA_DIR` (default `~/dev`).
 
 ## Install the whole setup
 
