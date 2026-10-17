@@ -49,19 +49,7 @@ Series over time, bars, waterfall, KPI scorecards: `deck` has those. Boxes and a
 
 ## What the render checks
 
-`render.sh` expands the template, loads it in headless Chrome and runs `scripts/check.js` inside the page, then checks the PNG.
-
-| Check | Fails when |
-|---|---|
-| Canvas | Content is taller or wider than 1280x720, or an element sits outside it |
-| Clipping | An element hides part of its own content |
-| Text size | Text is under 13px |
-| Contrast | Text fails 4.5:1 (3:1 for text of 24px or more) against its background |
-| Overlap | Two pieces of text cover each other |
-| Placeholders | `TODO`, `lorem`, `TBD`, `XXX`, `{{ }}` or "sample data" is left in |
-| Blank PNG | The PNG is almost empty (bytes per pixel under 0.008) |
-| Font (WARN) | Inter is not installed, so text falls back to the system font |
-| Density (WARN) | More than 120 words |
+Content inside the 1280x720 canvas, no clipped or overlapping text, text at least 13px, contrast 4.5:1 (3:1 at 24px and up), no leftover placeholders (`TODO`, `lorem`, `TBD`, `XXX`, `{{ }}`, "sample data"), a non-blank PNG. It warns when Inter is missing or the canvas holds more than 120 words.
 
 ## Review the PNG yourself
 
@@ -78,9 +66,8 @@ For a web-style result run the `kill-ai-slop` skill as the last pass.
 ## Outputs
 
 - `.pdf`: vector, one 1280x720 page. This is the sharp output for slides and print.
-- `.png`: 1280x720, a review copy. Do not add `--force-device-scale-factor`: with it headless Chrome saved a blank image in testing.
+- `.png`: 1280x720, a review copy.
 - `.html`: standalone, with tokens and icons inlined. It opens in any browser.
-- To use one in a presentation, insert the PNG or the PDF page in the presentation tool. `deck` builds its own slide types.
 
 ## Building a new template
 

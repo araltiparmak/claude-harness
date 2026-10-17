@@ -16,9 +16,7 @@ allowed-tools:
 
 A mind map is a tree. Write the tree as a Markdown outline, render it with `scripts/render.sh`, look at the PNG, fix, repeat. The `.md` source is the deliverable alongside the image: it stays editable and diffable.
 
-## When to use it
-
-Use markmap when the content is a hierarchy: topics and subtopics, a curriculum, a summary of a long document. Do not use it when the content has arrows, order or cycles. That is a `diagrams` job (Mermaid, D2, Graphviz).
+Content with arrows, order or cycles is a `diagrams` job.
 
 ## Steps
 
@@ -49,8 +47,7 @@ markmap:
 ## Environment
 
 - `render.sh` finds Chrome, Edge or Chromium itself. Set `CHROME=/path` to override. Set `MARKMAP_SIZE=2400x1500` for a big map (default `1600x1000`).
-- The PNG is taken from a copy with `duration: 0`: markmap animates the first draw for 500 ms, and headless Chrome often saved the frame before the map appeared (blank PNG). The HTML keeps its own settings and still animates. Do not set `duration` in the outline expecting it to reach the PNG, and do not add `--force-device-scale-factor` to the screenshot: with it Chrome saves a blank image. The PNG is therefore 1x. For a sharper image, raise `MARKMAP_SIZE`.
-- The PNG is forced to the light theme. The HTML follows the viewer's system theme.
+- The PNG is 1x, light theme, without animation; raise `MARKMAP_SIZE` for a sharper one. The HTML keeps its animation and follows the viewer's system theme.
 - To hand over only the interactive map, send the `.html`. It has no external files.
 
 ## Examples

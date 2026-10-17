@@ -59,10 +59,6 @@ All numbers are sample data.
 | `deck-team-wins.json` | Short 4-slide team update |
 | `deck-q3-review.json` | Full review using all 12 slide types; copy the slides you need |
 
-## Not used
-
-Slidev (Markdown and Vue slides): tested, it exports PNG and PDF with the system Chrome in about 4 seconds, but it installs 571 MB of dependencies and its default theme is plain white text, so the premium look would need a custom Vue theme. It earns its place for code-heavy technical talks with live coding and presenter mode, not for results decks. This skill's JSON spec stays the way to build them.
-
 ## Setup
 
 Needs Node and Chrome or Edge. For the premium typeface run `brew install --cask font-inter` once; without it the script falls back to the system font and says so.

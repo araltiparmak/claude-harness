@@ -33,7 +33,6 @@ Default deck shape: `title`, `summary`, 3 to 6 evidence slides, `next`.
 - **Round for the room.** $2.1M, not $2,084,316. Keep precision only where the decimal is the point (99.97%).
 - **Percent vs points.** A rate that moves from 99.81% to 99.97% rose 0.16 pt, not 0.16%.
 - **Same number, same value everywhere.** If the summary says −38%, the KPI slide says −38%.
-- **Never invent numbers.** When the user has no figure, leave a visible placeholder (`"value": "TBD"`) and list what is missing. Sample decks say "Sample data" in the footer.
 - **Name the source and period** in `source` (deck-wide or per slide). The lint warns without it.
 
 ## Team successes
@@ -116,17 +115,11 @@ How color is assigned, so it stays meaningful:
 - `"preset": "classic"` switches to the restrained single-accent look (neutral panels, one `accent` color) for audiences that want it plain.
 - `font` swaps the typeface; `accent` sets the chart color in `classic`.
 
-## Build and check
-
-```bash
-node scripts/slides.mjs deck.json [out-dir]
-```
-
-It writes the formats from `--format` or the spec's `output` (default: all): `deck.pdf`, `slide-NN.png` (2x, 2560x1440) and `deck.html`, a presenter (arrow keys, F for fullscreen, `#3` in the URL opens slide 3). It prints these findings:
+## Script findings
 
 - **SPEC** (exit code 2): the spec is invalid; nothing was built.
 - **content**: the rules above that a script can check: a title without a number, a title number that nothing on the slide shows or computes, length, source, item limits, jargon.
 - **layout**: a slide body that is mostly empty.
-- **LAYOUT**: text clipped or outside the slide, or a title on 3+ lines. Exit code 3. Shorten the text; never shrink fonts in the spec.
+- **LAYOUT** (exit code 3): text clipped or outside the slide, or a title on 3+ lines.
 
-Then read every PNG. Lint clean is necessary, not sufficient: look for a slide whose body does not prove its title, empty space, and numbers that disagree between slides.
+In the HTML presenter, `#3` in the URL opens slide 3.

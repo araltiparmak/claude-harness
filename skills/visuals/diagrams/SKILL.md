@@ -34,18 +34,12 @@ Read only the file for the tool you picked. A pure topic hierarchy (mind map, st
 1. Check the tool exists (`command -v mmdc d2 dot`). Chrome is needed for `.mmd` and `.html`. Missing tools: ask before `brew install d2 graphviz`; Mermaid runs through `npx` with no install.
 2. Write the source to `diagrams-out/<name>.<ext>` in the project, or the scratchpad when the user wants a throwaway.
 3. Run `scripts/render.sh <source> [out-dir]`.
-4. Read the PNG. Done means: every label legible, nothing clipped or overlapping, the picture shows the mechanism the user asked for. Aim for an aspect ratio near 16:9 or square, never wider than 3:1. Fix and re-render until that holds.
-   `render.sh` also checks the PNG and prints `ok`, `WARN` or `FAIL`: blank image, aspect ratio over 3:1 (`MAX_WIDE=4` relaxes it for a gantt or a timeline), resolution under 1000px (warning only). A `FAIL` means the diagram is wrong: fix the diagram, not the check. The check cannot see a wrong mechanism or an unreadable label, so still read the PNG.
+4. Fix every `FAIL` that `render.sh` prints (blank image, wider than 3:1; `MAX_WIDE=4` relaxes it for a gantt or timeline) in the diagram, not the check. Then read the PNG. Done means: every label legible, nothing clipped or overlapping, the picture shows the mechanism the user asked for, aspect near 16:9 or square.
 5. Report the paths of the PNG and the source.
-
-## Not used
-
-- Python `diagrams` (mingrammer): tested, it works, but it needs a Python venv, its SVG links the icon files by absolute path so the SVG breaks when moved (D2 embeds them), Graphviz decides the layout and floats edge labels away from their edges, and the default PNG is only 1634px wide. Its one strength is hundreds of ready icons (GCP, Azure, Kubernetes, on-prem). If a diagram needs those, add the icons to `scripts/icons.tsv` or a sibling table instead of adopting the library.
-- `go-diagrams`: same idea in Go, and the same trade-offs.
 
 ## Delivery
 
-- Pull requests: GitHub renders fenced `mermaid` blocks natively (its docs list four syntaxes: mermaid, geoJSON, topoJSON, ASCII STL), but not D2. So:
+- Pull requests: GitHub renders fenced `mermaid` blocks natively, but not D2. So:
   - D2 diagram (every AWS-icon architecture): attach the rendered SVG, which zooms without blur, plus a 2x PNG. `gh pr create|edit|comment --attach file.svg` uploads it (gh 2.99 or newer; it rewrites a `![alt](./file.svg)` reference in the body to the uploaded asset). Commit the `.d2` source, not only the image.
   - Sequence, flow, state, ER: a fenced `mermaid` block in the description. The source stays reviewable in the PR, and GitHub draws it with its own Mermaid theme, not ours.
   - Architecture that must render natively (no image): a Mermaid `flowchart` with `subgraph` groups. It has no service icons.
@@ -61,4 +55,4 @@ Ship one self-contained `.html` with libraries from `cdnjs.cloudflare.com` at pi
 
 ## Examples
 
-`examples/`: `aws-icons.d2`, `message-chain.d2`, `order-system.d2` (D2); `message-chain-sequence.mmd`, `pr-sequence.mmd`, `order-states.mmd`, `orders-er.mmd`, `roadmap.mmd`, `flow.mmd` (Mermaid); `g.dot` (Graphviz).
+`examples/` holds a working source for each tool and diagram kind; start from the closest one.

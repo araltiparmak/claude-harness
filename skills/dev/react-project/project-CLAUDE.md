@@ -24,7 +24,7 @@ Prove a change with `pnpm check` (typecheck, lint, build) and the running dev se
 | `pnpm clean` | Removes `dist` and the Vite cache |
 | `pnpm ship` | Clean git tree, then `pnpm check`, then deploy to the project's target |
 
-`pnpm ship` picks the target in this order: a `deploy` script in `package.json`; `cloudflare.config.ts` (`cf deploy`); `vercel.json`, `vercel.ts` or `.vercel` (`vercel --prod`). With none it stops after the checks with exit code 3. The script is `scripts/ship.mjs`; edit it when the project needs another step.
+How `pnpm ship` picks its deploy target is documented at the top of `scripts/ship.mjs`; edit that file when the project needs another step.
 
 ## Checkpoint
 
@@ -42,10 +42,8 @@ Empty means go. Anything listed gets committed first — so there is always a cl
 pnpm add react-router
 ```
 
-Deep links then need a rewrite in `vercel.json` — the `vercel` skill writes it. Without that rewrite the app deploys and navigates fine, then 404s on refresh or on any shared deep link.
+Deep links then need an SPA fallback on the host (the `vercel` skill writes it into `vercel.json`). Without it the app navigates fine, then 404s on refresh or on any shared deep link.
 
 ## Deploy
 
-Run the `vercel` skill (`/vercel`) once to set the deploy path up; after that `pnpm ship` deploys to production. It writes `vercel.json` and `.vercelignore`, pins Node and pnpm so Vercel's build matches the local one, links the project, ships a preview before production, and leaves a `pnpm run deploy:prod` script behind. Once that script exists, use it.
-
-A deploy is a checkpoint — clean tree first.
+Set up a target once with the `vercel` or `cloudflare` skill; after that `pnpm ship` deploys to production.

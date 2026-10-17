@@ -6,7 +6,7 @@ disable-model-invocation: true
 
 A **prototype**: speed over polish, cheap to throw away, cheap to restart. Scaffolding is delegated to `cra.sh`, which ships in this skill's folder — it is fixed and verified, so spend the run's thinking on the idea, not on the shell.
 
-**Don't read the scaffolded output.** No `cat package.json`, no `ls -R`, no opening `vite.config.ts`/`tsconfig.app.json`/etc. with the Read tool just to "check" what `cra.sh` wrote. Step 4's build + grep is the verification — trust it. Reading generated boilerplate burns tokens for zero benefit; only open a file once you're actually about to edit it in step 6. Same goes for command output: `cra.sh` already runs pnpm silently, and the build commands below are piped through `tail` — don't re-run anything more verbosely to "see what happened."
+Step 4's build and grep is the verification of what `cra.sh` wrote; open a generated file only when you are about to edit it.
 
 ## 1. Name it
 
@@ -32,7 +32,7 @@ The user may pass an effort level 1–5 in the invocation (e.g. a trailing numbe
 ~/.claude/skills/react-project/cra.sh <name>
 ```
 
-This creates `<projects folder>/<name>` (`$CRA_DIR`, default `~/dev`) as a React + Vite + TS + Tailwind v4 project: pnpm pinned via corepack, Node 24 LTS required, a free port auto-picked and pinned into `vite.config.ts` (`strictPort`), the `@/` alias wired into both `vite.config.ts` and `tsconfig.app.json`, a `Proof.tsx` placeholder wired through `@/`, dependencies bumped to latest, the scripts `typecheck`, `check` (typecheck, lint, build), `clean` and `ship`, and an initial git commit already made. If `cra.sh` fails (wrong Node version, name collision, bad name), relay its error plainly and stop — don't work around it.
+This creates `$CRA_DIR/<name>` (default `~/dev`) with a free port pinned in `vite.config.ts`, the `@/` alias, a `Proof.tsx` placeholder, the scripts `typecheck`, `check`, `clean` and `ship`, and an initial commit. If `cra.sh` fails (wrong Node version, name collision, bad name), relay its error plainly and stop.
 
 **Done when:** `cra.sh` has printed its "✓ ready" line with the project path and port.
 
@@ -40,7 +40,6 @@ This creates `<projects folder>/<name>` (`$CRA_DIR`, default `~/dev`) as a React
 
 ```bash
 cd <project path>
-rm -rf dist
 pnpm build 2>&1 | tail -30
 grep -q 'justify-content' dist/assets/*.css && echo "PROOF OK"
 ```
@@ -51,8 +50,8 @@ grep -q 'justify-content' dist/assets/*.css && echo "PROOF OK"
 
 ```bash
 cd <project path>
-cp ~/.claude/skills/react-project/project-CLAUDE.md ./CLAUDE.md
-# replace the <PORT> placeholder in the copied CLAUDE.md with the real port from vite.config.ts
+PORT=$(grep -oE 'port: [0-9]+' vite.config.ts | grep -oE '[0-9]+')
+sed "s/<PORT>/$PORT/g" ~/.claude/skills/react-project/project-CLAUDE.md > CLAUDE.md
 git add -A
 git commit -m "Add project CLAUDE.md"
 ```
