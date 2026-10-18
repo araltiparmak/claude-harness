@@ -761,11 +761,9 @@ function lintSpec(deck) {
 function findChrome() {
   const cands = [process.env.CHROME, '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
     '/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge', '/Applications/Chromium.app/Contents/MacOS/Chromium',
-    'C:/Program Files/Google/Chrome/Application/chrome.exe', 'C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe'];
+    'C:/Program Files/Google/Chrome/Application/chrome.exe', 'C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe',
+    '/usr/bin/google-chrome', '/usr/bin/chromium', '/usr/bin/chromium-browser', '/usr/bin/microsoft-edge', '/snap/bin/chromium'];
   for (const c of cands) if (c && fs.existsSync(c)) return c;
-  for (const name of ['google-chrome', 'chromium', 'chromium-browser', 'microsoft-edge']) {
-    try { return execFileSync('which', [name], { encoding: 'utf8' }).trim(); } catch {}
-  }
   throw new Error('no Chrome/Edge/Chromium found: set CHROME=/path/to/browser');
 }
 const chrome = (bin, args) => execFileSync(bin, ['--headless', '--disable-gpu', '--hide-scrollbars', ...args], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'], maxBuffer: 64 << 20 });
@@ -784,7 +782,10 @@ let deck;
 try { deck = JSON.parse(fs.readFileSync(specPath, 'utf8')); }
 catch (e) { console.error(`SPEC     ${specPath} is not valid JSON: ${e.message}`); process.exit(2); }
 const specErrors = validate(deck);
-if (specErrors.length) { for (const e of specErrors) console.error(`SPEC     ${e}`); process.exit(2); }
+if (specErrors.length) {
+  console.error(specErrors.map(e => `SPEC     ${e}`).join('\n'));
+  process.exit(2);
+}
 const FORMATS = ['pdf', 'png', 'html'];
 const formats = String(formatArg || FORMATS.join(',')).split(',').map(x => x.trim().toLowerCase()).filter(Boolean);
 for (const f of formats) if (!FORMATS.includes(f)) { console.error(`SPEC     unknown format "${f}"; use ${FORMATS.join(', ')}`); process.exit(2); }

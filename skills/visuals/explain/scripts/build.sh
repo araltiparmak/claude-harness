@@ -15,4 +15,13 @@ for src in "$dir"/*.d2 "$dir"/*.mmd; do
   [ -e "$src" ] || continue
   SKETCH="${SKETCH-1}" "$render" "$src" "$dir/out"
 done
-python3 -I "$here/build.py" "$dir/page.html" "$dir/out" "$dir/index.html"
+# Each <!--svg:NAME--> in the page becomes a data: URI of out/NAME.svg. A data URI in an <img> keeps
+# every SVG's styles apart: two inline Mermaid SVGs share one id and restyle each other.
+OUT="$dir/out" perl -MMIME::Base64 -0pe '
+  s{<!--svg:([a-z0-9-]+)-->}{
+    my $f = "$ENV{OUT}/$1.svg";
+    open(my $h, "<:raw", $f) or die "build: page names \x27$1\x27 but $f does not exist\n";
+    local $/; "data:image/svg+xml;base64," . encode_base64(<$h>, "")
+  }ge' "$dir/page.html" > "$dir/index.html.tmp" || { rm -f "$dir/index.html.tmp"; exit 1; }
+mv "$dir/index.html.tmp" "$dir/index.html"
+echo "$dir/index.html"

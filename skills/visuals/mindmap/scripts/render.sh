@@ -30,7 +30,6 @@ grep -qF "$fit" "$out/$base.html" || { echo "render.sh: markmap init changed, au
 FIT="$fit" perl -pi -e 's/\Q$ENV{FIT}\E/{ duration: 200, ...$ENV{FIT}, autoFit: true }/' "$out/$base.html"
 
 chrome="$(find_chrome)"
-shared="$(cd -P "$(dirname "$0")" && pwd -P)/../../scripts"   # physical path: the skill is symlinked into ~/.claude/skills
 
 # The screenshot comes from a copy with duration 0 and every branch open. markmap animates the first
 # draw for 500 ms, and headless Chrome often saved the frame before the map appeared (a blank PNG in
@@ -59,8 +58,3 @@ PY
   --blink-settings=preferredColorScheme=1 "file://$tmp/shot.html" >/dev/null 2>&1
 
 ls -1 "$out/$base".*
-
-# Visual check: blank output, aspect ratio, resolution.
-if [ -f "$shared/check-image.py" ]; then
-  python3 -I "$shared/check-image.py" --max-wide 3 "$out/$base.png"
-fi

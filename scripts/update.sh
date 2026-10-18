@@ -114,7 +114,7 @@ done
 ext_names=" "
 if [ -f "$EXTERNAL" ]; then
   echo "== link external skills"
-  pairs="$(python3 -I "$MINE/scripts/external-skills.py" "$EXTERNAL")" || { echo "warn: external skills not linked (see above)" >&2; pairs=""; }
+  pairs="$(python3 -I "$MINE/scripts/external-skills.py")" || { echo "warn: external skills not linked (see above)" >&2; pairs=""; }
   synced=" "
   while IFS=$'\t' read -r url name; do
     [ -n "$url" ] || continue

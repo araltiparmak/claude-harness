@@ -28,7 +28,7 @@ One page per topic, so developers, testers and a PM look at the same picture. Ea
    | Open questions | PM | `Q1`, `Q2`, each with the role that answers it |
 
    Each `<img src="<!--svg:NAME-->">` names a source file without its extension. Set its `width` so diagram text reads near body size; a wide diagram scrolls inside its panel.
-5. **Build**: `scripts/build.sh docs/explain/<topic>`. It renders every source into `out/` (D2 in the whiteboard style) and writes `index.html` with the diagrams inlined. Fix every `FAIL` it prints.
+5. **Build**: `scripts/build.sh docs/explain/<topic>`. It renders every source into `out/` (D2 in the whiteboard style) and writes `index.html` with the diagrams inlined. It stops when the page names a diagram that has no source.
 6. **Check**: read each PNG in `out/`, then look at `index.html` once. Done means: every component, step and state has the same name in every diagram and in the text, the diagrams agree with each other, the decision table covers every combination, every rule has at least one example, and every unknown is an open question.
 7. **Share**: when the Artifact tool is available, publish `index.html`, and tell the user that teammates can open it only after it is shared from the page's Share menu. Otherwise hand over the path. Report the source folder and the page.
 

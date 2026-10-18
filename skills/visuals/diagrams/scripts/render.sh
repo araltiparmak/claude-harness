@@ -9,7 +9,6 @@ mkdir -p "$out"; out="$(cd "$out" && pwd)"
 base="$(basename "${src%.*}")"
 ext="${src##*.}"
 here="$(cd -P "$(dirname "$0")" && pwd -P)"   # physical path: the skill is symlinked into ~/.claude/skills
-shared="$here/../../scripts"                    # check-image.py, shared by the visuals skills
 
 find_chrome() {
   for c in "${CHROME:-}" \
@@ -57,8 +56,3 @@ case "$ext" in
 esac
 
 for f in "$out/$base".png "$out/$base".svg; do [ -f "$f" ] && echo "$f"; done
-
-# Visual check: blank output, aspect ratio, resolution. MAX_WIDE=4 relaxes the width limit (gantt, timelines).
-if [ -f "$shared/check-image.py" ]; then
-  python3 -I "$shared/check-image.py" --max-wide "${MAX_WIDE:-3}" "$out/$base.png"
-fi

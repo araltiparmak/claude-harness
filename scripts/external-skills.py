@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Read external-skills.yaml and print one line per skill: URL<TAB>NAME.
+"""Read the repo's external-skills.yaml and print one line per skill: URL<TAB>NAME.
 
 The file is plain YAML in one shape only, so no YAML library is needed:
 
@@ -9,16 +9,18 @@ The file is plain YAML in one shape only, so no YAML library is needed:
 On any other line, a skill before its repo, a repo with no skills, or a name or repo
 listed twice, it prints every problem with its line number and exits 1.
 
-Usage: external-skills.py FILE
+Usage: external-skills.py
 """
 import re
 import sys
+from pathlib import Path
 
 REPO = re.compile(r"(https://[^\s/]+/[^\s/]+/[^\s/:]+?)(\.git)?:")
 SKILL = re.compile(r"\s+- ([a-z0-9]+(?:-[a-z0-9]+)*)")
 
 
-def main(path):
+def main():
+    path = Path(__file__).resolve().parent.parent / "external-skills.yaml"
     problems, pairs, names, repos = [], [], set(), {}
     url = None
     for n, raw in enumerate(open(path, encoding="utf-8"), 1):
@@ -50,6 +52,6 @@ def main(path):
 
 
 if __name__ == "__main__":
-    if len(sys.argv) != 2:
+    if len(sys.argv) != 1:
         sys.exit(__doc__)
-    main(sys.argv[1])
+    main()

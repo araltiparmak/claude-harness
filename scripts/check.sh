@@ -48,7 +48,7 @@ done < <(grep -oE 'skills/[a-z0-9/-]+/SKILL\.md' README.md | sort -u)
 # external-skills.yaml has the one shape scripts/external-skills.py reads, and lists no
 # skill that this repo already has.
 if [ -f external-skills.yaml ]; then
-  if ext="$(python3 -I scripts/external-skills.py external-skills.yaml)"; then
+  if ext="$(python3 -I scripts/external-skills.py)"; then
     while IFS=$'\t' read -r _ name; do
       if printf '%s\n' "${skills[@]}" | grep -qx "$name"; then problem "external-skills.yaml: '$name' is also a skill in this repo"; fi
     done <<< "$ext"

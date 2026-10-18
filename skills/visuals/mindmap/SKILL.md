@@ -14,7 +14,7 @@ Content with arrows, order or cycles is a `diagrams` job.
 1. Check Node and Chrome exist (`command -v node`). `markmap-cli` runs through `npx` with no install. Chrome or Edge is needed for the PNG only.
 2. Write the outline to `mindmap-out/<name>.md` in the project, or the scratchpad when the user wants a throwaway.
 3. Run `scripts/render.sh <source.md> [out-dir]`. It writes `<name>.html` (interactive, works offline) and `<name>.png`.
-4. Read the PNG. Done means: every label legible, the branches balanced, nothing clipped. Fix and re-render until that holds. `render.sh` also checks the PNG and prints `ok`, `WARN` or `FAIL` (blank image, aspect ratio).
+4. Read the PNG. Done means: the map is drawn (not blank), every label legible, the branches balanced, nothing clipped. Fix and re-render until that holds.
 5. Report the paths of the HTML, the PNG and the source.
 
 ## Writing the outline

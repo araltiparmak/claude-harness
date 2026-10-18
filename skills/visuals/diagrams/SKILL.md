@@ -25,7 +25,7 @@ Read only the file for the tool you picked. A pure topic hierarchy (mind map, st
 1. Check the tool exists (`command -v mmdc d2`). Chrome is needed for `.mmd` and `.html`. Missing tools: ask before `brew install d2`; Mermaid runs through `npx` with no install.
 2. Write the source to `diagrams-out/<name>.<ext>` in the project, or the scratchpad when the user wants a throwaway.
 3. Run `scripts/render.sh <source> [out-dir]`.
-4. Fix every `FAIL` that `render.sh` prints (blank image, wider than 3:1; `MAX_WIDE=4` relaxes it for a gantt or timeline) in the diagram, not the check. Then read the PNG. Done means: every label legible, nothing clipped or overlapping, the picture shows the mechanism the user asked for, aspect near 16:9 or square.
+4. Read the PNG. Done means: something is drawn (not a blank or half-loaded page), every label legible, nothing clipped or overlapping, the picture shows the mechanism the user asked for, aspect near 16:9 or square and never wider than 3:1 (4:1 for a gantt or timeline). Fix the diagram and render again until that holds.
 5. Report the paths of the PNG and the source.
 
 ## Delivery

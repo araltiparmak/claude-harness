@@ -14,7 +14,7 @@ skills/<group>/<name>/
   <anything>     reference docs, scripts, profiles the skill names by path
 ```
 
-Related skills share a group folder: `visuals/` (deck, diagrams, explain, mindmap) and `dev/` (mobile-app, react-app, vercel). A folder with a `SKILL.md` is a skill, at any depth; a folder without one is a group. Skill names stay unique across groups, because `update.sh` links each skill into `~/.claude/skills/<name>` by name. A skill that needs a file from outside its folder resolves its own path with `cd -P` and `pwd -P`, since that path is a symlink (`visuals/scripts/check-image.py` is shared this way). A skill with no relatives, like `todo`, sits directly in `skills/`.
+Related skills share a group folder: `visuals/` (deck, diagrams, explain, mindmap) and `dev/` (mobile-app, react-app, vercel). A folder with a `SKILL.md` is a skill, at any depth; a folder without one is a group. Skill names stay unique across groups, because `update.sh` links each skill into `~/.claude/skills/<name>` by name. A skill that needs a file from outside its folder resolves its own path with `cd -P` and `pwd -P`, since that path is a symlink (`explain` calls `diagrams/scripts/render.sh` this way). A skill with no relatives, like `todo`, sits directly in `skills/`.
 
 `SKILL.md` frontmatter needs `name` (matches the folder, kebab-case) and `description`. Write the description as the trigger: what the skill does, then the phrases or situations that should fire it, one phrase per distinct case. Add `disable-model-invocation: true` for a skill that should run only when typed by name. Leave `allowed-tools` out: the setup runs in auto mode, where it would only skip the classifier. Leave `model` unset so the skill runs on the session's model.
 
