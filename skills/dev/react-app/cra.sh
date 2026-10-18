@@ -230,8 +230,9 @@ pnpm build >"$LOG" 2>&1 || die "pnpm build failed — see $LOG"
 # A green build with no utilities in the CSS means Tailwind is not wired: every class would do nothing.
 # The Cloudflare plugin builds into .cloudflare/output instead of dist.
 css_files="$(find dist .cloudflare -name '*.css' 2>/dev/null || true)"
-[[ -n "$css_files" ]] && printf '%s\n' "$css_files" | xargs grep -q 'justify-content' \
-  || die "the built CSS has no Tailwind utilities; check @tailwindcss/vite in vite.config.ts"
+if [[ -z "$css_files" ]] || ! printf '%s\n' "$css_files" | xargs grep -q 'justify-content'; then
+  die "the built CSS has no Tailwind utilities; check @tailwindcss/vite in vite.config.ts"
+fi
 
 step "committing"
 git init -b main -q
