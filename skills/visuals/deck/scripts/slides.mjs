@@ -38,32 +38,37 @@ const hv = h => `--bg:${h.bg};--tint:${h.tint};--mark:${h.mark};--ink:${h.ink}`;
 
 // ---------- text and number helpers ----------
 
-const esc = s => String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+const esc = s => String(s ?? '').replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;').replaceAll('"', '&quot;');
 const md = s => esc(s).replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
 const decimalsOf = n => (String(+n.toFixed(10)).split('.')[1] || '').length;
 
 function fmt(v, f = {}, signed = false) {
   const d = f.decimals ?? (Number.isInteger(v) ? 0 : 1);
   const n = Math.abs(v).toLocaleString('en-US', { minimumFractionDigits: d, maximumFractionDigits: d });
-  const sign = v < 0 ? '−' : signed && v > 0 ? '+' : '';
+  let sign = '';
+  if (v < 0) sign = '−';
+  else if (signed && v > 0) sign = '+';
   return sign + (f.prefix || '') + n + (f.suffix || '');
 }
 
 // Change between two numbers as display text. Rates (suffix %) default to points,
 // because a percent change of a percent reads like the value itself.
-function change(before, after, f = {}, mode, better = 'higher') {
+function changeText(d, pct, f, mode) {
+  if (mode === 'points') return `${fmt(Math.abs(d), { decimals: f.decimals ?? (Number.isInteger(d) ? 0 : 1) })} pt`;
+  if (mode === 'diff') return fmt(Math.abs(d), { ...f, suffix: f.suffix === '%' ? ' pt' : f.suffix });
+  return `${Math.abs(pct).toFixed(Math.abs(pct) < 10 ? 1 : 0)}%`;
+}
+
+function change(before, after, f, mode, better = 'higher') {
   const d = after - before, pct = before ? d / before * 100 : 0;
-  mode = mode || (f.suffix === '%' ? 'points' : 'percent');
-  const abs = mode === 'points' ? `${fmt(Math.abs(d), { decimals: f.decimals ?? (Number.isInteger(d) ? 0 : 1) })} pt`
-    : mode === 'diff' ? fmt(Math.abs(d), { ...f, suffix: f.suffix === '%' ? ' pt' : f.suffix })
-    : `${Math.abs(pct).toFixed(Math.abs(pct) < 10 ? 1 : 0)}%`;
+  const abs = changeText(d, pct, f, mode || (f.suffix === '%' ? 'points' : 'percent'));
   return { d, abs, signed: (d < 0 ? '−' : '+') + abs, good: (d >= 0) === (better === 'higher'), pct };
 }
 
 function ticks(min, max, count = 4) {
   if (min === max) max = min + 1;
   const raw = (max - min) / count, p = 10 ** Math.floor(Math.log10(raw)), m = raw / p;
-  const step = (m <= 1 ? 1 : m <= 2 ? 2 : m <= 2.5 ? 2.5 : m <= 5 ? 5 : 10) * p;
+  const step = ([1, 2, 2.5, 5].find(nice => m <= nice) ?? 10) * p;
   const out = [];
   for (let v = Math.floor(min / step) * step; v <= Math.ceil(max / step) * step + step / 1e6; v += step) out.push(+v.toFixed(10));
   return out;
@@ -104,6 +109,32 @@ const deltaHtml = (delta, good, vs) => {
 
 // ---------- charts ----------
 
+// Grid lines with tick labels, x labels, event markers and the target line of a line chart.
+function chartFrame({ x, y, L, iw, bottom }, { labels, markers, target, format }, tk, tf) {
+  let g = '';
+  for (const t of tk) {
+    const label = t === 0 ? '0' : esc(fmt(t, tf));
+    g += `<line x1="${L}" x2="${L + iw}" y1="${y(t)}" y2="${y(t)}" stroke="${t === tk[0] ? th.axis : th.grid}"/>`;
+    g += `<text x="${L - 12}" y="${y(t) + 4.5}" text-anchor="end" class="tick">${label}</text>`;
+  }
+  const every = Math.ceil(labels.length / 12);
+  labels.forEach((l, i) => {
+    if (i % every === 0 || i === labels.length - 1) g += `<text x="${x(i)}" y="${bottom + 26}" text-anchor="middle" class="tick">${esc(l)}</text>`;
+  });
+  for (const m of markers) {
+    const i = labels.indexOf(m.at);
+    if (i < 0) continue;
+    g += `<line x1="${x(i)}" x2="${x(i)}" y1="8" y2="${bottom}" stroke="${th.ink2}" stroke-width="1"/>`;
+    g += `<text x="${x(i) + 8}" y="22" class="note">${esc(m.label)}</text>`;
+  }
+  if (target) {
+    const ty = y(target.value), label = target.label || 'Target ' + fmt(target.value, format);
+    g += `<line x1="${L}" x2="${L + iw}" y1="${ty}" y2="${ty}" stroke="${th.muted}" stroke-width="1.5"/>`;
+    g += `<text x="${L + 8}" y="${ty - 8}" class="note">${esc(label)}</text>`;
+  }
+  return g;
+}
+
 function lineChart({ labels, series, format = {}, markers = [], target, zero, w, h }) {
   const all = series.flatMap(s => s.values).concat(target ? [target.value] : []);
   let min = Math.min(...all);
@@ -115,26 +146,7 @@ function lineChart({ labels, series, format = {}, markers = [], target, zero, w,
   const iw = w - L - R, ih = h - T - B;
   const x = i => L + i * iw / Math.max(1, labels.length - 1);
   const y = v => T + ih - (v - lo) / (hi - lo) * ih;
-  let g = '';
-  for (const t of tk) {
-    g += `<line x1="${L}" x2="${L + iw}" y1="${y(t)}" y2="${y(t)}" stroke="${t === lo ? th.axis : th.grid}"/>`;
-    g += `<text x="${L - 12}" y="${y(t) + 4.5}" text-anchor="end" class="tick">${t === 0 ? '0' : esc(fmt(t, tf))}</text>`;
-  }
-  const every = Math.ceil(labels.length / 12);
-  labels.forEach((l, i) => {
-    if (i % every === 0 || i === labels.length - 1) g += `<text x="${x(i)}" y="${T + ih + 26}" text-anchor="middle" class="tick">${esc(l)}</text>`;
-  });
-  for (const m of markers) {
-    const i = labels.indexOf(m.at);
-    if (i < 0) continue;
-    g += `<line x1="${x(i)}" x2="${x(i)}" y1="8" y2="${T + ih}" stroke="${th.ink2}" stroke-width="1"/>`;
-    g += `<text x="${x(i) + 8}" y="22" class="note">${esc(m.label)}</text>`;
-  }
-  if (target) {
-    const ty = y(target.value);
-    g += `<line x1="${L}" x2="${L + iw}" y1="${ty}" y2="${ty}" stroke="${th.muted}" stroke-width="1.5"/>`;
-    g += `<text x="${L + 8}" y="${ty - 8}" class="note">${esc(target.label || 'Target ' + fmt(target.value, format))}</text>`;
-  }
+  let g = chartFrame({ x, y, L, iw, bottom: T + ih }, { labels, markers, target, format }, tk, tf);
   const focus = series[0], fy = y(focus.values.at(-1));
   const pts = focus.values.map((v, i) => [x(i), y(v)]);
   // The focus wash goes first so comparison lines stay visible on top of it.
@@ -160,6 +172,16 @@ function lineChart({ labels, series, format = {}, markers = [], target, zero, w,
 
 const legend = series => series.length < 2 ? '' : `<div class="legend">${series.map((s, i) =>
   `<span><i style="background:${i === 0 ? th.accent : th.contextLine}"></i>${esc(s.name)}</span>`).join('')}</div>`;
+
+// The sparkline at the bottom of a KPI tile, sized to the tile and to the space under the numbers.
+function kpiSpark(k, s, i) {
+  if (!k.spark?.length) return '';
+  const w = Math.floor((CONTENT_W - 24 * (s.items.length - 1)) / s.items.length) - 48;
+  const h = Math.max(48, Math.min(200, mainHeight(s) - 46 - 200 - (s.sparkLabel ? 26 : 0)));
+  const label = s.sparkLabel ? `<div class="k-sl">${esc(s.sparkLabel)}</div>` : '';
+  return `<div class="k-s">${spark(k.spark, w, h, hue(i))}
+        ${label}</div>`;
+}
 
 const SLIDES = {
   title: s => `
@@ -194,9 +216,7 @@ const SLIDES = {
       <div class="k-v">${esc(value)}</div>
       ${deltaHtml(delta, good, k.vs)}
       ${target ? `<div class="k-t">${md(target)}</div>` : ''}
-      ${k.spark?.length ? `<div class="k-s">${spark(k.spark, Math.floor((CONTENT_W - 24 * (s.items.length - 1)) / s.items.length) - 48,
-        Math.max(48, Math.min(200, mainHeight(s) - 46 - 200 - (s.sparkLabel ? 26 : 0))), hue(i))}
-        ${s.sparkLabel ? `<div class="k-sl">${esc(s.sparkLabel)}</div>` : ''}</div>` : ''}
+      ${kpiSpark(k, s, i)}
     </div>`;
   }).join('')}</main>
     ${s.takeaway ? `<p class="takeaway">${md(s.takeaway)}</p>` : ''}`,
@@ -411,7 +431,7 @@ const DECK_KEYS = ['title', 'footer', 'source', 'slides'];
 
 function closest(word, options) {
   const dist = (a, b) => {
-    const d = Array.from({ length: a.length + 1 }, (_, i) => [i, ...Array(b.length).fill(0)]);
+    const d = Array.from({ length: a.length + 1 }, (_, i) => [i, ...new Array(b.length).fill(0)]);
     for (let j = 1; j <= b.length; j++) d[0][j] = j;
     for (let i = 1; i <= a.length; i++) for (let j = 1; j <= b.length; j++)
       d[i][j] = Math.min(d[i - 1][j] + 1, d[i][j - 1] + 1, d[i - 1][j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1));
@@ -421,21 +441,24 @@ function closest(word, options) {
   return best && best[1] <= 2 ? ` (did you mean "${best[0]}"?)` : '';
 }
 
-function checkFields(obj, rule, where, errs, extra = []) {
-  if (!obj || typeof obj !== 'object' || Array.isArray(obj)) { errs.push(`${where} must be an object`); return; }
+const isNumbers = v => Array.isArray(v) ? v.every(x => typeof x === 'number') : typeof v === 'number';
+
+function checkKeys(obj, rule, where, errs, extra) {
   const allowed = [...extra, ...(rule.req || []), ...(rule.opt || [])];
   for (const k of Object.keys(obj)) if (!allowed.includes(k) && !k.startsWith('_')) errs.push(`${where}: unknown field "${k}"${closest(k, allowed)}`);
   for (const k of rule.req || []) if (obj[k] === undefined || obj[k] === '') errs.push(`${where}: "${k}" is missing`);
-  if (rule.oneOf && !rule.oneOf.some(k => obj[k] !== undefined)) errs.push(`${where}: needs "${rule.oneOf.join('" or "')}"`);
   for (const k of rule.nums || []) {
-    const v = obj[k];
-    if (v === undefined) continue;
-    if (Array.isArray(v) ? v.some(x => typeof x !== 'number') : typeof v !== 'number') errs.push(`${where}: "${k}" must be ${Array.isArray(v) ? 'an array of numbers' : 'a number'}, without units or quotes`);
+    if (obj[k] !== undefined && !isNumbers(obj[k])) errs.push(`${where}: "${k}" must be ${Array.isArray(obj[k]) ? 'an array of numbers' : 'a number'}, without units or quotes`);
   }
+}
+
+function checkFields(obj, rule, where, errs, extra = []) {
+  if (!obj || typeof obj !== 'object' || Array.isArray(obj)) { errs.push(`${where} must be an object`); return; }
+  checkKeys(obj, rule, where, errs, extra);
   for (const [k, sub] of Object.entries(rule.items || {})) {
     if (obj[k] === undefined) continue;
-    if (!Array.isArray(obj[k])) { errs.push(`${where}: "${k}" must be an array`); continue; }
-    obj[k].forEach((it, j) => checkFields(it, sub, `${where} ${k}[${j}]`, errs));
+    if (Array.isArray(obj[k])) obj[k].forEach((it, j) => checkFields(it, sub, `${where} ${k}[${j}]`, errs));
+    else errs.push(`${where}: "${k}" must be an array`);
   }
   for (const [k, sub] of Object.entries(rule.objs || {})) if (obj[k] !== undefined) checkFields(obj[k], sub, `${where} ${k}`, errs);
 }
@@ -501,7 +524,7 @@ function build() {
   fs.writeFileSync(htmlPath, html);
   const dom = chrome(bin, ['--virtual-time-budget=3000', '--window-size=1400,900', '--dump-dom', `${url}?lint=1`]);
   const raw = (dom.match(/<pre id="lint">([\s\S]*?)<\/pre>/) || [])[1] || '{"out":[],"warn":[],"sizes":[],"fonts":[]}';
-  return JSON.parse(raw.replace(/&quot;/g, '"').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&amp;/g, '&'));
+  return JSON.parse(raw.replaceAll('&quot;', '"').replaceAll('&lt;', '<').replaceAll('&gt;', '>').replaceAll('&amp;', '&'));
 }
 
 // Pass 1 measures each slide body; pass 2 sizes charts to the measured space and re-checks layout.

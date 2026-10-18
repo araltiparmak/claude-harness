@@ -12,7 +12,7 @@ render="$here/../../diagrams/scripts/render.sh"  # shared with the diagrams skil
 
 rm -f "$dir"/out/*.svg "$dir"/out/*.png   # a removed source must not leave its old diagram behind
 for src in "$dir"/*.d2 "$dir"/*.mmd; do
-  [ -e "$src" ] || continue
+  [[ -e "$src" ]] || continue
   SKETCH="${SKETCH-1}" "$render" "$src" "$dir/out"
 done
 # Each <!--svg:NAME--> in the page becomes a data: URI of out/NAME.svg. A data URI in an <img> keeps

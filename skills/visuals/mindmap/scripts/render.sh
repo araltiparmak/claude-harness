@@ -14,7 +14,7 @@ find_chrome() {
     "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" \
     "/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge" \
     google-chrome chromium chromium-browser microsoft-edge; do
-    [ -n "$c" ] && { [ -x "$c" ] || command -v "$c" >/dev/null 2>&1; } && { echo "$c"; return; }
+    [[ -n "$c" ]] && { [[ -x "$c" ]] || command -v "$c" >/dev/null 2>&1; } && { echo "$c"; return; }
   done
   echo "no Chrome/Edge found: set CHROME=/path/to/browser" >&2; exit 1
 }

@@ -31,6 +31,7 @@ Creates $PROJECTS_DIR/<name> as a React + Vite + TS + Tailwind v4 project:
 Requires Node ${NODE_MAJOR}.x. pnpm is pinned to major ${PNPM_MAJOR} via corepack.
 USAGE
     exit 0 ;;
+  *) ;;
 esac
 
 [[ "$NAME" =~ ^[a-z0-9]+(-[a-z0-9]+)*$ ]] || die "name must be kebab-case: '$NAME'"

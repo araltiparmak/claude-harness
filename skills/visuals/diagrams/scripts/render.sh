@@ -15,7 +15,7 @@ find_chrome() {
     "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" \
     "/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge" \
     google-chrome chromium chromium-browser microsoft-edge; do
-    [ -n "$c" ] && { [ -x "$c" ] || command -v "$c" >/dev/null 2>&1; } && { echo "$c"; return; }
+    [[ -n "$c" ]] && { [[ -x "$c" ]] || command -v "$c" >/dev/null 2>&1; } && { echo "$c"; return; }
   done
   echo "no Chrome/Edge found: set CHROME=/path/to/browser" >&2; exit 1
 }
@@ -38,7 +38,7 @@ case "$ext" in
       d2src="$(mktemp -d)/$base.d2"
       sed "s|ICONS/|$here/../icons/|g" "$src" > "$d2src"
     fi
-    sketch=(); [ -n "${SKETCH:-}" ] && sketch=(--sketch)   # SKETCH=1: hand-drawn look
+    sketch=(); [[ -n "${SKETCH:-}" ]] && sketch=(--sketch)   # SKETCH=1: hand-drawn look
     d2 --layout="$layout" ${sketch[@]+"${sketch[@]}"} --pad 48 "$d2src" "$out/$base.svg"
     d2 --layout="$layout" ${sketch[@]+"${sketch[@]}"} --pad 48 --scale 2 "$d2src" "$out/$base.png"
     ;;
@@ -55,4 +55,4 @@ case "$ext" in
   *) echo "unsupported extension: .$ext" >&2; exit 2 ;;
 esac
 
-for f in "$out/$base".png "$out/$base".svg; do [ -f "$f" ] && echo "$f"; done
+for f in "$out/$base".png "$out/$base".svg; do [[ -f "$f" ]] && echo "$f"; done

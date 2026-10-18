@@ -11,8 +11,8 @@ mkdir -p "$dest"
 
 failed=0
 while IFS=$'\t' read -r name path; do
-  [ -n "$name" ] || continue
-  [ -s "$dest/$name.svg" ] && continue
+  [[ -n "$name" ]] || continue
+  [[ -s "$dest/$name.svg" ]] && continue
   tmp="$dest/$name.tmp"
   if curl -fsS "$base$path.svg" -o "$tmp" 2>/dev/null && head -c 400 "$tmp" | grep -q '<svg'; then
     mv "$tmp" "$dest/$name.svg"

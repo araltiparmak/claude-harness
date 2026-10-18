@@ -14,22 +14,22 @@ skills=(); skill_dirs=()
 while IFS= read -r file; do
   dir="$(dirname "$file")"
   inside=0
-  for parent in ${skill_dirs[@]+"${skill_dirs[@]}"}; do case "$dir/" in "$parent"/*) inside=1 ;; esac; done
-  [ "$inside" = 0 ] || continue   # a SKILL.md nested in a skill (an example) is not a skill
+  for parent in ${skill_dirs[@]+"${skill_dirs[@]}"}; do case "$dir/" in "$parent"/*) inside=1 ;; *) ;; esac; done
+  [[ "$inside" = 0 ]] || continue   # a SKILL.md nested in a skill (an example) is not a skill
   name="$(basename "$dir")"
   skills+=("$name"); skill_dirs+=("$dir")
-  [ "$(head -1 "$file")" = "---" ] || problem "$name: SKILL.md does not start with front matter"
+  [[ "$(head -1 "$file")" = "---" ]] || problem "$name: SKILL.md does not start with front matter"
   awk 'NR>1 && /^---$/ {found=1; exit} END {exit !found}' "$file" || problem "$name: front matter has no closing ---"
   front="$(awk 'NR==1{next} /^---$/{exit} {print}' "$file")"
   grep -qx "name: $name" <<<"$front" || problem "$name: front matter name is not '$name'"
   grep -qE '^description: .+' <<<"$front" || problem "$name: front matter has no description"
 done < <(find skills -name SKILL.md | sort)
 dupes="$(printf '%s\n' "${skills[@]}" | sort | uniq -d)"
-[ -z "$dupes" ] || problem "skill names must be unique across groups: $dupes"
+[[ -z "$dupes" ]] || problem "skill names must be unique across groups: $dupes"
 # Every folder directly under skills/ is a skill or a group with a skill somewhere inside.
 for dir in skills/*/; do
   dir="${dir%/}"
-  if [ -z "$(find "$dir" -name SKILL.md | head -1)" ]; then
+  if [[ -z "$(find "$dir" -name SKILL.md | head -1)" ]]; then
     problem "$dir: not a skill (no SKILL.md) and not a group (no skill inside)"
   fi
 done
@@ -37,17 +37,17 @@ done
 # README's skill table lists exactly the skills, and every link in it resolves.
 listed="$(grep -oE '^\| \[[a-z0-9-]+\]\(skills/' README.md | sed -E 's/^\| \[([a-z0-9-]+)\].*/\1/' | sort)"
 actual="$(printf '%s\n' "${skills[@]}" | sort)"
-if [ "$listed" != "$actual" ]; then
+if [[ "$listed" != "$actual" ]]; then
   problem "README skill table does not match the skills:"
   diff <(echo "$listed") <(echo "$actual") | sed 's/^/  /' || true
 fi
 while IFS= read -r path; do
-  [ -f "$path" ] || problem "README links to a missing file: $path"
+  [[ -f "$path" ]] || problem "README links to a missing file: $path"
 done < <(grep -oE 'skills/[a-z0-9/-]+/SKILL\.md' README.md | sort -u)
 
 # external-skills.yaml has the one shape scripts/external-skills.py reads, and lists no
 # skill that this repo already has.
-if [ -f external-skills.yaml ]; then
+if [[ -f external-skills.yaml ]]; then
   if ext="$(python3 -I scripts/external-skills.py)"; then
     while IFS=$'\t' read -r _ name; do
       if printf '%s\n' "${skills[@]}" | grep -qx "$name"; then problem "external-skills.yaml: '$name' is also a skill in this repo"; fi
@@ -101,5 +101,5 @@ for h in hits[:10]:
 sys.exit(1 if hits else 0)
 PY
 
-if [ "$fail" = 0 ]; then echo "all checks passed"; fi
+if [[ "$fail" = 0 ]]; then echo "all checks passed"; fi
 exit "$fail"

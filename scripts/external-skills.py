@@ -1,57 +1,117 @@
 #!/usr/bin/env python3
-"""Read the repo's external-skills.yaml and print one line per skill: URL<TAB>NAME.
+"""Skills from other repos, listed in the repo's external-skills.yaml.
 
 The file is plain YAML in one shape only, so no YAML library is needed:
 
     https://github.com/owner/repo:    # a repo: its https URL as a key
       - skill-name                    # the skills to link from it, by SKILL.md name
 
-On any other line, a skill before its repo, a repo with no skills, or a name or repo
-listed twice, it prints every problem with its line number and exits 1.
+Usage:
+    external-skills.py            check the file, then print URL<TAB>NAME for every skill
+    external-skills.py resolve    print NAME<TAB>DIR for every skill in the cloned repos, found
+                                  by the `name:` in its SKILL.md, and delete the clones of
+                                  repos the file no longer lists
 
-Usage: external-skills.py
+update.sh clones and pulls the repos between the two calls. A problem in the file is printed
+with its line number, and the exit code is 1.
 """
+import os
 import re
+import shutil
 import sys
 from pathlib import Path
 
+LIST = Path(__file__).resolve().parent.parent / "external-skills.yaml"
+# Same folder as CACHE in update.sh.
+CACHE = Path(os.environ.get("XDG_CACHE_HOME") or Path.home() / ".cache") / "claude-harness" / "repos"
 REPO = re.compile(r"(https://[^\s/]+/[^\s/]+/[^\s/:]+?)(\.git)?:")
 SKILL = re.compile(r"\s+- ([a-z0-9]+(?:-[a-z0-9]+)*)")
 
 
-def main():
-    path = Path(__file__).resolve().parent.parent / "external-skills.yaml"
-    problems, pairs, names, repos = [], [], set(), {}
-    url = None
-    for n, raw in enumerate(open(path, encoding="utf-8"), 1):
+def parse_line(line, url, repos, seen):
+    """Apply one line to repos; return (url now in effect, problem or None)."""
+    if m := REPO.fullmatch(line):
+        new = m.group(1)
+        problem = f"{new} is listed twice" if new in repos else None
+        repos[new] = []
+        return new, problem
+    m = SKILL.fullmatch(line)
+    if not m:
+        return url, f"neither 'https://host/owner/repo:' nor '  - skill-name': {line.strip()}"
+    name = m.group(1)
+    if url is None:
+        return url, f"skill '{name}' comes before any repo URL"
+    repos[url].append(name)
+    if name in seen:
+        return url, f"'{name}' is listed twice"
+    seen.add(name)
+    return url, None
+
+
+def read_list():
+    """Return {url: [skill names]}, or exit listing every problem in the file."""
+    repos, seen, problems, url = {}, set(), [], None
+    for n, raw in enumerate(LIST.open(encoding="utf-8"), 1):
         line = re.sub(r"(^|\s)#.*", "", raw).rstrip()
-        if not line:
-            continue
-        if m := REPO.fullmatch(line):
-            url = m.group(1)
-            if url in repos:
-                problems.append(f"{path}:{n}: {url} is listed twice")
-            repos[url] = 0
-        elif m := SKILL.fullmatch(line):
-            name = m.group(1)
-            if url is None:
-                problems.append(f"{path}:{n}: skill '{name}' comes before any repo URL")
-                continue
-            if name in names:
-                problems.append(f"{path}:{n}: '{name}' is listed twice")
-            names.add(name)
-            repos[url] += 1
-            pairs.append((url, name))
-        else:
-            problems.append(f"{path}:{n}: neither 'https://host/owner/repo:' nor '  - skill-name': {raw.rstrip()}")
-    problems += [f"{path}: {u} lists no skills" for u, count in repos.items() if count == 0]
+        if line:
+            url, problem = parse_line(line, url, repos, seen)
+            if problem:
+                problems.append(f"{LIST}:{n}: {problem}")
+    problems += [f"{LIST}: {u} lists no skills" for u, names in repos.items() if not names]
     if problems:
         sys.exit("\n".join(problems))
-    for url, name in pairs:
-        print(f"{url}\t{name}")
+    return repos
+
+
+def clone_dir(url):
+    return CACHE / url.removeprefix("https://")
+
+
+def skill_name(skill_md):
+    """The `name:` in a SKILL.md's front matter, or None."""
+    lines = skill_md.read_text(encoding="utf-8", errors="replace").splitlines()
+    if not lines or lines[0] != "---":
+        return None
+    for line in lines[1:]:
+        if line == "---":
+            break
+        if line.startswith("name: "):
+            return line.removeprefix("name: ").strip()
+    return None
+
+
+def resolve(repos):
+    for url, names in repos.items():
+        root = clone_dir(url)
+        if not (root / ".git").is_dir():
+            continue  # update.sh has already reported the failed clone
+        found = {}
+        for md in sorted(root.rglob("SKILL.md")):
+            if ".git" not in md.relative_to(root).parts:
+                found.setdefault(skill_name(md), md.parent)
+        for name in names:
+            if name in found:
+                print(f"{name}\t{found[name]}")
+            else:
+                print(f"warn: {url} has no skill named {name}", file=sys.stderr)
+    listed = {clone_dir(u) for u in repos}
+    for git in sorted(CACHE.glob("*/*/*/.git")):
+        if git.parent not in listed:
+            shutil.rmtree(git.parent)
+            print(f"removed clone {git.parent.relative_to(CACHE)}", file=sys.stderr)
+
+
+def main(args):
+    repos = read_list()
+    if args == ["resolve"]:
+        resolve(repos)
+    elif not args:
+        for url, names in repos.items():
+            for name in names:
+                print(f"{url}\t{name}")
+    else:
+        sys.exit(__doc__)
 
 
 if __name__ == "__main__":
-    if len(sys.argv) != 1:
-        sys.exit(__doc__)
-    main()
+    main(sys.argv[1:])
