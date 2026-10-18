@@ -1,28 +1,12 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Pulls this repo (and an optional second skills repo), then installs the
-# Claude Code setup from them: skills, settings and global instructions. Run it
-# again whenever you want the latest, or after changing anything in the repos.
-#
-# - Skills are symlinked into ~/.claude/skills, so the pull is what updates them.
-#   Every folder that holds a SKILL.md is a skill, at any depth (skills/<group>/<name>/);
-#   it is linked by its folder name, so names must be unique.
-# - An optional second repo (for example one with private skills) is read from
-#   PRIVATE_DIR (default ~/dev/private-skills). Set PRIVATE_URL to clone it when the
-#   folder is missing. With neither, only this repo is installed.
-# - ~/.claude/settings.json is built from claude/settings.json plus an optional overlay
-#   in <second repo>/claude/settings.json (scripts/build-settings.py).
-#   If the live file was changed outside the harness, it is left alone and the
-#   difference is printed.
-# - ~/.claude/CLAUDE.md is a symlink to claude/CLAUDE.md.
-# - Skills from other repos are listed in external-skills.yaml. Each repo is cloned into
-#   ~/.cache/claude-harness/repos (pulled on later runs), and the listed skills are linked
-#   by the `name:` in their SKILL.md. A skill whose line is gone is unlinked.
-# - A second repo that cannot be cloned is skipped, and the rest still links.
+# Pulls this repo and the optional second skills repo (PRIVATE_DIR, cloned from
+# PRIVATE_URL when missing), then installs the Claude Code setup into ~/.claude.
+# The README describes each part. Rules the code below relies on:
 # - Real folders in ~/.claude/skills are never touched, only reported.
-# - Links into these repos whose skill no longer exists are removed.
 # - A skill of your own wins over an external skill with the same name.
+# - Links whose skill is gone, and external skills no longer listed, are removed.
 
 MINE="$(cd "$(dirname "$0")/.." && pwd)"
 PRIVATE="${PRIVATE_DIR:-$HOME/dev/private-skills}"

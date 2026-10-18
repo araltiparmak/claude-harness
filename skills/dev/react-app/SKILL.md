@@ -40,8 +40,7 @@ This creates `$CRA_DIR/<name>` (default `~/dev`) with a free port pinned in `vit
 
 ```bash
 cd <project path>
-pnpm build 2>&1 | tail -30
-grep -q 'justify-content' dist/assets/*.css && echo "PROOF OK"
+set -o pipefail; pnpm build 2>&1 | tail -30 && grep -q 'justify-content' dist/assets/*.css && echo "PROOF OK"
 ```
 
 **Done when:** the build exits green *and* the grep finds the utility in the freshly built CSS. A green build with no utilities in the CSS means Tailwind is wired wrong — the app will look unstyled and every class you write afterwards will do nothing. Fix it here, before touching feature code.
