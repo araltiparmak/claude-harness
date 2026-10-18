@@ -80,20 +80,31 @@ def skill_name(skill_md):
     return None
 
 
+def skills_in(root):
+    """{name: folder} for every SKILL.md in a clone; the first one wins a name."""
+    found = {}
+    for md in sorted(root.rglob("SKILL.md")):
+        if ".git" not in md.relative_to(root).parts:
+            found.setdefault(skill_name(md), md.parent)
+    return found
+
+
 def resolve(repos):
     for url, names in repos.items():
         root = clone_dir(url)
         if not (root / ".git").is_dir():
             continue  # update.sh has already reported the failed clone
-        found = {}
-        for md in sorted(root.rglob("SKILL.md")):
-            if ".git" not in md.relative_to(root).parts:
-                found.setdefault(skill_name(md), md.parent)
+        found = skills_in(root)
         for name in names:
             if name in found:
                 print(f"{name}\t{found[name]}")
             else:
                 print(f"warn: {url} has no skill named {name}", file=sys.stderr)
+    prune(repos)
+
+
+def prune(repos):
+    """Delete the clones of repos the list no longer names."""
     listed = {clone_dir(u) for u in repos}
     for git in sorted(CACHE.glob("*/*/*/.git")):
         if git.parent not in listed:

@@ -173,6 +173,13 @@ function lineChart({ labels, series, format = {}, markers = [], target, zero, w,
 const legend = series => series.length < 2 ? '' : `<div class="legend">${series.map((s, i) =>
   `<span><i style="background:${i === 0 ? th.accent : th.contextLine}"></i>${esc(s.name)}</span>`).join('')}</div>`;
 
+// The decision panel beside the summary points.
+function askPanel(ask) {
+  const meta = ask.meta ? `<div class="ask-m">${md(ask.meta)}</div>` : '';
+  return `<aside class="ask" style="${hv(role('violet'))}"><div class="ask-l">${esc(ask.label || 'Decision needed')}</div>
+      <p>${md(ask.text)}</p>${meta}</aside>`;
+}
+
 // The sparkline at the bottom of a KPI tile, sized to the tile and to the space under the numbers.
 function kpiSpark(k, s, i) {
   if (!k.spark?.length) return '';
@@ -199,8 +206,7 @@ const SLIDES = {
       <div class="sp" style="${hv(s.ask ? hueExcept(i, 'violet') : hue(i))}"><div class="sp-v">${esc(p.value)}</div>
       <div class="sp-t"><div class="sp-l">${md(p.label)}</div>${p.detail ? `<div class="sp-d">${md(p.detail)}</div>` : ''}</div></div>`).join('')}
     </div>
-    ${s.ask ? `<aside class="ask" style="${hv(role('violet'))}"><div class="ask-l">${esc(s.ask.label || 'Decision needed')}</div>
-      <p>${md(s.ask.text)}</p>${s.ask.meta ? `<div class="ask-m">${md(s.ask.meta)}</div>` : ''}</aside>` : ''}
+    ${s.ask ? askPanel(s.ask) : ''}
   </main>`,
 
   kpis: s => `<main class="kpis${s.items.some(k => k.spark?.length) ? '' : ' nospark'}">${s.items.map((k, i) => {
