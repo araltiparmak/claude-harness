@@ -9,13 +9,13 @@ You write the content as a JSON spec; `scripts/slides.mjs` owns layout, charts, 
 
 ## Rules
 
-1. Every number comes from the user or their data. A missing number is the text `TBD`, never a guess.
+1. Every number comes from the user or their data, never a guess. A missing number is `TBD` in text fields; a `kpis` tile or `compare` row whose number is missing is left out. Both go on the TBD list.
 2. Every slide title is the result in one sentence, with a number: "Checkout is 3× faster", not "Checkout".
-3. Put numbers in as numbers and let the script do the math and the formatting: `"now": 2.1, "before": 8.2, "target": 3, "format": { "suffix": "s" }, "better": "lower"` (kpis), `"before": 2.3, "after": 0.9` (compare), `"before"`, `"now"`, `"target"` (scorecard). Do not write `delta`, `status`, `"Target: ..."` text or your own percentages. Percent values show their change in points automatically; set `"change": "diff"` for scores like 4.3 to 4.7.
+3. Put numbers in as numbers and let the script do the math and the formatting: `"now": 2.1, "before": 8.2, "target": 3, "format": { "suffix": "s" }, "better": "lower"` (kpis), `"before": 2.3, "after": 0.9` (compare). The script writes the change and its colour; percent values change in points, and `"change": "diff"` fits scores like 4.3 to 4.7.
 4. Plain words for a company-wide reader: "yearly revenue", not ARR.
 5. Leave out an optional field you have nothing for (a `detail`, `org`, `meta`, `note`). Never fill it with placeholder text. `TBD` is only for a number or fact the slide needs, and it goes on the TBD list. When the user names no source, use their team as `source` and list it for them to confirm.
-6. Start from the closest file in `examples/` and change values; keep its structure.
-7. Fix every `SPEC`, `LAYOUT` and `content` line the script prints, then build again. Shorten text; never shrink fonts.
+6. Start from `examples/deck-q3-review.json`: copy the slides you need and change the values.
+7. Fix every `SPEC` and `LAYOUT` line the script prints, then build again. Shorten text; never shrink fonts.
 
 ## Output type
 
@@ -40,17 +40,14 @@ Several at once: `--format pdf,html`.
 6. **Read every PNG.** When the user did not ask for PNGs, add `png` to the build for this check anyway; the PNGs are for you, so report only the formats the user asked for. Done means: each slide's body proves its title, someone outside the team could read every slide, and the same number has the same value on every slide.
 7. **Report** the output paths and the `TBD` list.
 
-Read [`references/deck-guide.md`](references/deck-guide.md) when choosing slide types, writing for the audience, or using a field the examples do not show. It holds every field of every slide type and the color rules.
+Read [`references/deck-guide.md`](references/deck-guide.md) when choosing slide types, writing for the audience, or using a field the examples do not show. It holds every field of the six slide types.
 
 ## Examples
 
 All numbers are sample data.
 
-| File | Use case |
-|---|---|
-| `deck-team-wins.json` | Short 4-slide team update |
-| `deck-q3-review.json` | Full review using all 12 slide types; copy the slides you need |
+`examples/deck-q3-review.json` is a 6-slide review that uses every slide type once: `title`, `summary`, `kpis`, `trend`, `compare`, `next`.
 
 ## Setup
 
-Needs Node and Chrome or Edge. For the premium typeface run `brew install --cask font-inter` once; without it the script falls back to the system font and says so.
+Needs Node and Chrome or Edge. For the Inter typeface run `brew install --cask font-inter` once; without it the script falls back to the system font and says so.

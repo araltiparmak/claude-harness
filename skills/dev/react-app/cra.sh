@@ -22,6 +22,7 @@ Creates $PROJECTS_DIR/<name> as a React + Vite + TS + Tailwind v4 project:
   - @/ alias wired in BOTH vite.config.ts and tsconfig.app.json
   - Tailwind v4 via @tailwindcss/vite (no config file, no PostCSS)
   - scripts: typecheck, check (typecheck + lint + build), clean, ship (check, then deploy)
+  - Vercel ready: vercel.json (SPA rewrite, asset caching), .vercelignore, Node and pnpm pinned
   - initial git commit
 
 Requires Node ${NODE_MAJOR}.x. pnpm is pinned to major ${PNPM_MAJOR} via corepack.
@@ -109,7 +110,7 @@ pnpm up --latest --silent || die "pnpm up --latest failed"
 
 step "adding project scripts (typecheck, check, clean, ship)"
 mkdir -p scripts
-node - <<'NODE'
+PNPM_VERSION="$(pnpm -v)" NODE_MAJOR="$NODE_MAJOR" node - <<'NODE'
 const fs = require('node:fs')
 const pkg = JSON.parse(fs.readFileSync('package.json', 'utf8'))
 pkg.scripts = {
@@ -119,6 +120,9 @@ pkg.scripts = {
   clean: "node -e \"for (const p of ['dist', 'node_modules/.vite']) require('node:fs').rmSync(p, { recursive: true, force: true })\"",
   ship: 'node scripts/ship.mjs',
 }
+// Vercel builds from source on its own machine: pin the Node major and the exact pnpm it uses.
+pkg.engines = { node: `${process.env.NODE_MAJOR}.x` }
+pkg.packageManager = `pnpm@${process.env.PNPM_VERSION}`
 fs.writeFileSync('package.json', JSON.stringify(pkg, null, 2) + '\n')
 NODE
 cat > scripts/ship.mjs <<'EOF'
@@ -126,7 +130,7 @@ cat > scripts/ship.mjs <<'EOF'
 // Deploy target, first match wins:
 //   1. a "deploy" script in package.json   -> pnpm run deploy
 //   2. cloudflare.config.ts                -> cf deploy
-//   3. vercel.json, vercel.ts or .vercel   -> vercel --prod
+//   3. vercel.json, vercel.ts or .vercel   -> vercel deploy --prod --yes (the first run links the project)
 // Exit codes: 0 shipped, 1 a step failed, 3 checks passed but there is no deploy target.
 import { spawnSync } from 'node:child_process'
 import { existsSync, readFileSync } from 'node:fs'
@@ -147,11 +151,11 @@ const scripts = JSON.parse(readFileSync('package.json', 'utf8')).scripts ?? {}
 let name, command, args
 if (scripts.deploy) [name, command, args] = ['package.json deploy script', 'pnpm', ['run', 'deploy']]
 else if (existsSync('cloudflare.config.ts')) [name, command, args] = ['Cloudflare Workers', 'cf', ['deploy']]
-else if (['vercel.json', 'vercel.ts', '.vercel'].some(existsSync)) [name, command, args] = ['Vercel', 'vercel', ['--prod']]
+else if (['vercel.json', 'vercel.ts', '.vercel'].some(existsSync)) [name, command, args] = ['Vercel', 'vercel', ['deploy', '--prod', '--yes']]
 
 if (!command) {
   console.log('\n✓ checks passed, but there is no deploy target, so nothing was deployed.')
-  console.log('  Add a "deploy" script, a cloudflare.config.ts, or run the vercel skill to create vercel.json.')
+  console.log('  Add a "deploy" script, a cloudflare.config.ts, or a vercel.json.')
   process.exit(3)
 }
 
@@ -160,12 +164,40 @@ if (command === 'cf') {
   if (who.error) fail('the cf CLI is not installed or not on PATH')
   if (who.status !== 0) fail('not signed in to Cloudflare. Run: cf auth login')
 }
-if (command === 'vercel' && read('vercel', ['--version']).status !== 0) [command, args] = ['npx', ['vercel', '--prod']]
+if (command === 'vercel') {
+  if (read('vercel', ['--version']).status !== 0) [command, args] = ['npx', ['vercel', ...args]]
+  const who = command === 'npx' ? read('npx', ['vercel', 'whoami']) : read('vercel', ['whoami'])
+  if (who.status !== 0) fail('not signed in to Vercel. Run: vercel login')
+}
 
 step(`deploying to ${name}`)
 if (run(command, args).status !== 0) fail(`deploy to ${name} failed`)
 console.log(`\n✓ shipped to ${name}`)
 EOF
+
+step "writing Vercel config"
+cat > vercel.json <<'EOF'
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "framework": "vite",
+  "outputDirectory": "dist",
+  "rewrites": [{ "source": "/(.*)", "destination": "/index.html" }],
+  "headers": [
+    { "source": "/assets/(.*)", "headers": [{ "key": "Cache-Control", "value": "public, max-age=31536000, immutable" }] },
+    {
+      "source": "/(.*)",
+      "headers": [
+        { "key": "X-Content-Type-Options", "value": "nosniff" },
+        { "key": "Referrer-Policy", "value": "strict-origin-when-cross-origin" },
+        { "key": "X-Frame-Options", "value": "DENY" }
+      ]
+    }
+  ]
+}
+EOF
+# Vercel uploads source and builds it there: keep local build output and tooling out of the upload.
+printf '%s\n' dist .idea .vscode .DS_Store '*.log' '*.local' > .vercelignore
+grep -qx '.vercel' .gitignore 2>/dev/null || echo '.vercel' >> .gitignore
 
 step "committing"
 git init -b main -q

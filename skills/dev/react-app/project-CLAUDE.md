@@ -42,8 +42,12 @@ Empty means go. Anything listed gets committed first — so there is always a cl
 pnpm add react-router
 ```
 
-Deep links then need an SPA fallback on the host (the `vercel` skill writes it into `vercel.json`). Without it the app navigates fine, then 404s on refresh or on any shared deep link.
+Deep links need an SPA fallback on the host. `vercel.json` already rewrites every path to `index.html`; on another host, add the same rule, or the app 404s on refresh and on shared deep links.
 
 ## Deploy
 
-Set up a target once; after that `pnpm ship` deploys to production. It uses the first target it finds: a `deploy` script in `package.json`, then `cloudflare.config.ts` (Cloudflare), then Vercel config (the `vercel` skill writes it).
+`pnpm ship` deploys to production. It uses the first target it finds: a `deploy` script in `package.json`, then `cloudflare.config.ts` (Cloudflare), then `vercel.json` (Vercel, set up when the project was created). The first Vercel deploy links the project; sign in once with `vercel login`.
+
+- Vercel builds the source on its own machine. `engines.node` and `packageManager` in `package.json` pin its Node and pnpm, so keep them matching your machine.
+- `VITE_` variables are inlined into the public bundle: never put a secret in one. `.env.local` does not reach Vercel; add each variable with `vercel env add NAME production`.
+- After a deploy, check a deep route: `curl -sI <url>/any/route` returns 200 when the rewrite works.

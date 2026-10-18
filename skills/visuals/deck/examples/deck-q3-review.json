@@ -25,25 +25,6 @@
       }
     },
     {
-      "type": "hero",
-      "title": "Checkout is 3× faster, and conversion rose 11% in the pilot",
-      "value": "0.8s",
-      "label": "median checkout time, September",
-      "before": "2.4s",
-      "after": "0.8s",
-      "beforeLabel": "March",
-      "afterLabel": "September",
-      "notes": ["Pilot conversion rose 11% on 20% of traffic over 6 weeks", "Full rollout completed 28 September"],
-      "trend": {
-        "title": "Median checkout time, seconds",
-        "labels": ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep"],
-        "values": [2.5, 2.4, 2.4, 2.3, 2.2, 1.4, 1.0, 0.9, 0.8],
-        "format": { "suffix": "s", "decimals": 1 },
-        "zero": true,
-        "markers": [{ "at": "Jun", "label": "New checkout live" }]
-      }
-    },
-    {
       "type": "kpis",
       "title": "All 4 platform KPIs beat target for the first time",
       "items": [
@@ -65,11 +46,7 @@
         { "name": "2025", "values": [342, 330, 351, 360, 366, 371, 380, 392, 405] }
       ],
       "format": { "suffix": "K" },
-      "markers": [{ "at": "Jun", "label": "Launch" }],
-      "side": [
-        { "value": "+77%", "label": "monthly orders, June to September" },
-        { "value": "0", "label": "major outages since launch, down from **3** in the first half" }
-      ]
+      "markers": [{ "at": "Jun", "label": "Launch" }]
     },
     {
       "type": "compare",
@@ -82,77 +59,6 @@
         { "label": "Payment failures", "note": "share of attempts", "before": 1.9, "after": 0.7, "format": { "suffix": "%", "decimals": 1 }, "better": "lower" },
         { "label": "Payment support tickets", "note": "per quarter", "before": 4200, "after": 1600, "better": "lower" }
       ]
-    },
-    {
-      "type": "waterfall",
-      "title": "Three changes cut monthly infrastructure spend by $148K",
-      "subtitle": "Monthly infrastructure cost, June to September",
-      "start": { "label": "June", "value": 412 },
-      "steps": [
-        { "label": "ARM instances", "value": -62 },
-        { "label": "Storage tiering", "value": -41 },
-        { "label": "Right-sizing", "value": -58 },
-        { "label": "Order growth", "value": 13 }
-      ],
-      "end": { "label": "September" },
-      "format": { "prefix": "$", "suffix": "K" },
-      "better": "lower",
-      "side": [
-        { "value": "$1.8M", "label": "annualised saving at September run rate" },
-        { "value": "−36%", "label": "monthly spend while orders grew 77%" }
-      ]
-    },
-    {
-      "type": "bars",
-      "title": "Teams on the new platform release 4× more often than teams still migrating",
-      "subtitle": "Releases per week, September",
-      "items": [
-        { "label": "Checkout", "value": 21, "highlight": true },
-        { "label": "Payments", "value": 18, "highlight": true },
-        { "label": "Orders", "value": 16, "highlight": true },
-        { "label": "Search", "value": 5 },
-        { "label": "Catalog", "value": 4 },
-        { "label": "Accounts", "value": 4 }
-      ],
-      "side": [
-        { "value": "18.3", "label": "average for the 3 teams on the platform" },
-        { "value": "4.3", "label": "average for the 3 teams still migrating" }
-      ]
-    },
-    {
-      "type": "wins",
-      "title": "Six team results the business can measure, all shipped in Q3",
-      "items": [
-        { "metric": "+11%", "win": "One-tap pay with saved cards and wallets", "team": "Payments" },
-        { "metric": "0.8s", "win": "New checkout, rebuilt on event-driven orders", "team": "Checkout" },
-        { "metric": "−62%", "win": "Fewer payment support tickets after retry logic", "team": "Payments" },
-        { "metric": "9 min", "win": "Merge-to-production pipeline for all services", "team": "Developer Experience" },
-        { "metric": "$148K", "win": "Lower monthly cloud spend from three cost projects", "team": "Infrastructure" },
-        { "metric": "0", "win": "Major outages since launch, with automatic rollback", "team": "Reliability" }
-      ]
-    },
-    {
-      "type": "scorecard",
-      "title": "Q4 outlook: 3 of 6 targets on track, 3 need attention",
-      "periods": ["Q2", "Q3"],
-      "rows": [
-        { "metric": "Release lead time", "before": 42, "now": 9, "target": 15, "format": { "suffix": " min" }, "better": "lower", "spark": [44, 42, 38, 30, 21, 14, 11, 9] },
-        { "metric": "Checkout availability", "before": 99.81, "now": 99.97, "target": 99.95, "format": { "suffix": "%", "decimals": 2 }, "better": "higher", "spark": [99.8, 99.84, 99.86, 99.93, 99.95, 99.96, 99.97] },
-        { "metric": "Cost per order", "before": 0.021, "now": 0.013, "target": 0.015, "format": { "prefix": "$", "decimals": 3 }, "better": "lower", "spark": [21, 20, 19, 16, 15, 14, 13] },
-        { "metric": "Conversion rate", "before": 3.1, "now": 3.45, "target": 3.5, "format": { "suffix": "%", "decimals": 2 }, "better": "higher", "spark": [3.1, 3.1, 3.2, 3.3, 3.4, 3.45] },
-        { "metric": "Search on platform", "note": "services migrated", "before": 0, "now": 2, "target": 9, "format": { "suffix": " of 9" }, "better": "higher", "statusLabel": "At risk: needs staff", "spark": [0, 0, 1, 1, 2, 2] },
-        { "metric": "Mobile checkout time", "note": "median", "before": 2.8, "now": 2.9, "target": 1.5, "format": { "suffix": "s", "decimals": 1 }, "better": "lower", "spark": [2.8, 2.8, 2.9, 2.9, 3.0, 2.9] }
-      ]
-    },
-    {
-      "type": "impact",
-      "title": "How 1.6 seconds faster checkout became $2.1M in yearly revenue",
-      "steps": [
-        { "label": "What we built", "value": "Event-driven orders", "detail": "Orders are saved first and processed in the background, so checkout no longer waits for invoicing and email." },
-        { "label": "What customers felt", "value": "2.4s → 0.8s", "detail": "Median checkout time. Mobile users on slow networks gained the most." },
-        { "label": "What the business gained", "value": "+$2.1M a year", "detail": "11% pilot conversion uplift × checkout revenue, annualised. Estimate, ±$0.4M." }
-      ],
-      "footnote": "Method: uplift measured in a 6-week A/B test on 20% of traffic; revenue estimate uses Q3 average order value of $58."
     },
     {
       "type": "next",

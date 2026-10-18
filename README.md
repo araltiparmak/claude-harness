@@ -46,7 +46,7 @@ Skills sit in group folders; `update.sh` links each one into `~/.claude/skills/`
 
 | Skill | What it does |
 |---|---|
-| [deck](skills/visuals/deck/SKILL.md) | Builds presentation decks (PDF, PNG slides or a presentable HTML file) from a JSON spec for a company-wide audience: results, KPIs, team wins, next steps |
+| [deck](skills/visuals/deck/SKILL.md) | Builds presentation decks (PDF, PNG slides or a presentable HTML file) from a JSON spec for a company-wide audience: summary, KPIs, trends, before and after, next steps |
 | [diagrams](skills/visuals/diagrams/SKILL.md) | Draws technical diagrams (architecture with AWS icons, message chains, sequence, ER, state, flow) as SVG and PNG with Mermaid and D2, plain or hand-drawn (whiteboard style), for PRs and docs |
 | [explain](skills/visuals/explain/SKILL.md) | Builds a one-page brief that explains a feature to developers, testers and a PM: scope, architecture (D2, whiteboard style), flow and states (Mermaid), a decision table, rules with test examples, open questions |
 | [mindmap](skills/visuals/mindmap/SKILL.md) | Turns a Markdown outline into an interactive mind map (HTML) and a PNG with markmap, for topic trees and study maps |
@@ -56,8 +56,7 @@ Skills sit in group folders; `update.sh` links each one into `~/.claude/skills/`
 | Skill | What it does |
 |---|---|
 | [mobile-app](skills/dev/mobile-app/SKILL.md) | Recommends the default stack for a new Expo + React Native + TypeScript app, one decision at a time |
-| [react-app](skills/dev/react-app/SKILL.md) | Scaffolds a React + Vite + TS + Tailwind prototype via `cra` (project scripts `check` and `ship` included) and builds v1 (user-invoked: `/react-app`) |
-| [vercel](skills/dev/vercel/SKILL.md) | Deploys a Vite/React project to Vercel, or repairs its deploy path |
+| [react-app](skills/dev/react-app/SKILL.md) | Scaffolds a React + Vite + TS + Tailwind prototype via `cra`, ready for Vercel (`pnpm ship` checks and deploys), and builds v1 (user-invoked: `/react-app`) |
 
 ### Todo
 
@@ -69,7 +68,7 @@ A typical run, from idea to live URL:
 
 ```text
 /react-app habit-tracker 3        scaffold with cra, verify Tailwind, commit, build v1 at effort 3
-/vercel                           pin Node and pnpm, write vercel.json, preview, then production
+pnpm ship                         clean tree, pnpm check, deploy (Vercel config is already in place)
 ```
 
 ## Use these skills
