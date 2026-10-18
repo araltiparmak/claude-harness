@@ -12,17 +12,20 @@ die() { printf '\033[31merror:\033[0m %s\n' "$*" >&2; exit 1; }
 step() { printf '\033[36m▸\033[0m %s\n' "$*"; }
 
 NAME="${1:-}"
+TARGET="${2:-vercel}"   # where pnpm ship deploys: vercel or cloudflare
 case "$NAME" in
   ''|-h|--help)
     cat <<USAGE
-usage: cra <kebab-case-name>
+usage: cra <kebab-case-name> [vercel|cloudflare]
 
 Creates $PROJECTS_DIR/<name> as a React + Vite + TS + Tailwind v4 project:
   - free port pinned in vite.config.ts (strictPort)
   - @/ alias wired in BOTH vite.config.ts and tsconfig.app.json
   - Tailwind v4 via @tailwindcss/vite (no config file, no PostCSS)
   - scripts: typecheck, check (typecheck + lint + build), clean, ship (check, then deploy)
-  - Vercel ready: vercel.json (SPA rewrite, asset caching), .vercelignore, Node and pnpm pinned
+  - deploy target for pnpm ship, Node and pnpm pinned:
+      vercel (default)  vercel.json (SPA rewrite, asset caching), .vercelignore
+      cloudflare        cloudflare.config.ts (Workers static assets, SPA fallback), the Cloudflare Vite plugin, cf
   - initial git commit
 
 Requires Node ${NODE_MAJOR}.x. pnpm is pinned to major ${PNPM_MAJOR} via corepack.
@@ -31,6 +34,7 @@ USAGE
 esac
 
 [[ "$NAME" =~ ^[a-z0-9]+(-[a-z0-9]+)*$ ]] || die "name must be kebab-case: '$NAME'"
+case "$TARGET" in vercel|cloudflare) ;; *) die "target must be vercel or cloudflare: '$TARGET'" ;; esac
 
 DEST="$PROJECTS_DIR/$NAME"
 [[ -e "$DEST" ]] && die "$DEST already exists"
@@ -120,7 +124,7 @@ pkg.scripts = {
   clean: "node -e \"for (const p of ['dist', 'node_modules/.vite']) require('node:fs').rmSync(p, { recursive: true, force: true })\"",
   ship: 'node scripts/ship.mjs',
 }
-// Vercel builds from source on its own machine: pin the Node major and the exact pnpm it uses.
+// Pin the Node major and the exact pnpm, so a build on the host matches this machine.
 pkg.engines = { node: `${process.env.NODE_MAJOR}.x` }
 pkg.packageManager = `pnpm@${process.env.PNPM_VERSION}`
 fs.writeFileSync('package.json', JSON.stringify(pkg, null, 2) + '\n')
@@ -160,9 +164,9 @@ if (!command) {
 }
 
 if (command === 'cf') {
-  const who = read('cf', ['auth', 'whoami'])
-  if (who.error) fail('the cf CLI is not installed or not on PATH')
-  if (who.status !== 0) fail('not signed in to Cloudflare. Run: cf auth login')
+  if (read('cf', ['--version']).status !== 0) [command, args] = ['pnpm', ['exec', 'cf', ...args]]
+  const who = command === 'pnpm' ? read('pnpm', ['exec', 'cf', 'auth', 'whoami']) : read('cf', ['auth', 'whoami'])
+  if (who.error || who.status !== 0) fail('not signed in to Cloudflare, or the cf CLI is missing. Run: cf auth login')
 }
 if (command === 'vercel') {
   if (read('vercel', ['--version']).status !== 0) [command, args] = ['npx', ['vercel', ...args]]
@@ -175,6 +179,7 @@ if (run(command, args).status !== 0) fail(`deploy to ${name} failed`)
 console.log(`\n✓ shipped to ${name}`)
 EOF
 
+if [[ "$TARGET" == vercel ]]; then
 step "writing Vercel config"
 cat > vercel.json <<'EOF'
 {
@@ -198,6 +203,35 @@ EOF
 # Vercel uploads source and builds it there: keep local build output and tooling out of the upload.
 printf '%s\n' dist .idea .vscode .DS_Store '*.log' '*.local' > .vercelignore
 grep -qx '.vercel' .gitignore 2>/dev/null || echo '.vercel' >> .gitignore
+else
+step "writing Cloudflare config"
+# The 2.x beta of the Vite plugin is the one that reads cloudflare.config.ts (1.x needs a Wrangler file).
+pnpm add -D cf@latest @cloudflare/vite-plugin@beta --silent || die "installing cf and the Cloudflare Vite plugin failed"
+perl -0pi -e "s|import tailwindcss from '\@tailwindcss/vite'\n|import tailwindcss from '\@tailwindcss/vite'\nimport { cloudflare } from '\@cloudflare/vite-plugin'\n|; s|plugins: \[react\(\), tailwindcss\(\)\]|plugins: [react(), tailwindcss(), cloudflare()]|" vite.config.ts
+grep -q 'cloudflare()' vite.config.ts || die "failed to add the Cloudflare plugin to vite.config.ts"
+# The project name becomes the Worker name; the build is served as static assets.
+cat > cloudflare.config.ts <<EOF
+import { defineConfig } from "cf/config";
+
+export default defineConfig({
+  worker: {
+    name: "$NAME",
+    compatibilityDate: "$(date +%F)",
+    observability: { enabled: true },
+    assets: { notFoundHandling: "single-page-application" },
+  },
+});
+EOF
+printf '%s\n' .cloudflare .wrangler >> .gitignore
+fi
+
+step "verifying Tailwind in the build"
+pnpm build >"$LOG" 2>&1 || die "pnpm build failed — see $LOG"
+# A green build with no utilities in the CSS means Tailwind is not wired: every class would do nothing.
+# The Cloudflare plugin builds into .cloudflare/output instead of dist.
+css_files="$(find dist .cloudflare -name '*.css' 2>/dev/null || true)"
+[[ -n "$css_files" ]] && printf '%s\n' "$css_files" | xargs grep -q 'justify-content' \
+  || die "the built CSS has no Tailwind utilities; check @tailwindcss/vite in vite.config.ts"
 
 step "committing"
 git init -b main -q

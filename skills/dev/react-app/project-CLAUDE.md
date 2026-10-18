@@ -42,12 +42,13 @@ Empty means go. Anything listed gets committed first — so there is always a cl
 pnpm add react-router
 ```
 
-Deep links need an SPA fallback on the host. `vercel.json` already rewrites every path to `index.html`; on another host, add the same rule, or the app 404s on refresh and on shared deep links.
+Deep links need an SPA fallback on the host, or the app 404s on refresh and on shared deep links. `vercel.json` (a rewrite to `index.html`) and `cloudflare.config.ts` (`notFoundHandling: "single-page-application"`) already have it.
 
 ## Deploy
 
-`pnpm ship` deploys to production. It uses the first target it finds: a `deploy` script in `package.json`, then `cloudflare.config.ts` (Cloudflare), then `vercel.json` (Vercel, set up when the project was created). The first Vercel deploy links the project; sign in once with `vercel login`.
+`pnpm ship` deploys to production. It uses the first target it finds: a `deploy` script in `package.json`, then `cloudflare.config.ts` (Cloudflare Workers, `cf deploy`), then `vercel.json` (Vercel). The project was created with one of the two configs; to move it, add the other host's file and delete the old one. Sign in once with `cf auth login` or `vercel login`.
 
-- Vercel builds the source on its own machine. `engines.node` and `packageManager` in `package.json` pin its Node and pnpm, so keep them matching your machine.
-- `VITE_` variables are inlined into the public bundle: never put a secret in one. `.env.local` does not reach Vercel; add each variable with `vercel env add NAME production`.
+- `VITE_` variables are inlined into the public bundle: never put a secret in one. `.env.local` reaches neither host.
+- Vercel builds the source on its own machine; `engines.node` and `packageManager` in `package.json` pin its Node and pnpm. Add a variable there with `vercel env add NAME production`.
+- On Cloudflare, `@cloudflare/vite-plugin` in `vite.config.ts` builds into `.cloudflare/output/` instead of `dist/`, and `cf deploy` uploads that. The Worker is named after the project in `cloudflare.config.ts`; `pnpm exec cf deploy --dry-run` checks a deploy without uploading.
 - After a deploy, check a deep route: `curl -sI <url>/any/route` returns 200 when the rewrite works.

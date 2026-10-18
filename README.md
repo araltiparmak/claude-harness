@@ -56,7 +56,7 @@ Skills sit in group folders; `update.sh` links each one into `~/.claude/skills/`
 | Skill | What it does |
 |---|---|
 | [mobile-app](skills/dev/mobile-app/SKILL.md) | Recommends the default stack for a new Expo + React Native + TypeScript app, one decision at a time |
-| [react-app](skills/dev/react-app/SKILL.md) | Scaffolds a React + Vite + TS + Tailwind prototype via `cra`, ready for Vercel (`pnpm ship` checks and deploys), and builds v1 (user-invoked: `/react-app`) |
+| [react-app](skills/dev/react-app/SKILL.md) | Scaffolds a React + Vite + TS + Tailwind prototype via `cra`, ready for Vercel or Cloudflare (`pnpm ship` checks and deploys), and builds v1 (user-invoked: `/react-app`) |
 
 ### Todo
 
@@ -67,8 +67,8 @@ Skills sit in group folders; `update.sh` links each one into `~/.claude/skills/`
 A typical run, from idea to live URL:
 
 ```text
-/react-app habit-tracker 3        scaffold with cra, verify Tailwind, commit, build v1 at effort 3
-pnpm ship                         clean tree, pnpm check, deploy (Vercel config is already in place)
+/react-app habit-tracker 3        scaffold with cra, verify Tailwind, commit, build v1 at effort 3 (add "cloudflare" for Workers)
+pnpm ship                         clean tree, pnpm check, deploy to Vercel or Cloudflare
 ```
 
 ## Use these skills
