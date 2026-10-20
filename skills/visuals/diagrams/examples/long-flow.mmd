@@ -1,0 +1,12 @@
+%% A long flow wrapped into stages: each stage reads left to right, the stages stack like lines of text.
+flowchart TB
+  subgraph intake [Intake]
+    direction LR
+    a[Order placed] -- order --> b[Validate] -- valid order --> c[Reserve stock] -- reservation --> d[Charge card]
+    b -. invalid .-> x[Reject]
+  end
+  subgraph fulfil [Fulfilment]
+    direction LR
+    e[Pick] -- items --> f[Pack] -- parcel --> g[Ship] -- tracking id --> h[Notify customer]
+  end
+  intake -- paid order --> fulfil

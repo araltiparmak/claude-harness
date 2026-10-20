@@ -1,5 +1,6 @@
-# Message chain: services hand a message along, each hop through a queue or topic.
-# Number the edges in hop order, so the reader follows the chain without arrows crossing.
+# Services talking through SNS and SQS: a few topics carry several message types,
+# and each consumer reads from its own queue subscribed to a topic.
+# The publish edge names the types a producer sends; a subscription edge names the types that queue listens to.
 direction: right
 
 classes: {
@@ -21,16 +22,24 @@ classes: {
 }
 
 orders: Orders { class: svc }
-q1: orders-events { class: q; icon: ICONS/aws/sqs.svg }
+t1: order-events { class: q; icon: ICONS/aws/sns.svg }
+q1: billing-orders { class: q; icon: ICONS/aws/sqs.svg }
+q2: shipping-orders { class: q; icon: ICONS/aws/sqs.svg }
+q3: notify-orders { class: q; icon: ICONS/aws/sqs.svg }
 billing: Billing { class: svc }
-t1: billing-events { class: q; icon: ICONS/aws/sns.svg }
 shipping: Shipping { class: svc }
 notify: Notifications { class: svc }
-dlq: billing-dlq { class: dead }
+db1: invoices { class: q; icon: ICONS/aws/dynamodb.svg }
+db2: shipments { class: q; icon: ICONS/aws/dynamodb.svg }
+dlq: billing-orders-dlq { class: dead }
 
-orders -> q1: "1 order.created" { class: hop }
-q1 -> billing: "2 consume" { class: hop }
-billing -> t1: "3 invoice.paid" { class: hop }
-t1 -> shipping: "4 fan-out" { class: hop }
-t1 -> notify: "4 fan-out" { class: hop }
+orders -> t1: "order.created\norder.cancelled" { class: hop }
+t1 -> q1: "order.created\norder.cancelled" { class: hop }
+t1 -> q2: "order.created" { class: hop }
+t1 -> q3: "order.cancelled" { class: hop }
+q1 -> billing: consume { class: hop }
+q2 -> shipping: consume { class: hop }
+q3 -> notify: consume { class: hop }
+billing -> db1: write { class: hop }
+shipping -> db2: write { class: hop }
 q1 -> dlq: "after 3 failures" { class: hop; style.stroke-dash: 4 }
