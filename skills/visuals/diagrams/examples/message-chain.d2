@@ -1,6 +1,8 @@
 # Services talking through SNS and SQS: a few topics carry several message types,
 # and each consumer reads from its own queue subscribed to a topic.
 # The publish edge names the types a producer sends; a subscription edge names the types that queue listens to.
+# ELK puts every node one column right of what feeds it: consumers of one topic stand side by side in one column.
+vars: { d2-config: { layout-engine: elk } }
 direction: right
 
 classes: {

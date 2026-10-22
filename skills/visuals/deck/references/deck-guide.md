@@ -34,6 +34,18 @@ Decks go to the whole company: leadership, other teams, people far from the work
 | Something grew or fell over time, with a cause | `trend` with `markers` |
 | Before vs after across metrics | `compare` |
 | What happens next and what we need | `next` |
+| One message, or one number, that should land hard: an opener, a section break, a headline result | `statement` |
+
+## Bold style
+
+A bold deck is built from `statement` slides only: one short sentence on a bright solid colour, and a big number when the slide has one. It suits an all-hands or a team showcase, where the room should remember three results rather than read a chart.
+
+- **A number only when the user gave it.** A statement without a number is complete; it never carries `TBD`.
+- **The number speaks, the title explains.** With a number, the title says what it changed for the business and need not repeat it ("Faster checkout turned into revenue" under $2.1M). The `label` says what the number counts.
+- **Short.** About 60 characters for a title alone, 50 beside a number; `subtitle` is one line.
+- **Colour.** Slides take blue, orange, green, violet, yellow and pink in turn, never the same colour twice in a row. Set `color` only when the colour carries meaning, such as `green` for a result that saved money.
+
+The data style and the bold style mix: a `statement` slide works as an opener or a section break before `kpis` or `trend`.
 
 ## Spec format
 
@@ -58,12 +70,13 @@ Every slide except `title` takes `title`, optional `subtitle` and optional `sour
 | `trend` | `labels[]`, `series[] {name, values[], display}` (the first is the focus, the second grey context), `format`, `zero`, `markers[] {at, label}`, `target {value, label}` |
 | `compare` | `beforeLabel`, `afterLabel`, `rows[] {label, note, before, after, format, better, change}` (up to 5) |
 | `next` | `priorities[] {title, detail, when}`, `asks[] {text, owner}`, `asksLabel` |
+| `statement` | `title`, `subtitle`, `number`, `format`, `label` (needs `number`), `color` (`blue`, `orange`, `green`, `violet`, `yellow`, `pink`) |
 
 - `format` is `{prefix, suffix, decimals}`, for example `{"prefix": "$", "suffix": "K"}`.
 - `better` is `"higher"` (default) or `"lower"`; it decides whether a change shows green or red.
 - `change` is `"percent"`, `"points"` or `"diff"`. A value with suffix `%` defaults to points, so 38% to 61% shows +23 pt.
 
-Colour is fixed: cards rotate through the palette, green means good, red means bad, and violet marks the decision.
+Colour is fixed: cards rotate through the palette, green means good, red means bad, and violet marks the decision. `statement` slides use their own bright colours (Bold style).
 
 ## Script output
 

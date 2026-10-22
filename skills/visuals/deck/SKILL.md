@@ -1,6 +1,6 @@
 ---
 name: deck
-description: Builds presentation decks as PDF, PNG slides or a presentable HTML file from a JSON spec: team successes, quarterly results, KPIs, cost savings, before/after, roadmap and next steps, written for a company-wide audience. Use when the user wants a presentation, slides or a deck (all-hands, company update, leadership review, team showcase), or a single slide or visual that shows results and numbers.
+description: Builds presentation decks as PNG slides, a presentable HTML page or PDF from a JSON spec: team successes, quarterly results, KPIs, cost savings, before/after, roadmap and next steps, written for a company-wide audience, in a data style or a bold style (one message per slide on a bright solid colour). Use when the user wants a presentation, slides or a deck (all-hands, company update, leadership review, team showcase), a bold, simple or colourful deck, or a single slide or visual that shows results and numbers.
 ---
 
 # Decks
@@ -19,34 +19,35 @@ You write the content as a JSON spec; `scripts/slides.mjs` owns layout, charts, 
 
 ## Output type
 
-Pick the format from the user's words and pass `--format`. When they name none, build all three.
+PNG is the default. Pass another `--format` only when the user's words ask for it.
 
 | The user says | Flag | They get |
 |---|---|---|
-| "PDF", "send it", "email", "attach" | `--format pdf` | `deck.pdf` |
-| "PNG", "images", "Slack", "Confluence", "paste in a doc" | `--format png` | `slide-01.png`, ... (2560×1440) |
-| "HTML", "present", "in the browser", "share a link" | `--format html` | `deck.html`: one file; arrow keys move, F is fullscreen |
-| nothing | (none) | all of the above |
+| nothing, "PNG", "images", "Slack", "paste in a doc" | (none) | `slide-01.png`, ... (2560×1440) |
+| "HTML", "web page", "present", "in the browser", "share a link", "Artifact" | `--format html` | the PNGs and `deck.html`: one file; arrow keys move, F is fullscreen. Publish `deck.html` as built when an Artifact is asked for |
+| "PDF" | `--format pdf` | the PNGs and `deck.pdf` |
 
-Several at once: `--format pdf,html`.
+The script writes the PNGs in every build, because step 6 checks them.
 
 ## Steps
 
 1. **Collect the numbers.** List every gap as `TBD`.
-2. **Outline as titles.** One action title per slide: `title`, `summary`, evidence slides, `next`. When the user gave data but no story, show the outline and wait for agreement.
+2. **Outline as titles.** One action title per slide: `title`, `summary`, evidence slides, `next`. A bold deck is `statement` slides only. When the user gave data but no story, show the outline and wait for agreement.
 3. **Write the spec** to `decks/<name>.json` in the project, or the scratchpad for a throwaway.
-4. **Build:** `node scripts/slides.mjs <deck.json> [out-dir] --format <formats>`.
+4. **Build:** `node scripts/slides.mjs <deck.json> [out-dir] [--format html|pdf]`.
 5. **Fix findings** (rule 7) until the script prints `lint: clean`.
-6. **Read every PNG.** When the user did not ask for PNGs, add `png` to the build for this check anyway; the PNGs are for you, so report only the formats the user asked for. Done means: each slide's body proves its title, someone outside the team could read every slide, and the same number has the same value on every slide.
+6. **Read `contact.png`**, every slide on one sheet, on the first clean build. Read a single `slide-NN.png` only to look closer at one slide, and after a later fix only the slides that changed. Never read `deck.html`: the PNGs are the same slides. Done means: each slide's body proves its title, someone outside the team could read every slide, and the same number has the same value on every slide.
 7. **Report** the output paths and the `TBD` list.
 
-Read [`references/deck-guide.md`](references/deck-guide.md) when choosing slide types, writing for the audience, or using a field the examples do not show. It holds every field of the six slide types.
+Read [`references/deck-guide.md`](references/deck-guide.md) when choosing slide types, writing for the audience, or using a field the examples do not show. It holds every field of the seven slide types.
 
 ## Examples
 
 All numbers are sample data.
 
-`examples/deck-q3-review.json` is a 6-slide review that uses every slide type once: `title`, `summary`, `kpis`, `trend`, `compare`, `next`.
+`examples/deck-q3-review.json` is a 6-slide review in the data style that uses every slide type once: `title`, `summary`, `kpis`, `trend`, `compare`, `next`.
+
+`examples/deck-bold.json` is the same story as a 5-slide bold deck: `statement` slides with and without a number.
 
 ## Setup
 

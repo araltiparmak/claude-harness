@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // Builds a presentation deck from a JSON spec.
-// Usage: node slides.mjs <deck.json> [out-dir] [--format pdf,png,html]
-// Writes deck.pdf, slide-NN.png (2x) and deck.html (a presenter: arrow keys, F for fullscreen), then prints the layout check.
+// Usage: node slides.mjs <deck.json> [out-dir] [--format html|pdf|html,pdf]
+// Writes slide-NN.png (2x), plus deck.html (a presenter: arrow keys, F for fullscreen) and deck.pdf when asked, then prints the layout check.
 // Exit code 2 means the spec is invalid; 3 means a slide failed the layout check (text clipped or overflowing).
 import fs from 'node:fs';
 import path from 'node:path';
@@ -27,6 +27,16 @@ const PALETTE = [
   { name: 'violet', bg: '#e5ddfd', tint: '#5b34d4', mark: '#5b34d4', ink: '#33188c' },
   { name: 'amber', bg: '#fbe9b0', tint: '#e0a100', mark: '#b07a00', ink: '#5c3f00' },
   { name: 'red', bg: '#fcd9e1', tint: '#d0244c', mark: '#d0244c', ink: '#850f2c' },
+];
+// Full-slide colours for `statement` slides: bright, each with a coloured ink (a contrasting hue or a deep shade
+// of its own) that reads at 4.9:1 or better.
+const BOLD = [
+  { name: 'blue', bg: '#1f4bff', ink: '#fff07a' },
+  { name: 'orange', bg: '#ff5a1f', ink: '#1b1464' },
+  { name: 'green', bg: '#00b37e', ink: '#00331f' },
+  { name: 'violet', bg: '#6b2bff', ink: '#b8ffd6' },
+  { name: 'yellow', bg: '#ffcc00', ink: '#1d2fd6' },
+  { name: 'pink', bg: '#ff2e7e', ink: '#2b0640' },
 ];
 // Fixed palette: green, red and amber keep their meaning; violet marks a decision.
 let th = { ...DEFAULT_THEME, palette: PALETTE, accent: PALETTE[0].mark, accentInk: PALETTE[0].ink, accentWash: PALETTE[0].bg };
@@ -244,6 +254,14 @@ const SLIDES = {
         <div class="delta big ${good ? 'good' : 'bad'}" style="${hv(role(good ? 'green' : 'red'))}"><span class="arrow">${d < 0 ? '▼' : '▲'}</span>${changeText}</div></div>`;
     }).join('')}</main>`,
 
+  // One message on a solid colour; the number, when given, is the biggest thing on the slide.
+  statement: s => {
+    const num = typeof s.number === 'number'
+      ? `<div class="st-num"><div class="st-n">${esc(fmt(s.number, s.format || {}))}</div>${s.label ? `<div class="st-l">${md(s.label)}</div>` : ''}</div>` : '';
+    return `<main class="st${num ? ' has-n' : ''}">${num}
+    <div><h1 class="st-h">${md(s.title)}</h1>${s.subtitle ? `<p class="st-d">${md(s.subtitle)}</p>` : ''}</div></main>`;
+  },
+
   next: s => `<main class="next">
     <div class="prio">${s.priorities.map((p, i) => `<div class="p-row" style="${hv(hue(i))}"><div><div class="p-t"><i class="dot"></i>${esc(p.title)}</div>${p.detail ? `<div class="p-d">${md(p.detail)}</div>` : ''}</div><div class="p-w">${esc(p.when || '')}</div></div>`).join('')}</div>
     ${s.asks ? `<aside class="ask" style="${hv(role('violet'))}"><div class="ask-l">${esc(s.asksLabel || 'Decisions needed')}</div>
@@ -335,6 +353,17 @@ svg text{font-family:${th.font}}
 .dot{width:14px;height:14px;border-radius:50%;background:var(--mark);flex:none}
 .p-d{font-size:16.5px;color:${th.ink2};margin-top:6px;line-height:1.4;max-width:600px;padding-left:26px}
 .p-w{font-size:15px;font-weight:600;white-space:nowrap;background:var(--bg);color:var(--ink);padding:6px 14px;border-radius:999px}
+/* statement */
+.slide.bold{background:var(--sb);color:var(--si);padding:64px 72px 0}
+.slide.bold strong{color:inherit;font-weight:800}
+.slide.bold footer{border-top:none;color:inherit;opacity:.72}
+.st{flex-direction:column;justify-content:center;gap:0;padding:0 0 32px}
+.st.has-n{justify-content:space-between;padding-top:4px}
+.st-n{font-family:${th.display};font-size:200px;font-weight:800;line-height:.9;letter-spacing:-0.03em}
+.st-l{font-size:28px;font-weight:600;margin-top:18px;opacity:.85}
+.st-h{margin:0;font-family:${th.display};font-size:68px;line-height:1.06;font-weight:700;letter-spacing:-0.025em;max-width:1040px;text-wrap:balance}
+.st.has-n .st-h{font-size:44px;line-height:1.12}
+.st-d{margin:24px 0 0;font-size:26px;line-height:1.35;opacity:.82;max-width:900px}
 #lint{display:none}
 .k-v,.sp-v,.delta.big{font-family:${th.display}}
 body.present{background:#101010;overflow:hidden;height:100vh}
@@ -359,8 +388,9 @@ const LINT_JS = `
     if(m && m.scrollWidth>m.clientWidth+2) out.push([n,'content wider than the slide body by '+(m.scrollWidth-m.clientWidth)+'px']);
     const h=s.querySelector('header h1');
     if(h){const lh=parseFloat(getComputedStyle(h).lineHeight); if(h.getBoundingClientRect().height>lh*2.2) out.push([n,'title wraps to 3+ lines; shorten it']);}
-    if(m){
+    if(m && !s.classList.contains('bold')){
       // Leaf content (text and charts) should span most of the slide body; a big blank band looks unfinished.
+      // A statement slide is meant to be mostly colour, so it is skipped.
       let top=1e9,bot=-1e9;
       m.querySelectorAll('*').forEach(el=>{
         const bg=getComputedStyle(el).backgroundColor;
@@ -406,11 +436,33 @@ const PRESENT_JS = `
   fit();go(i);
 })();`;
 
+// Statement slides take their named colour or the next one in turn, skipping the colour just used,
+// so two neighbours never share one. The source shows only beside a number.
+function boldColors(deck) {
+  let k = 0, prev;
+  return deck.slides.map(s => {
+    if (s.type !== 'statement') { prev = undefined; return undefined; }
+    let c = BOLD.find(b => b.name === s.color);
+    if (!c) {
+      const next = deck.slides.slice(deck.slides.indexOf(s) + 1).find(x => x.type === 'statement');
+      do c = BOLD[k++ % BOLD.length]; while (c === prev || (next?.color === c.name));
+    }
+    prev = c;
+    return c;
+  });
+}
+
 function slideHtml(s, n, deck) {
   if (!SLIDES[s.type]) throw new Error(`slide ${n}: unknown type "${s.type}"`);
   const body = SLIDES[s.type](s);
   if (s.type === 'title') return `<section class="slide">${body}</section>`;
   const src = s.source ?? deck.source;
+  if (s.type === 'statement') {
+    const c = boldColors(deck)[n - 1];
+    return `<section class="slide bold" style="--sb:${c.bg};--si:${c.ink}">${body}
+  <footer><span class="src">${src && typeof s.number === 'number' ? 'Source: ' + esc(src) : ''}</span><span>${esc(deck.footer || '')}</span><span>${n}</span></footer>
+</section>`;
+  }
   return `<section class="slide">
   <header><h1>${md(s.title)}</h1>${s.subtitle ? `<p class="lede">${md(s.subtitle)}</p>` : ''}</header>
   ${body}
@@ -432,6 +484,7 @@ const SCHEMA = {
     items: { series: { req: ['name', 'values'], opt: ['display'], nums: ['values'] }, markers: { req: ['at', 'label'] } }, objs: { target: { req: ['value'], opt: ['label'], nums: ['value'] } } },
   compare: { req: ['title', 'rows'], opt: ['beforeLabel', 'afterLabel'], items: { rows: { req: ['label', 'before', 'after'], opt: ['note', 'format', 'better', 'change'], nums: ['before', 'after'] } } },
   next: { req: ['title', 'priorities'], opt: ['asks', 'asksLabel'], items: { priorities: { req: ['title'], opt: ['detail', 'when'] }, asks: { req: ['text'], opt: ['owner'] } } },
+  statement: { req: ['title'], opt: ['number', 'format', 'label', 'color'], nums: ['number'] },
 };
 const DECK_KEYS = ['title', 'footer', 'source', 'slides'];
 
@@ -477,6 +530,8 @@ function validate(deck) {
     const where = `slide ${i + 1} (${s?.type ?? 'no type'})`, rule = SCHEMA[s?.type];
     if (!rule) { errs.push(`slide ${i + 1}: type "${s?.type}" is not one of ${Object.keys(SCHEMA).join(', ')}${closest(String(s?.type), Object.keys(SCHEMA))}`); return; }
     checkFields(s, rule, where, errs, COMMON);
+    if (s.type === 'statement' && s.color !== undefined && !BOLD.some(b => b.name === s.color)) errs.push(`${where}: "color" must be one of ${BOLD.map(b => b.name).join(', ')}${closest(String(s.color), BOLD.map(b => b.name))}`);
+    if (s.type === 'statement' && s.label !== undefined && s.number === undefined) errs.push(`${where}: "label" describes "number", which is missing`);
     if (s.type === 'trend' && Array.isArray(s.series) && Array.isArray(s.labels)) s.series.forEach((se, j) => {
       if (Array.isArray(se?.values) && se.values.length !== s.labels.length) errs.push(`${where} series[${j}]: ${se.values.length} values for ${s.labels.length} labels`);
     });
@@ -515,8 +570,10 @@ if (specErrors.length) {
   process.exit(2);
 }
 const FORMATS = ['pdf', 'png', 'html'];
-const formats = String(formatArg || FORMATS.join(',')).split(',').map(x => x.trim().toLowerCase()).filter(Boolean);
+const formats = String(formatArg || 'png').split(',').map(x => x.trim().toLowerCase()).filter(Boolean);
 for (const f of formats) if (!FORMATS.includes(f)) { console.error(`SPEC     unknown format "${f}"; use ${FORMATS.join(', ')}`); process.exit(2); }
+// PNGs come with every build: they are how the slides get checked.
+if (!formats.includes('png')) formats.unshift('png');
 const out = path.resolve(outArg || path.join(path.dirname(specPath), path.basename(specPath, '.json') + '-out'));
 fs.mkdirSync(out, { recursive: true });
 
@@ -541,10 +598,19 @@ if (formats.includes('png')) deck.slides.forEach((_, i) => {
   const png = path.join(out, `slide-${String(i + 1).padStart(2, '0')}.png`);
   chrome(bin, [`--screenshot=${png}`, `--window-size=${W},${H}`, '--force-device-scale-factor=2', `${url}?only=${i + 1}`]);
 });
+// Every slide on one sheet, two per row: one image to read instead of one per slide.
+if (formats.includes('png')) {
+  const cw = 960, ch = 540, gap = 16, rows = Math.ceil(deck.slides.length / 2);
+  const sheet = path.join(out, 'contact.html');
+  fs.writeFileSync(sheet, `<!doctype html><body style="margin:0;padding:${gap}px;background:#9a9a96;display:grid;grid-template-columns:repeat(2,${cw}px);gap:${gap}px">${
+    deck.slides.map((_, i) => `<img src="slide-${String(i + 1).padStart(2, '0')}.png" width="${cw}" height="${ch}">`).join('')}</body>`);
+  chrome(bin, [`--screenshot=${path.join(out, 'contact.png')}`, `--window-size=${2 * cw + 3 * gap},${rows * (ch + gap) + gap}`, pathToFileURL(sheet).href]);
+  fs.rmSync(sheet);
+}
 if (formats.includes('pdf')) chrome(bin, [`--print-to-pdf=${path.join(out, 'deck.pdf')}`, '--no-pdf-header-footer', '--print-to-pdf-no-header', `${url}?print=1`]);
 if (!formats.includes('html')) fs.rmSync(htmlPath);
 
-const made = { pdf: 'deck.pdf', png: 'slide-NN.png', html: 'deck.html (open it, arrow keys to present)' };
+const made = { pdf: 'deck.pdf', png: 'slide-NN.png and contact.png (all slides on one sheet)', html: 'deck.html (open it, arrow keys to present)' };
 console.log(`deck: ${out}  (${deck.slides.length} slides: ${formats.map(f => made[f]).join(', ')})`);
 if (missingFonts.length) console.log(`  font     ${missingFonts.join(' and ')} not installed, so the system font was used; run: brew install --cask font-inter`);
 for (const [n, msg] of layoutWarn) console.log(`  layout   slide ${n}: ${msg}`);

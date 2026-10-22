@@ -46,7 +46,7 @@ Skills sit in group folders; `update.sh` links each one into `~/.claude/skills/`
 
 | Skill | What it does |
 |---|---|
-| [deck](skills/visuals/deck/SKILL.md) | Builds presentation decks (PDF, PNG slides or a presentable HTML file) from a JSON spec for a company-wide audience: summary, KPIs, trends, before and after, next steps |
+| [deck](skills/visuals/deck/SKILL.md) | Builds presentation decks (PNG slides, a presentable HTML page or PDF) from a JSON spec for a company-wide audience: summary, KPIs, trends, before and after, next steps, or bold one-message slides on bright colour |
 | [diagrams](skills/visuals/diagrams/SKILL.md) | Draws technical diagrams (architecture with AWS icons, message chains, sequence, ER, state, flow) as SVG and PNG with Mermaid and D2, plain or hand-drawn (whiteboard style), for PRs and docs |
 | [explain](skills/visuals/explain/SKILL.md) | Builds a one-page brief that explains a feature to developers, testers and a PM: scope, architecture (D2, whiteboard style), flow and states (Mermaid), a decision table, rules with test examples, open questions |
 | [mindmap](skills/visuals/mindmap/SKILL.md) | Turns a Markdown outline into an interactive mind map (HTML) and a PNG with markmap, for topic trees and study maps |

@@ -30,7 +30,12 @@ case "$ext" in
     PUPPETEER_SKIP_DOWNLOAD=1 "${mm[@]}" -p "$cfg" -i "$src" -o "$out/$base.svg" -b white
     ;;
   d2)
-    layout="${D2_LAYOUT:-tala}"
+    # D2_LAYOUT wins, then the source's own `layout-engine:` (d2-config), then TALA.
+    layout="${D2_LAYOUT:-$(sed -n 's/.*layout-engine: *\([a-z]*\).*/\1/p' "$src" | head -1)}"
+    layout="${layout:-tala}"
+    lflags=(--layout="$layout")
+    # ELK's default gap between columns leaves a left-to-right route about 15% wider than it needs.
+    [[ "$layout" == elk ]] && lflags+=(--elk-nodeNodeBetweenLayers=40 --elk-edgeNodeBetweenLayers=20)
     d2src="$src"
     # ICONS/ in the source stands for the local icon folder: fetch once, then work offline.
     if grep -q 'ICONS/' "$src"; then
@@ -39,8 +44,8 @@ case "$ext" in
       sed "s|ICONS/|$here/../icons/|g" "$src" > "$d2src"
     fi
     sketch=(); [[ -n "${SKETCH:-}" ]] && sketch=(--sketch)   # SKETCH=1: hand-drawn look
-    d2 --layout="$layout" ${sketch[@]+"${sketch[@]}"} --pad 48 "$d2src" "$out/$base.svg"
-    d2 --layout="$layout" ${sketch[@]+"${sketch[@]}"} --pad 48 --scale 2 "$d2src" "$out/$base.png"
+    d2 "${lflags[@]}" ${sketch[@]+"${sketch[@]}"} --pad 48 "$d2src" "$out/$base.svg"
+    d2 "${lflags[@]}" ${sketch[@]+"${sketch[@]}"} --pad 48 --scale 2 "$d2src" "$out/$base.png"
     ;;
   html)
     chrome="$(find_chrome)"
@@ -56,3 +61,12 @@ case "$ext" in
 esac
 
 for f in "$out/$base".png "$out/$base".svg; do [[ -f "$f" ]] && echo "$f"; done
+
+# Size and aspect, so a picture that breaks the aspect rule is fixed before anyone reads it.
+read -r w h < <(file "$out/$base.png" | sed -n 's/.* \([0-9]*\) x \([0-9]*\),.*/\1 \2/p')
+if [[ -n "${w:-}" ]]; then
+  ratio="$(awk -v w="$w" -v h="$h" 'BEGIN { printf "%.1f", w / h }')"
+  echo "size $w x $h ($ratio:1)"
+  awk -v r="$ratio" 'BEGIN { exit !(r > 3) }' && echo "WIDE wider than 3:1; only a gantt or timeline may reach 4:1"
+fi
+exit 0
