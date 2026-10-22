@@ -1,0 +1,18 @@
+%%{init: {'theme':'neutral','themeVariables':{'fontSize':'16px'}}}%%
+sequenceDiagram
+  autonumber
+  participant C as Client
+  participant A as API
+  participant O as Orders Lambda
+  participant D as DynamoDB
+  participant Q as SQS
+  participant W as Worker
+  C->>A: POST /orders
+  A->>O: invoke
+  O->>D: put order (status=PENDING)
+  O->>Q: publish OrderCreated
+  O-->>C: 202 Accepted + orderId
+  Q->>W: OrderCreated
+  W->>W: render PDF
+  W->>D: update status=FULFILLED
+  Note over O,Q: New in this PR: write happens before publish,<br/>so a failed publish never loses the order

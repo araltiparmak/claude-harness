@@ -1,0 +1,39 @@
+{
+  "title": "Q3 2026 Platform Update",
+  "footer": "Acme Commerce · Platform Engineering · Sample data",
+  "source": "Sample data for illustration, Q3 2026",
+  "slides": [
+    {
+      "type": "statement",
+      "title": "Q3: the new platform paid for itself",
+      "subtitle": "Platform Engineering · Company update · October 2026"
+    },
+    {
+      "type": "statement",
+      "title": "Product changes now reach customers within the hour",
+      "number": 9,
+      "format": { "suffix": " min" },
+      "label": "from merge to production, down from 42"
+    },
+    {
+      "type": "statement",
+      "title": "Faster checkout turned into revenue",
+      "number": 2.1,
+      "format": { "prefix": "$", "suffix": "M", "decimals": 1 },
+      "label": "estimated yearly revenue from a 3× faster checkout"
+    },
+    {
+      "type": "statement",
+      "title": "Orders grew 77%, and each one costs less to serve",
+      "number": -38,
+      "format": { "suffix": "%" },
+      "label": "infrastructure cost per order",
+      "color": "green"
+    },
+    {
+      "type": "statement",
+      "title": "Next: Search and Catalog move onto the platform",
+      "subtitle": "Q4 plan, and the 2 engineers it needs"
+    }
+  ]
+}

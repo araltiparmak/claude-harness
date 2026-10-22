@@ -1,0 +1,12 @@
+%%{init: {'theme':'neutral','themeVariables':{'fontSize':'16px'}}}%%
+stateDiagram-v2
+  [*] --> PENDING: order placed
+  PENDING --> PAID: webhook paid
+  PENDING --> CANCELLED: 30 min, no payment
+  PENDING --> CANCELLED: customer cancels
+  PAID --> FULFILLED: shipped
+  PAID --> REFUNDED: refund requested
+  FULFILLED --> REFUNDED: within 14 days
+  CANCELLED --> [*]
+  REFUNDED --> [*]
+  FULFILLED --> [*]

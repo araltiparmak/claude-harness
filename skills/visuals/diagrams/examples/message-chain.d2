@@ -1,0 +1,47 @@
+# Services talking through SNS and SQS: a few topics carry several message types,
+# and each consumer reads from its own queue subscribed to a topic.
+# The publish edge names the types a producer sends; a subscription edge names the types that queue listens to.
+# ELK puts every node one column right of what feeds it: consumers of one topic stand side by side in one column.
+vars: { d2-config: { layout-engine: elk } }
+direction: right
+
+classes: {
+  svc: {
+    style: { fill: "#dbeafe"; stroke: "#2563eb"; font-size: 24; border-radius: 8 }
+  }
+  q: {
+    shape: image
+    width: 64
+    height: 64
+    style.font-size: 20
+  }
+  dead: {
+    style: { fill: "#fee2e2"; stroke: "#dc2626"; font-size: 20; border-radius: 8; stroke-dash: 4 }
+  }
+  hop: {
+    style: { font-size: 20; stroke-width: 2 }
+  }
+}
+
+orders: Orders { class: svc }
+t1: order-events { class: q; icon: ICONS/aws/sns.svg }
+q1: billing-orders { class: q; icon: ICONS/aws/sqs.svg }
+q2: shipping-orders { class: q; icon: ICONS/aws/sqs.svg }
+q3: notify-orders { class: q; icon: ICONS/aws/sqs.svg }
+billing: Billing { class: svc }
+shipping: Shipping { class: svc }
+notify: Notifications { class: svc }
+db1: invoices { class: q; icon: ICONS/aws/dynamodb.svg }
+db2: shipments { class: q; icon: ICONS/aws/dynamodb.svg }
+dlq: billing-orders-dlq { class: dead }
+
+orders -> t1: "order.created\norder.cancelled" { class: hop }
+t1 -> q1: "order.created\norder.cancelled" { class: hop }
+t1 -> q2: "order.created" { class: hop }
+t1 -> q3: "order.cancelled" { class: hop }
+q1 -> billing: consume { class: hop }
+q2 -> shipping: consume { class: hop }
+q3 -> notify: consume { class: hop }
+billing -> db1: write { class: hop }
+shipping -> db2: write { class: hop }
+q1 -> dlq: "after 3 failures" { class: hop; style.stroke-dash: 4 }

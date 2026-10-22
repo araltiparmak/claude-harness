@@ -1,0 +1,54 @@
+# AWS architecture with official service icons (local copies: ICONS/aws/<name>.svg).
+direction: right
+
+classes: {
+  group: {
+    style: { fill: "#f8fafc"; stroke: "#94a3b8"; font-size: 26; border-radius: 10 }
+  }
+  svc: {
+    shape: image
+    width: 80
+    height: 80
+    style.font-size: 22
+    label.near: outside-bottom-center
+  }
+  tier: {
+    style: { fill: "#ffffff"; stroke: "#cbd5e1"; stroke-dash: 3; border-radius: 8 }
+    label: ""
+  }
+  edge: {
+    style: { font-size: 20; stroke-width: 2 }
+  }
+}
+
+user: Customer { shape: person; style.font-size: 24 }
+
+aws: AWS account (prod) { class: group
+  direction: down
+
+  request: { class: tier
+    direction: right
+    cdn: CloudFront { class: svc; icon: ICONS/aws/cloudfront.svg }
+    api: API Gateway { class: svc; icon: ICONS/aws/api-gateway.svg }
+    orders: Orders { class: svc; icon: ICONS/aws/lambda.svg; label.near: outside-top-center }
+    db: Orders table { class: svc; icon: ICONS/aws/dynamodb.svg }
+
+    cdn -> api { class: edge }
+    api -> orders: invoke { class: edge }
+    orders -> db: write { class: edge }
+  }
+
+  async: { class: tier
+    direction: right
+    queue: Order events { class: svc; icon: ICONS/aws/sqs.svg }
+    worker: Fulfilment { class: svc; icon: ICONS/aws/lambda.svg }
+    files: Invoices { class: svc; icon: ICONS/aws/s3.svg }
+
+    queue -> worker: consume { class: edge }
+    worker -> files: PDF { class: edge }
+  }
+
+  request.orders -> async.queue: publish { class: edge }
+}
+
+user -> aws.request.cdn: HTTPS { class: edge }
