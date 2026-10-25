@@ -64,26 +64,14 @@ mine_names=" "
 for repo in "$MINE" "$PRIVATE"; do
   [[ -d "$repo/skills" ]] || continue
   # A folder with SKILL.md is a skill, at any depth; a folder without one is a group.
-  # Sorted, so a skill comes before anything nested inside it, and nested SKILL.md files
-  # (examples, fixtures) are not linked as skills of their own.
-  linked_dirs=()
   while IFS= read -r file; do
     src="$(dirname "$file")"
-    inside=0
-    for parent in ${linked_dirs[@]+"${linked_dirs[@]}"}; do
-      case "$src/" in
-        "$parent"/*) inside=1 ;;
-        *) ;;
-      esac
-    done
-    [[ "$inside" = 0 ]] || continue
     name="$(basename "$src")"
     case "$mine_names" in
       *" $name "*) echo "skip $src: another skills repo already has $name" >&2; continue ;;
       *) ;;
     esac
     mine_names+="$name "
-    linked_dirs+=("$src")
     link "$src" && echo "linked  $name ($(basename "$repo"))"
   done < <(find "$repo/skills" -name SKILL.md | sort)
 done

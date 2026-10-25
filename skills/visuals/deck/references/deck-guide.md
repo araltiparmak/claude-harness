@@ -1,12 +1,12 @@
 # Deck guide
 
-Read this before writing a deck spec for `scripts/slides.mjs`. The script owns layout, charts, colour and export, so the work here is content.
+The detail behind the rules in `SKILL.md`: the reader, the story, every slide type and field. The script owns layout, charts, colour and export, so the work here is content.
 
 ## The reader
 
 Decks go to the whole company: leadership, other teams, people far from the work. Each slide gets about 10 seconds, and most readers read only the title. So every slide carries its whole message in the title, and the body is evidence for it.
 
-- **Plain words.** Someone from Sales or Finance must understand every slide without asking: "yearly revenue", not ARR; "major outages", not Sev-1. Name the customer effect before the system that caused it.
+- **Plain words.** Someone from Sales or Finance must understand every slide without asking: "major outages", not Sev-1. Name the customer effect before the system that caused it.
 - **Restraint.** One message per slide, short lines, no filler bullets, no exclamation marks, no emoji.
 
 ## Story
@@ -18,7 +18,7 @@ Decks go to the whole company: leadership, other teams, people far from the work
 
 ## Titles and numbers
 
-- **Action title, not topic**, with one number: "Three changes cut monthly spend by $148K", never "Infrastructure costs". Write numerals ("4 of 6").
+- **Write numerals** in titles: "4 of 6", "3 changes cut monthly spend by $148K".
 - **Under ~90 characters.** The layout check fails a title that wraps to three lines.
 - **The subtitle names the measure and period** ("Orders per month, thousands").
 - **Every number has a comparison**: a baseline, a target or a peer. Translate to money or time where you honestly can, and label estimates.

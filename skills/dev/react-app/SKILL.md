@@ -66,4 +66,4 @@ set -o pipefail; pnpm check 2>&1 | tail -30 && git add -A && git commit -m "<wha
 
 Start `pnpm dev` in the background and report the localhost URL — `http://localhost:<PORT>`, the port `cra.sh` picked — along with the project path and what you built. If the dev server refuses to start because the port is taken, pick a fresh one the same way `cra.sh` did and update `vite.config.ts` and `CLAUDE.md` together.
 
-When the user wants it live, `pnpm ship` checks that the git tree is clean, runs `pnpm check`, then deploys to the project's target. It picks the first target it finds: a `deploy` script in `package.json`, then `cloudflare.config.ts` (Cloudflare), then `vercel.json` (Vercel). If `ship` says the user is not signed in, ask them to type `! vercel login` or `! cf auth login`.
+When the user wants it live, run `pnpm ship`; the project's `CLAUDE.md` covers the deploy. If `ship` says the user is not signed in, ask them to type `! vercel login` or `! cf auth login`.

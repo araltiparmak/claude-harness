@@ -13,7 +13,7 @@ You write the content as a JSON spec; `scripts/slides.mjs` owns layout, charts, 
 2. Every slide title is the result in one sentence, with a number: "Checkout is 3× faster", not "Checkout".
 3. Put numbers in as numbers and let the script do the math and the formatting: `"now": 2.1, "before": 8.2, "target": 3, "format": { "suffix": "s" }, "better": "lower"` (kpis), `"before": 2.3, "after": 0.9` (compare). The script writes the change and its colour; percent values change in points, and `"change": "diff"` fits scores like 4.3 to 4.7.
 4. Plain words for a company-wide reader: "yearly revenue", not ARR.
-5. Leave out an optional field you have nothing for (a `detail`, `org`, `meta`, `note`). Never fill it with placeholder text. `TBD` is only for a number or fact the slide needs, and it goes on the TBD list. When the user names no source, use their team as `source` and list it for them to confirm.
+5. Leave out an optional field you have nothing for (a `detail`, `org`, `meta`, `note`); `TBD` is only for a number or fact the slide needs. When the user names no source, use their team as `source` and put it on the TBD list for them to confirm.
 6. Start from `examples/deck-q3-review.json`: copy the slides you need and change the values.
 7. Fix every `SPEC` and `LAYOUT` line the script prints, then build again. Shorten text; never shrink fonts.
 

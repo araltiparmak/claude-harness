@@ -10,14 +10,10 @@ problem() { echo "FAIL: $*"; fail=1; }
 
 # Every skill: SKILL.md with front matter, name matching the folder, a description.
 # A folder with SKILL.md is a skill, at any depth; a folder without one is a group holding skills.
-skills=(); skill_dirs=()
+skills=()
 while IFS= read -r file; do
-  dir="$(dirname "$file")"
-  inside=0
-  for parent in ${skill_dirs[@]+"${skill_dirs[@]}"}; do case "$dir/" in "$parent"/*) inside=1 ;; *) ;; esac; done
-  [[ "$inside" = 0 ]] || continue   # a SKILL.md nested in a skill (an example) is not a skill
-  name="$(basename "$dir")"
-  skills+=("$name"); skill_dirs+=("$dir")
+  name="$(basename "$(dirname "$file")")"
+  skills+=("$name")
   [[ "$(head -1 "$file")" = "---" ]] || problem "$name: SKILL.md does not start with front matter"
   awk 'NR>1 && /^---$/ {found=1; exit} END {exit !found}' "$file" || problem "$name: front matter has no closing ---"
   front="$(awk 'NR==1{next} /^---$/{exit} {print}' "$file")"

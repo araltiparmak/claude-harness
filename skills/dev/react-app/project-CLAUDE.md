@@ -24,8 +24,6 @@ Prove a change with `pnpm check` (typecheck, lint, build) and the running dev se
 | `pnpm clean` | Removes `dist` and the Vite cache |
 | `pnpm ship` | Clean git tree, then `pnpm check`, then deploy to the project's target |
 
-How `pnpm ship` picks its deploy target is documented at the top of `scripts/ship.mjs`; edit that file when the project needs another step.
-
 ## Checkpoint
 
 Before any change that touches several files, adds or removes a dependency, or deploys:
@@ -46,7 +44,7 @@ Deep links need an SPA fallback on the host, or the app 404s on refresh and on s
 
 ## Deploy
 
-`pnpm ship` deploys to production. It uses the first target it finds: a `deploy` script in `package.json`, then `cloudflare.config.ts` (Cloudflare Workers, `cf deploy`), then `vercel.json` (Vercel). The project was created with one of the two configs; to move it, add the other host's file and delete the old one. Sign in once with `cf auth login` or `vercel login`.
+`pnpm ship` deploys to production. The top of `scripts/ship.mjs` says how it picks the target; edit that file when the project needs another step. The project was created with one of the two configs; to move it, add the other host's file and delete the old one. Sign in once with `cf auth login` or `vercel login`.
 
 - `VITE_` variables are inlined into the public bundle: never put a secret in one. `.env.local` reaches neither host.
 - Vercel builds the source on its own machine; `engines.node` and `packageManager` in `package.json` pin its Node and pnpm. Add a variable there with `vercel env add NAME production`.

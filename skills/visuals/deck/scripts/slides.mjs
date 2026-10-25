@@ -11,14 +11,6 @@ import { pathToFileURL } from 'node:url';
 const W = 1280, H = 720, PAD_X = 64, PAD_TOP = 52, FOOT = 48;
 const CONTENT_W = W - 2 * PAD_X;
 
-const DEFAULT_THEME = {
-  ink: '#0b0b0b', ink2: '#52514e', muted: '#898781',
-  grid: '#e8e7e1', axis: '#c3c2b7', context: '#dedcd5', contextLine: '#b5b2a9', surface: '#ffffff',
-  good: '#006300', bad: '#b42318',
-  // Inter comes from `brew install --cask font-inter`; without it the system font is used and the lint says so.
-  font: '"Inter", system-ui, -apple-system, "Segoe UI", Helvetica, Arial, sans-serif',
-  display: '"Inter Display", "Inter", system-ui, -apple-system, "Segoe UI", Helvetica, Arial, sans-serif',
-};
 // Each hue has four steps: bg (card wash), tint (title slide shapes), mark (chart mark, readable on white), ink (text on bg).
 const PALETTE = [
   { name: 'blue', bg: '#dbe5ff', tint: '#2453d6', mark: '#2453d6', ink: '#0d2a7a' },
@@ -39,11 +31,19 @@ const BOLD = [
   { name: 'pink', bg: '#ff2e7e', ink: '#2b0640' },
 ];
 // Fixed palette: green, red and amber keep their meaning; violet marks a decision.
-let th = { ...DEFAULT_THEME, palette: PALETTE, accent: PALETTE[0].mark, accentInk: PALETTE[0].ink, accentWash: PALETTE[0].bg };
-const hue = i => th.palette[((i % th.palette.length) + th.palette.length) % th.palette.length];
-// Semantic hues (good, bad, warning, emphasis) by name, falling back to the first hue.
-const hueExcept = (i, name) => { const list = th.palette.filter(h => h.name !== name); return list.length ? list[i % list.length] : hue(i); };
-const role = name => th.palette.find(h => h.name === name) || th.palette[0];
+const th = {
+  ink: '#0b0b0b', ink2: '#52514e', muted: '#898781',
+  grid: '#e8e7e1', axis: '#c3c2b7', context: '#dedcd5', contextLine: '#b5b2a9', surface: '#ffffff',
+  good: '#006300', bad: '#b42318',
+  // Inter comes from `brew install --cask font-inter`; without it the system font is used and the lint says so.
+  font: '"Inter", system-ui, -apple-system, "Segoe UI", Helvetica, Arial, sans-serif',
+  display: '"Inter Display", "Inter", system-ui, -apple-system, "Segoe UI", Helvetica, Arial, sans-serif',
+  accent: PALETTE[0].mark, accentWash: PALETTE[0].bg,
+};
+const hue = i => PALETTE[i % PALETTE.length];
+// Every hue but one, so a semantic hue (violet for the decision) is not reused beside it.
+const hueExcept = (i, name) => { const list = PALETTE.filter(h => h.name !== name); return list[i % list.length]; };
+const role = name => PALETTE.find(h => h.name === name);
 const hv = h => `--bg:${h.bg};--tint:${h.tint};--mark:${h.mark};--ink:${h.ink}`;
 
 // ---------- text and number helpers ----------
@@ -452,13 +452,13 @@ function boldColors(deck) {
   });
 }
 
-function slideHtml(s, n, deck) {
+function slideHtml(s, n, deck, bold) {
   if (!SLIDES[s.type]) throw new Error(`slide ${n}: unknown type "${s.type}"`);
   const body = SLIDES[s.type](s);
   if (s.type === 'title') return `<section class="slide">${body}</section>`;
   const src = s.source ?? deck.source;
   if (s.type === 'statement') {
-    const c = boldColors(deck)[n - 1];
+    const c = bold[n - 1];
     return `<section class="slide bold" style="--sb:${c.bg};--si:${c.ink}">${body}
   <footer><span class="src">${src && typeof s.number === 'number' ? 'Source: ' + esc(src) : ''}</span><span>${esc(deck.footer || '')}</span><span>${n}</span></footer>
 </section>`;
@@ -581,9 +581,11 @@ const htmlPath = path.join(out, 'deck.html');
 const url = pathToFileURL(htmlPath).href;
 const bin = findChrome();
 
+const bold = boldColors(deck);
+
 function build() {
   const html = `<!doctype html><html lang="en"><head><meta charset="utf-8"><title>${esc(deck.title || 'Deck')}</title><style>${css()}</style></head>
-<body>${deck.slides.map((s, i) => slideHtml(s, i + 1, deck)).join('\n')}<div id="hud"></div><pre id="lint"></pre><script>${LINT_JS}${PRESENT_JS}</script></body></html>`;
+<body>${deck.slides.map((s, i) => slideHtml(s, i + 1, deck, bold)).join('\n')}<div id="hud"></div><pre id="lint"></pre><script>${LINT_JS}${PRESENT_JS}</script></body></html>`;
   fs.writeFileSync(htmlPath, html);
   const dom = chrome(bin, ['--virtual-time-budget=3000', '--window-size=1400,900', '--dump-dom', `${url}?lint=1`]);
   const raw = (dom.match(/<pre id="lint">([\s\S]*?)<\/pre>/) || [])[1] || '{"out":[],"warn":[],"sizes":[],"fonts":[]}';
