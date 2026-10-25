@@ -1,4 +1,5 @@
 %% A long flow wrapped into stages: each stage reads left to right, the stages stack like lines of text.
+%% One class per kind of box; the dark `color` keeps the text readable in GitHub's dark theme.
 flowchart TB
   subgraph intake [Intake]
     direction LR
@@ -10,3 +11,12 @@ flowchart TB
     e[Pick] -- items --> f[Pack] -- parcel --> g[Ship] -- tracking id --> h[Notify customer]
   end
   intake -- paid order --> fulfil
+
+  classDef step fill:#dbeafe,stroke:#2563eb,color:#0b1b3a
+  classDef fail fill:#fee2e2,stroke:#dc2626,color:#450a0a
+  classDef done fill:#dcfce7,stroke:#16a34a,color:#052e16
+  class a,b,c,d,e,f,g step
+  class x fail
+  class h done
+  style intake fill:#94a3b81f,stroke:#94a3b8
+  style fulfil fill:#94a3b81f,stroke:#94a3b8

@@ -35,7 +35,7 @@ PNG is the default; the SVG beside it is for PRs and docs that zoom.
 - Web page or Artifact: `scripts/page.sh <out.html> "<title>" <name.svg>[=<caption>] ...` wraps the rendered diagrams into one self-contained page that also meets the Artifact rules (light and dark theme, phone width). Hand over or publish that file as built. The PNGs you already read are its check: every diagram sits in the page as base64, so reading the page costs far more and shows nothing new.
 - Pull requests: GitHub renders fenced `mermaid` blocks natively, but not D2. So:
   - D2 diagram (every AWS-icon architecture): attach the rendered SVG, which zooms without blur, plus a 2x PNG. `gh pr create|edit|comment --attach file.svg` uploads it (gh 2.99 or newer; it rewrites a `![alt](./file.svg)` reference in the body to the uploaded asset). Commit the `.d2` source, not only the image.
-  - Sequence, flow, state, ER: a fenced `mermaid` block in the description. The source stays reviewable in the PR, and GitHub draws it with its own Mermaid theme, not ours.
+  - Sequence, flow, state, ER: a fenced `mermaid` block in the description. The source stays reviewable in the PR. GitHub draws it with its own theme, so the colours come from `classDef` in the source (`mermaid.md`, Colour).
   - Architecture that must render natively (no image): a Mermaid `flowchart` with `subgraph` groups. It has no service icons.
 
 ## Interactive output
