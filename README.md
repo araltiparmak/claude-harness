@@ -57,6 +57,7 @@ Skills sit in group folders; `update.sh` links each one into `~/.claude/skills/`
 |---|---|
 | [mobile-app](skills/dev/mobile-app/SKILL.md) | Recommends the default stack for a new Expo + React Native + TypeScript app, one decision at a time |
 | [react-app](skills/dev/react-app/SKILL.md) | Scaffolds a React + Vite + TS + Tailwind prototype via `cra`, ready for Vercel or Cloudflare (`pnpm ship` checks and deploys), and builds v1 (user-invoked: `/react-app`) |
+| [sonar](skills/dev/sonar/SKILL.md) | Reads a PR's SonarQube Cloud findings (issues and hotspots) from the web API, one line each, and fixes them |
 
 ### Todo
 
@@ -91,7 +92,9 @@ npm i -g ccstatusline   # the status line command in claude/settings.json
 
 Plugins are installed by hand: `claude plugin install frontend-design@claude-plugins-official`, and a plugin only one project uses with `--scope project` from that project's folder. A plugin from another marketplace declares that marketplace in the project too, so it stays out of the global settings. For Cloudflare: `claude plugin marketplace add cloudflare/skills --scope project`, then `claude plugin install cloudflare@cloudflare --scope project`. Leave Matt Pocock's `mattpocock-skills` plugin uninstalled; `external-skills.yaml` already links his skills, and the plugin would load them twice.
 
-A second skills repo is optional: point `PRIVATE_DIR` at a checkout (default `~/dev/private-skills`), and set `PRIVATE_URL` to clone it when the folder is missing. Without either, the second repo is skipped; this repo and the skills in `external-skills.yaml` are still installed. `scripts/check.sh` checks the repo's consistency and runs in CI on every push.
+A second skills repo is optional: point `PRIVATE_DIR` at a checkout (default `~/dev/private-skills`), and set `PRIVATE_URL` to clone it when the folder is missing. Without either, the second repo is skipped; this repo and the skills in `external-skills.yaml` are still installed.
+
+To leave skills off a machine, set `SKIP_SKILLS` to group or skill names separated by spaces, for example `export SKIP_SKILLS="dev mindmap"` in `~/.zshrc`. `update.sh` then links none of them, removes their old links, and prints a `skipped` line for each. `scripts/check.sh` checks the repo's consistency and runs in CI on every push.
 
 ## License
 

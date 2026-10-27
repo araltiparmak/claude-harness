@@ -19,7 +19,7 @@ Load a thing only where it is used. Scope order, from cheapest to most expensive
 
 An MCP server adds all of its tool names to every session; a CLI costs nothing until it is called.
 
-- Prefer a CLI when one exists: `gh` instead of the GitHub MCP, `cf` instead of a Cloudflare MCP, the `supabase` and `aws` CLIs the same way.
+- Prefer a CLI when one exists: `gh` instead of the GitHub MCP, `cf` instead of a Cloudflare MCP, the `supabase` and `aws` CLIs the same way. For SonarQube Cloud, the `sonar` skill reads the web API instead of the SonarQube MCP server.
 - Keep user-scope MCP servers at zero. Add a server only in the repo that needs it, from that repo's folder: `claude mcp add --scope project <name> ...`.
 - Playwright MCP returns large page snapshots: keep it in the repos that test a UI.
 - Turn a server off for one session with `/mcp`.

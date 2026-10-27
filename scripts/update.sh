@@ -7,6 +7,8 @@ set -euo pipefail
 # - Real folders in ~/.claude/skills are never touched, only reported.
 # - A skill of your own wins over an external skill with the same name.
 # - Links whose skill is gone, and external skills no longer listed, are removed.
+# - SKIP_SKILLS names skills or groups this machine does not use ("dev mindmap"); they are
+#   not linked, and their old links are removed.
 
 MINE="$(cd "$(dirname "$0")/.." && pwd)"
 PRIVATE="${PRIVATE_DIR:-$HOME/dev/private-skills}"
@@ -40,6 +42,15 @@ link() {
   ln -sfn "$src" "$target"
 }
 
+# skipped <group/name>: true, and says so, when SKIP_SKILLS names the skill or one of its groups.
+skipped() {
+  local word
+  for word in ${SKIP_SKILLS:-}; do
+    [[ "/$1/" == *"/$word/"* ]] && { echo "skipped $1 (SKIP_SKILLS)"; return 0; }
+  done
+  return 1
+}
+
 sync_repo "$PRIVATE" "$PRIVATE_URL"
 sync_repo "$MINE" ""
 
@@ -67,6 +78,7 @@ for repo in "$MINE" "$PRIVATE"; do
   while IFS= read -r file; do
     src="$(dirname "$file")"
     name="$(basename "$src")"
+    skipped "${src#"$repo"/skills/}" && continue
     case "$mine_names" in
       *" $name "*) echo "skip $src: another skills repo already has $name" >&2; continue ;;
       *) ;;
@@ -89,6 +101,7 @@ if [[ -f "$EXTERNAL" ]]; then
       sync_repo "$CACHE/${url#https://}" "$url"
     done < <(cut -f1 <<< "$pairs" | sort -u)
     while IFS=$'\t' read -r name src; do
+      skipped "$name" && continue
       case "$mine_names" in
         *" $name "*) echo "skip $name: a skill of your own has that name" >&2; continue ;;
         *) ;;
@@ -101,12 +114,13 @@ if [[ -f "$EXTERNAL" ]]; then
   fi
 fi
 
-# Remove links into these repos that are dangling, and external links no longer listed.
+# Remove links into these repos that are dangling or skipped, and external links no longer listed.
 # With a broken external-skills.yaml, external links stay until the file is fixed.
 for entry in "$DEST"/*; do
   [[ -L "$entry" ]] || continue
   case "$(readlink "$entry")" in
-    "$MINE"/skills/*|"$PRIVATE"/skills/*) [[ -e "$entry" ]] && continue ;;
+    "$MINE"/skills/*|"$PRIVATE"/skills/*)
+      [[ -e "$entry" && "$mine_names" == *" $(basename "$entry") "* ]] && continue ;;
     "$CACHE"/*)
       [[ "$ext_ok" = 1 ]] || continue
       [[ -e "$entry" && "$ext_names" == *" $(basename "$entry") "* ]] && continue ;;
