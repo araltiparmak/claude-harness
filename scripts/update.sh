@@ -44,9 +44,9 @@ link() {
 
 # skipped <group/name>: true, and says so, when SKIP_SKILLS names the skill or one of its groups.
 skipped() {
-  local word
+  local skill="$1" word
   for word in ${SKIP_SKILLS:-}; do
-    [[ "/$1/" == *"/$word/"* ]] && { echo "skipped $1 (SKIP_SKILLS)"; return 0; }
+    [[ "/$skill/" == *"/$word/"* ]] && { echo "skipped $skill (SKIP_SKILLS)"; return 0; }
   done
   return 1
 }
