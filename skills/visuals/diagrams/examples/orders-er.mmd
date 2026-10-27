@@ -1,0 +1,21 @@
+%%{init: {'theme':'neutral'}}%%
+erDiagram
+  CUSTOMER ||--o{ ORDER : places
+  ORDER ||--|{ ORDER_ITEM : contains
+  PRODUCT ||--o{ ORDER_ITEM : "appears in"
+  ORDER ||--o| INVOICE : "billed by"
+  CUSTOMER { string id PK
+    string email }
+  ORDER { string id PK
+    string customer_id FK
+    string status
+    datetime created_at }
+  ORDER_ITEM { string order_id FK
+    string product_id FK
+    int quantity }
+  PRODUCT { string id PK
+    string name
+    int price_cents }
+  INVOICE { string id PK
+    string order_id FK
+    string pdf_key }

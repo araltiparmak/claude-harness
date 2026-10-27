@@ -4,66 +4,21 @@
     "pr": ""
   },
   "permissions": {
-    "allow": [
-      "Bash(git status:*)",
-      "Bash(git log:*)",
-      "Bash(git diff:*)",
-      "Bash(git show:*)",
-      "Bash(git branch:*)",
-      "Bash(git remote:*)",
-      "Bash(git ls-files:*)",
-      "Bash(git rev-parse:*)",
-      "Bash(git blame:*)",
-      "Bash(git describe:*)",
-      "Bash(git tag:*)",
-      "Bash(git stash list:*)",
-      "Bash(git config --get:*)",
-      "Bash(git fetch:*)",
-      "Bash(git pull:*)",
-      "Bash(ls:*)",
-      "Bash(cat:*)",
-      "Bash(pwd)",
-      "Bash(which:*)",
-      "Bash(grep:*)",
-      "Bash(rg:*)",
-      "Bash(find:*)",
-      "Bash(head:*)",
-      "Bash(tail:*)",
-      "Bash(wc:*)",
-      "Bash(tree:*)",
-      "Bash(file:*)",
-      "Bash(stat:*)",
-      "Bash(du:*)",
-      "Bash(df:*)",
-      "Bash(date)",
-      "Bash(echo:*)",
-      "Bash(sort:*)",
-      "Bash(uniq:*)",
-      "Bash(diff:*)",
-      "Bash(jq:*)",
-      "Bash(npm install:*)",
-      "Bash(npm ci:*)",
-      "Bash(npm test:*)",
-      "Bash(npm ls:*)",
-      "Bash(npm view:*)",
-      "Bash(npm outdated:*)",
-      "Bash(npm -v)",
-      "Bash(pnpm:*)",
-      "Bash(yarn:*)",
-      "Bash(bun:*)",
-      "Bash(tsc:*)"
-    ],
     "deny": [
       "Bash(terraform apply:*)",
       "Bash(terraform destroy:*)",
       "Read(./.env)",
+      "Read(./node_modules/**)",
+      "Read(./dist/**)",
+      "Read(./.next/**)",
+      "Read(./coverage/**)",
       "Read(~/.aws/credentials)"
     ],
     "defaultMode": "auto"
   },
   "model": "opus",
   "fallbackModel": [
-    "claude-opus-4-8"
+    "claude-sonnet-5-5"
   ],
   "hooks": {
     "Notification": [
@@ -169,22 +124,23 @@
   },
   "statusLine": {
     "type": "command",
-    "command": "npx -y ccstatusline@latest",
+    "command": "ccstatusline",
     "padding": 0,
     "refreshInterval": 10
   },
   "enabledPlugins": {
-    "expo@claude-plugins-official": true,
-    "frontend-design@claude-plugins-official": true
+    "frontend-design@claude-plugins-official": true,
+    "design@synced": false,
+    "engineering@synced": false,
+    "productivity@synced": false
   },
-  "extraKnownMarketplaces": {},
-  "effortLevel": "high",
+  "effortLevel": "medium",
   "modelSettings": {
-    "claude-opus-5": {
-      "effortLevel": "high"
-    },
     "claude-opus-5-5": {
-      "effortLevel": "high"
+      "effortLevel": "medium"
+    },
+    "claude-sonnet-5-5": {
+      "effortLevel": "medium"
     }
   },
   "tui": "fullscreen",

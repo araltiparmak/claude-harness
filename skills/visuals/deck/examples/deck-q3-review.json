@@ -1,0 +1,77 @@
+{
+  "title": "Q3 2026 Platform Review",
+  "footer": "Acme Commerce · Platform Engineering · Sample data",
+  "source": "Sample data for illustration, Q3 2026",
+  "slides": [
+    {
+      "type": "title",
+      "org": "Acme Commerce",
+      "title": "Q3 2026 Platform Review",
+      "subtitle": "Faster checkout, faster releases, lower cost per order",
+      "meta": "Platform Engineering · Company update · 16 October 2026"
+    },
+    {
+      "type": "summary",
+      "title": "The new platform added an estimated $2.1M in yearly revenue and cut cost per order by 38%",
+      "points": [
+        { "value": "+$2.1M", "label": "Estimated annual revenue from faster checkout", "detail": "Checkout time fell from 2.4s to 0.8s; pilot conversion rose 11%" },
+        { "value": "4×", "label": "Faster delivery of product changes", "detail": "Lead time from merge to production fell from 42 to 9 minutes" },
+        { "value": "−38%", "label": "Infrastructure cost per order", "detail": "$148K lower monthly spend while order volume grew 77%" }
+      ],
+      "ask": {
+        "label": "Decision needed",
+        "text": "Fund **2 engineers for Q4** to move Search and Catalog onto the platform.",
+        "meta": "Cost: about $340K per year. Expected payback: under 6 months, from the same speed and cost gains."
+      }
+    },
+    {
+      "type": "kpis",
+      "title": "All 4 platform KPIs beat target for the first time",
+      "items": [
+        { "label": "Release lead time", "now": 9, "before": 42, "target": 15, "format": { "suffix": " min" }, "better": "lower", "vs": "vs Q2", "spark": [44, 42, 41, 38, 30, 21, 14, 11, 9] },
+        { "label": "Releases per week", "now": 16, "before": 5, "target": 12, "better": "higher", "vs": "vs Q2", "spark": [5, 5, 6, 6, 8, 11, 13, 15, 16] },
+        { "label": "Checkout availability", "now": 99.97, "before": 99.81, "target": 99.95, "format": { "suffix": "%", "decimals": 2 }, "better": "higher", "vs": "vs Q2", "spark": [99.78, 99.81, 99.8, 99.84, 99.86, 99.93, 99.95, 99.96, 99.97] },
+        { "label": "Cost per order", "now": 0.013, "before": 0.021, "target": 0.015, "format": { "prefix": "$", "decimals": 3 }, "better": "lower", "vs": "vs Q2", "spark": [0.022, 0.021, 0.021, 0.02, 0.019, 0.016, 0.015, 0.014, 0.013] }
+      ],
+      "sparkLabel": "Monthly, January to September",
+      "takeaway": "Release speed and reliability improved together, which is the main risk this programme set out to remove."
+    },
+    {
+      "type": "trend",
+      "title": "Order volume grew 77% since launch with no extra on-call load",
+      "subtitle": "Orders per month, thousands",
+      "labels": ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep"],
+      "series": [
+        { "name": "2026", "values": [380, 372, 395, 401, 410, 413, 512, 598, 731] },
+        { "name": "2025", "values": [342, 330, 351, 360, 366, 371, 380, 392, 405] }
+      ],
+      "format": { "suffix": "K" },
+      "markers": [{ "at": "Jun", "label": "Launch" }]
+    },
+    {
+      "type": "compare",
+      "title": "Payment failures fell 63%, and every customer-facing metric improved",
+      "beforeLabel": "Q2 2026",
+      "afterLabel": "Q3 2026",
+      "rows": [
+        { "label": "Checkout time", "note": "median, seconds", "before": 2.3, "after": 0.9, "format": { "suffix": "s", "decimals": 1 }, "better": "lower" },
+        { "label": "Conversion rate", "note": "sessions to orders", "before": 3.1, "after": 3.45, "format": { "suffix": "%", "decimals": 2 }, "better": "higher" },
+        { "label": "Payment failures", "note": "share of attempts", "before": 1.9, "after": 0.7, "format": { "suffix": "%", "decimals": 1 }, "better": "lower" },
+        { "label": "Payment support tickets", "note": "per quarter", "before": 4200, "after": 1600, "better": "lower" }
+      ]
+    },
+    {
+      "type": "next",
+      "title": "Q4: bring Search and Catalog onto the platform and fix mobile checkout",
+      "priorities": [
+        { "title": "Migrate Search and Catalog", "detail": "Same release speed and cost gains for the two largest remaining services.", "when": "Oct to Dec" },
+        { "title": "Mobile checkout under 1.5s", "detail": "Apply the checkout rebuild to the mobile app; currently 2.9s.", "when": "Nov to Dec" },
+        { "title": "Multi-region failover", "detail": "Keep checkout up during a full region outage.", "when": "Dec" }
+      ],
+      "asks": [
+        { "text": "Approve 2 engineers for Search and Catalog migration (about $340K per year)", "owner": "CTO, CFO" },
+        { "text": "Agree mobile checkout as a joint Q4 goal with the Mobile team", "owner": "CPO" }
+      ]
+    }
+  ]
+}

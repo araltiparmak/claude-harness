@@ -1,0 +1,13 @@
+sequenceDiagram
+  autonumber
+  participant O as Orders
+  participant T as order-events<br/>(SNS)
+  participant Q as billing-orders<br/>(SQS)
+  participant B as Billing
+  participant D as invoices<br/>(DynamoDB)
+  O->>T: order.created
+  T->>Q: order.created
+  Q->>B: deliver
+  B->>D: put invoice
+  B-->>Q: delete message
+  Note over Q,B: failure: 3 tries, then DLQ
