@@ -14,23 +14,7 @@ step() { printf '\033[36m▸\033[0m %s\n' "$*"; }
 NAME="${1:-}"
 TARGET="${2:-vercel}"   # where pnpm ship deploys: vercel or cloudflare
 case "$NAME" in
-  ''|-h|--help)
-    cat <<USAGE
-usage: cra <kebab-case-name> [vercel|cloudflare]
-
-Creates $PROJECTS_DIR/<name> as a React + Vite + TS + Tailwind v4 project:
-  - free port pinned in vite.config.ts (strictPort)
-  - @/ alias wired in BOTH vite.config.ts and tsconfig.app.json
-  - Tailwind v4 via @tailwindcss/vite (no config file, no PostCSS)
-  - scripts: typecheck, check (typecheck + lint + build), clean, ship (check, then deploy)
-  - deploy target for pnpm ship, Node and pnpm pinned:
-      vercel (default)  vercel.json (SPA rewrite, asset caching), .vercelignore
-      cloudflare        cloudflare.config.ts (Workers static assets, SPA fallback), the Cloudflare Vite plugin, cf
-  - initial git commit
-
-Requires Node ${NODE_MAJOR}.x. pnpm is pinned to major ${PNPM_MAJOR} via corepack.
-USAGE
-    exit 0 ;;
+  ''|-h|--help) echo "usage: cra <kebab-case-name> [vercel|cloudflare]   (creates $PROJECTS_DIR/<name>; the react-app skill has the details)"; exit 0 ;;
   *) ;;
 esac
 

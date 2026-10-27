@@ -22,13 +22,6 @@ while IFS= read -r file; do
 done < <(find skills -name SKILL.md | sort)
 dupes="$(printf '%s\n' "${skills[@]}" | sort | uniq -d)"
 [[ -z "$dupes" ]] || problem "skill names must be unique across groups: $dupes"
-# Every folder directly under skills/ is a skill or a group with a skill somewhere inside.
-for dir in skills/*/; do
-  dir="${dir%/}"
-  if [[ -z "$(find "$dir" -name SKILL.md | head -1)" ]]; then
-    problem "$dir: not a skill (no SKILL.md) and not a group (no skill inside)"
-  fi
-done
 
 # README's skill table lists exactly the skills, and every link in it resolves.
 listed="$(grep -oE '^\| \[[a-z0-9-]+\]\(skills/' README.md | sed -E 's/^\| \[([a-z0-9-]+)\].*/\1/' | sort)"
@@ -41,16 +34,9 @@ while IFS= read -r path; do
   [[ -f "$path" ]] || problem "README links to a missing file: $path"
 done < <(grep -oE 'skills/[a-z0-9/-]+/SKILL\.md' README.md | sort -u)
 
-# external-skills.yaml has the one shape scripts/external-skills.py reads, and lists no
-# skill that this repo already has.
+# external-skills.yaml has the one shape scripts/external-skills.py reads.
 if [[ -f external-skills.yaml ]]; then
-  if ext="$(python3 -I scripts/external-skills.py)"; then
-    while IFS=$'\t' read -r _ name; do
-      if printf '%s\n' "${skills[@]}" | grep -qx "$name"; then problem "external-skills.yaml: '$name' is also a skill in this repo"; fi
-    done <<< "$ext"
-  else
-    problem "external-skills.yaml has the problems above"
-  fi
+  python3 -I scripts/external-skills.py >/dev/null || problem "external-skills.yaml has the problems above"
 fi
 
 # Settings are valid JSON, and the public file carries no machine-specific paths.

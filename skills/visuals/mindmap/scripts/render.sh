@@ -31,26 +31,11 @@ FIT="$fit" perl -pi -e 's/\Q$ENV{FIT}\E/{ duration: 200, ...$ENV{FIT}, autoFit: 
 
 chrome="$(find_chrome)"
 
-# The screenshot comes from a copy with duration 0 and every branch open. markmap animates the first
-# draw for 500 ms, and headless Chrome often saved the frame before the map appeared (a blank PNG in
-# about half of the runs); and a PNG cannot be clicked open. The HTML in $out keeps its own settings,
-# so the interactive map still animates and opens branches on click.
+# The screenshot comes from a copy with no animation, no refit and every branch open. markmap animates the first
+# draw, and headless Chrome often saved the frame before the map appeared (a blank PNG in about half of
+# the runs); and a PNG cannot be clicked open. The HTML in $out keeps its own settings.
 tmp="$(mktemp -d)"; trap 'rm -rf "$tmp"' EXIT
-python3 -I - "$src" "$tmp/shot.md" <<'PY'
-import re, sys
-text = open(sys.argv[1], encoding="utf-8").read()
-m = re.match(r"---\n(.*?)\n---\n", text, re.S)
-front = m.group(1) if m else ""
-body = text[m.end():] if m else text
-front = re.sub(r"^\s+(duration|initialExpandLevel):.*\n?", "", front, flags=re.M)
-shot = "markmap:\n  duration: 0\n  initialExpandLevel: -1"
-if re.search(r"^markmap:\s*$", front, re.M):
-    front = re.sub(r"^markmap:\s*$", shot, front, count=1, flags=re.M)
-else:
-    front = (front + "\n" if front else "") + shot
-open(sys.argv[2], "w", encoding="utf-8").write(f"---\n{front}\n---\n{body}")
-PY
-"${mm[@]}" "$tmp/shot.md" --no-open --offline --no-toolbar -o "$tmp/shot.html" >/dev/null
+sed 's/autoFit: true }/autoFit: false, duration: 0, initialExpandLevel: -1 }/' "$out/$base.html" > "$tmp/shot.html"
 
 "$chrome" --headless --disable-gpu --hide-scrollbars \
   --screenshot="$out/$base.png" --window-size="${size/x/,}" \
