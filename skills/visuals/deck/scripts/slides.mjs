@@ -50,6 +50,11 @@ const hv = h => `--bg:${h.bg};--tint:${h.tint};--mark:${h.mark};--ink:${h.ink}`;
 
 const esc = s => String(s ?? '').replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;').replaceAll('"', '&quot;');
 const md = s => esc(s).replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
+// The element around a formatted value, or '' when there is no value: el('p', 'st-d', s.subtitle, md).
+const el = (tag, cls, value, f = esc) => {
+  const attr = cls ? ` class="${cls}"` : '';
+  return value ? `<${tag}${attr}>${f(value)}</${tag}>` : '';
+};
 const decimalsOf = n => (String(+n.toFixed(10)).split('.')[1] || '').length;
 
 function fmt(v, f = {}, signed = false) {
@@ -114,7 +119,7 @@ function spark(values, w, h, c = hue(0)) {
 const deltaHtml = (delta, good, vs) => {
   if (!delta) return '';
   const down = /^[-−]/.test(delta);
-  return `<div class="delta ${good === false ? 'bad' : 'good'}"><span class="arrow">${down ? '▼' : '▲'}</span>${esc(delta.replace(/^[-−+]/, ''))}${vs ? ` <span class="vs">${esc(vs)}</span>` : ''}</div>`;
+  return `<div class="delta ${good === false ? 'bad' : 'good'}"><span class="arrow">${down ? '▼' : '▲'}</span>${esc(delta.replace(/^[-−+]/, ''))}${vs ? ' ' : ''}${el('span', 'vs', vs)}</div>`;
 };
 
 // ---------- charts ----------
@@ -180,14 +185,21 @@ function lineChart({ labels, series, format = {}, markers = [], target, zero, w,
 
 // ---------- slide types ----------
 
-const legend = series => series.length < 2 ? '' : `<div class="legend">${series.map((s, i) =>
-  `<span><i style="background:${i === 0 ? th.accent : th.contextLine}"></i>${esc(s.name)}</span>`).join('')}</div>`;
+const legendItem = (s, i) => `<span><i style="background:${i === 0 ? th.accent : th.contextLine}"></i>${esc(s.name)}</span>`;
+const legend = series => series.length < 2 ? '' : `<div class="legend">${series.map(legendItem).join('')}</div>`;
 
 // The decision panel beside the summary points.
 function askPanel(ask) {
   const meta = ask.meta ? `<div class="ask-m">${md(ask.meta)}</div>` : '';
   return `<aside class="ask" style="${hv(role('violet'))}"><div class="ask-l">${esc(ask.label || 'Decision needed')}</div>
       <p>${md(ask.text)}</p>${meta}</aside>`;
+}
+
+// The decisions beside the priorities on the next slide.
+function asksPanel(s) {
+  const items = s.asks.map(a => `<li>${md(a.text)}${el('span', 'owner', a.owner)}</li>`).join('');
+  return `<aside class="ask" style="${hv(role('violet'))}"><div class="ask-l">${esc(s.asksLabel || 'Decisions needed')}</div>
+      <ul>${items}</ul></aside>`;
 }
 
 // The sparkline at the bottom of a KPI tile, sized to the tile and to the space under the numbers.
@@ -214,7 +226,7 @@ const SLIDES = {
   summary: s => `<main class="sum">
     <div class="sum-points">${s.points.map((p, i) => `
       <div class="sp" style="${hv(s.ask ? hueExcept(i, 'violet') : hue(i))}"><div class="sp-v">${esc(p.value)}</div>
-      <div class="sp-t"><div class="sp-l">${md(p.label)}</div>${p.detail ? `<div class="sp-d">${md(p.detail)}</div>` : ''}</div></div>`).join('')}
+      <div class="sp-t"><div class="sp-l">${md(p.label)}</div>${el('div', 'sp-d', p.detail, md)}</div></div>`).join('')}
     </div>
     ${s.ask ? askPanel(s.ask) : ''}
   </main>`,
@@ -235,7 +247,7 @@ const SLIDES = {
       ${kpiSpark(k, s, i)}
     </div>`;
   }).join('')}</main>
-    ${s.takeaway ? `<p class="takeaway">${md(s.takeaway)}</p>` : ''}`,
+    ${el('p', 'takeaway', s.takeaway, md)}`,
 
   trend: s => {
     const mh = mainHeight(s) - (s.series.length > 1 ? 34 : 0);
@@ -249,23 +261,23 @@ const SLIDES = {
       const f = r.format || {}, mx = Math.max(r.before, r.after);
       const { d, abs: changeText, good } = change(r.before, r.after, f, r.change, r.better);
       const bar = (v, c) => `<div class="cb-row"><div class="cb" style="width:calc((100% - 120px) * ${(v / mx).toFixed(4)});background:${c}"></div><span>${esc(fmt(v, f))}</span></div>`;
-      return `<div class="c-row"><div class="c-lab">${esc(r.label)}${r.note ? `<small>${esc(r.note)}</small>` : ''}</div>
+      return `<div class="c-row"><div class="c-lab">${esc(r.label)}${el('small', '', r.note)}</div>
         <div class="c-bars">${bar(r.before, th.context)}${bar(r.after, th.accent)}</div>
         <div class="delta big ${good ? 'good' : 'bad'}" style="${hv(role(good ? 'green' : 'red'))}"><span class="arrow">${d < 0 ? '▼' : '▲'}</span>${changeText}</div></div>`;
     }).join('')}</main>`,
 
   // One message on a solid colour; the number, when given, is the biggest thing on the slide.
   statement: s => {
+    const label = el('div', 'st-l', s.label, md);
     const num = typeof s.number === 'number'
-      ? `<div class="st-num"><div class="st-n">${esc(fmt(s.number, s.format || {}))}</div>${s.label ? `<div class="st-l">${md(s.label)}</div>` : ''}</div>` : '';
+      ? `<div class="st-num"><div class="st-n">${esc(fmt(s.number, s.format || {}))}</div>${label}</div>` : '';
     return `<main class="st${num ? ' has-n' : ''}">${num}
-    <div><h1 class="st-h">${md(s.title)}</h1>${s.subtitle ? `<p class="st-d">${md(s.subtitle)}</p>` : ''}</div></main>`;
+    <div><h1 class="st-h">${md(s.title)}</h1>${el('p', 'st-d', s.subtitle, md)}</div></main>`;
   },
 
   next: s => `<main class="next">
-    <div class="prio">${s.priorities.map((p, i) => `<div class="p-row" style="${hv(hue(i))}"><div><div class="p-t"><i class="dot"></i>${esc(p.title)}</div>${p.detail ? `<div class="p-d">${md(p.detail)}</div>` : ''}</div><div class="p-w">${esc(p.when || '')}</div></div>`).join('')}</div>
-    ${s.asks ? `<aside class="ask" style="${hv(role('violet'))}"><div class="ask-l">${esc(s.asksLabel || 'Decisions needed')}</div>
-      <ul>${s.asks.map(a => `<li>${md(a.text)}${a.owner ? `<span class="owner">${esc(a.owner)}</span>` : ''}</li>`).join('')}</ul></aside>` : ''}
+    <div class="prio">${s.priorities.map((p, i) => `<div class="p-row" style="${hv(hue(i))}"><div><div class="p-t"><i class="dot"></i>${esc(p.title)}</div>${el('div', 'p-d', p.detail, md)}</div><div class="p-w">${esc(p.when || '')}</div></div>`).join('')}</div>
+    ${s.asks ? asksPanel(s) : ''}
   </main>`,
 };
 
@@ -596,16 +608,17 @@ function build() {
 build().sizes.forEach((h, i) => { if (h) deck.slides[i]._mh = h; });
 const { out: layout, warn: layoutWarn = [], fonts: missingFonts = [] } = build();
 
+const slideFile = i => `slide-${String(i + 1).padStart(2, '0')}.png`;
 if (formats.includes('png')) deck.slides.forEach((_, i) => {
-  const png = path.join(out, `slide-${String(i + 1).padStart(2, '0')}.png`);
+  const png = path.join(out, slideFile(i));
   chrome(bin, [`--screenshot=${png}`, `--window-size=${W},${H}`, '--force-device-scale-factor=2', `${url}?only=${i + 1}`]);
 });
 // Every slide on one sheet, two per row: one image to read instead of one per slide.
 if (formats.includes('png')) {
   const cw = 960, ch = 540, gap = 16, rows = Math.ceil(deck.slides.length / 2);
   const sheet = path.join(out, 'contact.html');
-  fs.writeFileSync(sheet, `<!doctype html><body style="margin:0;padding:${gap}px;background:#9a9a96;display:grid;grid-template-columns:repeat(2,${cw}px);gap:${gap}px">${
-    deck.slides.map((_, i) => `<img src="slide-${String(i + 1).padStart(2, '0')}.png" width="${cw}" height="${ch}">`).join('')}</body>`);
+  const imgs = deck.slides.map((_, i) => `<img src="${slideFile(i)}" width="${cw}" height="${ch}">`).join('');
+  fs.writeFileSync(sheet, `<!doctype html><body style="margin:0;padding:${gap}px;background:#9a9a96;display:grid;grid-template-columns:repeat(2,${cw}px);gap:${gap}px">${imgs}</body>`);
   chrome(bin, [`--screenshot=${path.join(out, 'contact.png')}`, `--window-size=${2 * cw + 3 * gap},${rows * (ch + gap) + gap}`, pathToFileURL(sheet).href]);
   fs.rmSync(sheet);
 }
