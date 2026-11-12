@@ -7,13 +7,13 @@
   /* worklog.py fills in the title and the body. Colours: light values first, dark below. */
   :root {
     color-scheme: light dark;
-    --page: #f9f9f7; --surface: #fcfcfb; --ink: #0b0b0b; --ink-2: #52514e; --muted: #898781;
-    --hairline: #e1e0d9; --axis: #c3c2b7; --mark: #2a78d6; --wash: rgba(42, 120, 214, 0.14);
+    --page: #f9f9f7; --ink: #0b0b0b; --ink-2: #52514e; --muted: #898781;
+    --hairline: #e1e0d9; --axis: #c3c2b7;
   }
   @media (prefers-color-scheme: dark) {
     :root {
-      --page: #0d0d0d; --surface: #1a1a19; --ink: #f0efec; --ink-2: #c3c2b7;
-      --hairline: #2c2c2a; --axis: #383835; --mark: #3987e5; --wash: rgba(57, 135, 229, 0.2);
+      --page: #0d0d0d; --ink: #f0efec; --ink-2: #c3c2b7;
+      --hairline: #2c2c2a; --axis: #383835;
     }
   }
   * { box-sizing: border-box; }
@@ -22,59 +22,28 @@
   main { max-width: 880px; margin: 0 auto; }
   h1 { font-size: 32px; line-height: 1.15; margin: 0; }
   h2 { font-size: 21px; line-height: 1.25; margin: 0 0 6px; }
-  h3 { font-size: 17px; line-height: 1.3; margin: 0; }
   section { margin-top: 56px; }
   a { color: inherit; text-underline-offset: 3px; text-decoration-color: var(--axis); }
   a:hover { text-decoration-color: currentColor; }
-  ul { margin: 12px 0 0; padding-left: 20px; overflow-wrap: anywhere; font-size: 15px; }
-  li { margin: 2px 0; }
   small { display: block; color: var(--muted); font-size: 13px; }
   .period { margin: 6px 0 0; color: var(--ink-2); }
-  .lede { margin: 20px 0 8px; font-size: 19px; line-height: 1.5; max-width: 62ch; text-wrap: pretty; }
   .intro { margin: 0 0 20px; color: var(--ink-2); max-width: 70ch; }
 
-  .tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 12px; margin-top: 20px; }
-  .tiles div { background: var(--surface); border: 1px solid var(--hairline); border-radius: 10px; padding: 14px 16px; }
-  .tiles span { display: block; color: var(--ink-2); font-size: 14px; }
-  .tiles b { display: block; font-size: 34px; font-weight: 600; line-height: 1.25; }
-
-  /* Timeline: one row per epic or project; a mark is a day with work, the wash spans first day to last. */
-  .timeline { display: grid; grid-template-columns: minmax(110px, max-content) minmax(120px, 1fr) max-content;
-              gap: 10px 14px; align-items: center; }
-  .row { display: contents; }
-  .row .name { max-width: 300px; line-height: 1.3; overflow-wrap: anywhere; }
-  .row .value { color: var(--ink-2); font-size: 14px; font-variant-numeric: tabular-nums; text-align: right; }
-  .track, .axis { position: relative; height: 18px; }
-  .track { border-bottom: 1px solid var(--hairline); }
-  .track em { position: absolute; top: 3px; bottom: 3px; border-radius: 3px; background: var(--wash); }
-  .track i { position: absolute; top: 3px; bottom: 3px; min-width: 4px; border-radius: 2px; background: var(--mark);
-             box-shadow: 0 0 0 1px var(--page); }
-  .axis span { position: absolute; bottom: -2px; color: var(--muted); font-size: 12px; white-space: nowrap; }
-
-  article { background: var(--surface); border: 1px solid var(--hairline); border-radius: 10px; padding: 18px 20px;
-            margin-top: 12px; break-inside: avoid; }
-  .facts { margin: 4px 0 0; color: var(--ink-2); font-size: 14px; }
-  .outcome { margin: 12px 0 0; white-space: pre-wrap; max-width: 70ch; }
+  .counts { margin: 16px 0 0; font-size: 17px; max-width: 70ch; }
 
   .scroll { overflow-x: auto; margin: 8px 0 16px; }
   table { border-collapse: collapse; width: 100%; font-size: 14px; font-variant-numeric: tabular-nums; }
   th, td { text-align: left; padding: 8px 14px 8px 0; border-bottom: 1px solid var(--hairline); vertical-align: top; }
   th { color: var(--ink-2); font-weight: 600; font-size: 13px; }
   td:first-child, td:last-child { white-space: nowrap; }
-  details { margin-top: 56px; border-top: 1px solid var(--hairline); padding-top: 16px; color: var(--ink-2); font-size: 14px; }
-  summary { cursor: pointer; width: max-content; max-width: 100%; }
+  td small { white-space: normal; }
   footer { margin-top: 40px; color: var(--muted); font-size: 13px; max-width: 70ch; }
   @media (max-width: 560px) {
     h1 { font-size: 26px; }
-    .lede { font-size: 17px; }
-    .timeline { grid-template-columns: minmax(0, 1fr) max-content; }
-    .row .name { grid-column: 1 / -1; margin-bottom: -6px; max-width: none; }
-    .row:first-child { display: none; }
   }
   @media print {
     body { background: none; padding: 0; font-size: 12px; }
     section { margin-top: 28px; }
-    details { display: none; }
   }
 </style>
 <main>
