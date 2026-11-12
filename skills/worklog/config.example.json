@@ -1,0 +1,7 @@
+{
+  "dev_dir": "~/dev",
+  "jira_prefixes": ["ABC"],
+  "support_prefixes": [],
+  "jira_cmd": "jira issue view {key} --raw",
+  "jira_search_cmd": "jira issue list -q {jql} --raw"
+}

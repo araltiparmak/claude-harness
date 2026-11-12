@@ -22,7 +22,7 @@ flowchart LR
 `update.sh` pulls this repo and the optional second one, then:
 
 - **Skills:** symlinks every skill into `~/.claude/skills/`, so a pull is all an update needs.
-- **Settings:** builds `~/.claude/settings.json` from [`claude/settings.json`](claude/settings.json) plus an optional overlay from the second repo, so private values stay out of this one. If Claude Code or you changed the live file since the last run, the script prints the difference and leaves the file alone, so no setting is lost silently.
+- **Settings:** builds `~/.claude/settings.json` from [`claude/settings.json`](claude/settings.json) plus an optional overlay from the second repo, so private values stay out of this one. If Claude Code or you changed the live file since the last run, the script prints the difference and leaves the file alone, so no setting is lost silently. The model and effort level are the exception: `/model` and `/effort` write them during normal use, so the next run puts the repo's values back.
 - **Global instructions:** links `~/.claude/CLAUDE.md` to [`claude/CLAUDE.md`](claude/CLAUDE.md).
 - **Skills from other repos:** [`external-skills.yaml`](external-skills.yaml) lists repo URLs and the skills to take from each. The script clones each repo into `~/.cache/claude-harness/repos`, pulls it on later runs, and links the listed skills. Delete a line and the next run unlinks that skill. `scripts/check.sh` checks the file's format.
 
@@ -30,13 +30,7 @@ flowchart LR
 
 ## The setup
 
-[`claude/settings.json`](claude/settings.json) in short:
-
-- **Permissions:** auto mode, so there is no allow list: reads and edits in the project run without asking, and the classifier reviews the rest. `terraform apply`/`destroy`, `.env` and AWS credentials are denied.
-- **Hooks:** every Claude Code event goes to iTerm2's `cc-status` utility, so the terminal tab shows whether Claude is working, waiting for permission or done.
-- **Status line:** [ccstatusline](https://github.com/sirmalloc/ccstatusline).
-- **Model:** Opus at medium effort, with Sonnet as the fallback model.
-- **Plugins:** the `design`, `engineering` and `productivity` plugins synced from claude.ai are turned off; they bring connectors (Atlassian, Figma, Slack, Datadog and more) that every session would load.
+[`claude/settings.json`](claude/settings.json): auto mode; Terraform and Terragrunt `apply`/`destroy`, secrets and large generated files denied; Opus at medium effort. The hooks need iTerm2 (`cc-status`); with another terminal, delete the `hooks` block.
 
 ## Skills
 
@@ -59,18 +53,17 @@ Skills sit in group folders; `update.sh` links each one into `~/.claude/skills/`
 | [react-app](skills/dev/react-app/SKILL.md) | Scaffolds a React + Vite + TS + Tailwind prototype via `cra`, ready for Vercel or Cloudflare (`pnpm ship` checks and deploys), and builds v1 (user-invoked: `/react-app`) |
 | [sonar](skills/dev/sonar/SKILL.md) | Reads a PR's SonarQube Cloud findings (issues and hotspots) from the web API, one line each, and fixes them |
 
+### Worklog
+
+| Skill | What it does |
+|---|---|
+| [worklog](skills/worklog/SKILL.md) | Keeps a ledger of Claude Code sessions (a `SessionEnd` hook, no model) and reports them by type and by epic or project, with tokens, pull requests, reviews given and Jira tickets, as Markdown and as an HTML page with charts (user-invoked: `/worklog`) |
+
 ### Todo
 
 | Skill | What it does |
 |---|---|
 | [todo](skills/todo/SKILL.md) | Adds an item to the current project's `todo.md` checklist, or ticks one off |
-
-A typical run, from idea to live URL:
-
-```text
-/react-app habit-tracker 3        scaffold with cra, verify Tailwind, commit, build v1 at effort 3 (add "cloudflare" for Workers)
-pnpm ship                         clean tree, pnpm check, deploy to Vercel or Cloudflare
-```
 
 ## Use these skills
 
@@ -94,7 +87,7 @@ Plugins are installed by hand: `claude plugin install frontend-design@claude-plu
 
 A second skills repo is optional: point `PRIVATE_DIR` at a checkout (default `~/dev/private-skills`), and set `PRIVATE_URL` to clone it when the folder is missing. Without either, the second repo is skipped; this repo and the skills in `external-skills.yaml` are still installed.
 
-To leave skills off a machine, set `SKIP_SKILLS` to group or skill names separated by spaces, for example `export SKIP_SKILLS="dev mindmap"` in `~/.zshrc`. `update.sh` then links none of them, removes their old links, and prints a `skipped` line for each. `scripts/check.sh` checks the repo's consistency and runs in CI on every push.
+To leave skills off a machine, set `SKIP_SKILLS` to group or skill names separated by spaces, for example `export SKIP_SKILLS="dev mindmap"` in `~/.zshrc`. `update.sh` then links none of them, removes their old links, and prints a `skipped` line for each. `scripts/check.sh` checks the repo's consistency and runs in CI on every push, where the deck examples are also built.
 
 ## License
 
