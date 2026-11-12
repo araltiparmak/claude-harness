@@ -36,6 +36,7 @@ LEDGER = DATA / "sessions.jsonl"
 PREFIXES = "|".join(re.escape(p) for p in CONFIG["jira_prefixes"])
 KEY = re.compile(rf"\b(?:{PREFIXES})-\d+\b") if PREFIXES else re.compile(r"[^\s\S]")  # never matches
 REVIEW = re.compile(r"gh pr (diff|review|checkout)|<command-name>/code-review")
+ALERT = re.compile(r"https://[\w-]+\.pagerduty\.com/", re.I)
 TOKENS = {"in": "input_tokens", "out": "output_tokens",
           "cache_write": "cache_creation_input_tokens", "cache_read": "cache_read_input_tokens"}
 PR_QUERY = """query($q: String!, $after: String) {
@@ -85,6 +86,11 @@ def note_tools(row, blocks):
         row["review"] |= name == "Bash" and bool(REVIEW.search(args.get("command", "")))
 
 
+def blocks_of(msg):
+    content = msg.get("content")
+    return content if isinstance(content, list) else [{"type": "text", "text": content or ""}]
+
+
 def read_session(path):
     """One ledger row for a transcript and its subagent transcripts, or None when no model ran."""
     usage, text, branches = {}, [], []
@@ -97,8 +103,7 @@ def read_session(path):
         if not isinstance(msg, dict):
             continue
         note_place(row, d, branches)
-        content = msg.get("content")
-        blocks = content if isinstance(content, list) else [{"type": "text", "text": content or ""}]
+        blocks = blocks_of(msg)
         if d.get("type") == "assistant":
             # A reply is written once per content block, each time with the same usage.
             if msg.get("usage"):
@@ -115,7 +120,7 @@ def finish(row, usage, text, branches):
     row["prompt"] = next((t.strip()[:200] for t in text if t.strip() and not t.lstrip().startswith("<")), "")
     row["branches"] = branches
     row["keys"] = list(dict.fromkeys(KEY.findall(" ".join(branches) + "\n" + said)))
-    row["alert"] = "pagerduty.com" in said.lower()
+    row["alert"] = bool(ALERT.search(said))
     row["review"] |= bool(REVIEW.search(said))
     row["tokens"] = {k: sum(u.get(field) or 0 for u in usage.values()) for k, field in TOKENS.items()}
     return row
