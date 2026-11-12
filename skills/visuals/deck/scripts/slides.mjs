@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // Builds a presentation deck from a JSON spec.
-// Usage: node slides.mjs <deck.json> [out-dir] [--format html|pdf|html,pdf]
-// Writes slide-NN.png (2x), plus deck.html (a presenter: arrow keys, F for fullscreen) and deck.pdf when asked, then prints the layout check.
+// Usage: node slides.mjs <deck.json> [out-dir] [--html]
+// Writes slide-NN.png (2x), plus deck.html (a presenter: arrow keys, F for fullscreen) with --html, then prints the layout check.
 // Exit code 2 means the spec is invalid; 3 means a slide failed the layout check (text clipped or overflowing).
 import fs from 'node:fs';
 import path from 'node:path';
@@ -288,12 +288,11 @@ function css() {
 @page{size:${W}px ${H}px;margin:0}
 *{box-sizing:border-box}
 html,body{margin:0}
-body{background:#e6e6e2;font-family:${th.font};color:${th.ink};-webkit-print-color-adjust:exact;print-color-adjust:exact;-webkit-font-smoothing:antialiased}
+body{background:#e6e6e2;font-family:${th.font};color:${th.ink};-webkit-font-smoothing:antialiased}
 .slide{width:${W}px;height:${H}px;background:${th.surface};position:relative;display:flex;flex-direction:column;padding:${PAD_TOP}px ${PAD_X}px 0;margin:24px auto;overflow:hidden}
 body.single{background:${th.surface}}
 body.single .slide{margin:0}
 body.single .slide:not(.on){display:none}
-@media print{body{background:none}.slide{margin:0;break-after:page}}
 header h1{margin:0;font-family:${th.display};font-size:36px;line-height:1.18;font-weight:600;letter-spacing:-0.015em;max-width:1080px;text-wrap:balance}
 .lede{margin:12px 0 0;font-size:19px;line-height:1.45;color:${th.ink2};max-width:980px}
 main{flex:1;min-height:0;display:flex;gap:40px;padding:36px 0 28px;overflow:hidden}
@@ -382,8 +381,7 @@ body.present{background:#101010;overflow:hidden;height:100vh}
 body.present .slide{position:fixed;left:50%;top:50%;margin:0;transform:translate(-50%,-50%) scale(var(--scale,1));display:none;box-shadow:0 12px 48px rgba(0,0,0,.45)}
 body.present .slide.on{display:flex}
 #hud{display:none;position:fixed;right:18px;bottom:14px;font:13px/1 ${th.font};color:#8a8a8a;user-select:none}
-body.present #hud{display:block}
-@media print{body.present .slide{position:static;transform:none;display:flex;box-shadow:none}#hud{display:none!important}}`;
+body.present #hud{display:block}`;
 }
 
 // In-page layout check: anything clipped by its box or pushed outside the slide body is an issue.
@@ -426,12 +424,12 @@ const LINT_JS = `
   document.getElementById('lint').textContent=JSON.stringify({out,warn,sizes,fonts});
 })();`;
 
-// Presenter for deck.html: one slide at a time, scaled to the window. Screenshots (?only), lint and print skip it.
+// Presenter for deck.html: one slide at a time, scaled to the window. Screenshots (?only) and lint skip it.
 const PRESENT_JS = `
 (function(){
   const q=new URLSearchParams(location.search), S=[...document.querySelectorAll('.slide')];
   if(q.has('only')){document.body.classList.add('single');S[q.get('only')-1].classList.add('on');return;}
-  if(q.has('lint')||q.has('print')) return;
+  if(q.has('lint')) return;
   document.body.classList.add('present');
   const hud=document.getElementById('hud');
   let i=Math.max(0,Math.min(S.length-1,(parseInt(location.hash.slice(1))||1)-1));
@@ -565,14 +563,10 @@ const chrome = (bin, args) => execFileSync(bin, ['--headless', '--disable-gpu', 
 
 // ---------- main ----------
 
-const args = process.argv.slice(2), pos = [];
-let formatArg;
-for (let i = 0; i < args.length; i++) {
-  if (args[i].startsWith('--format')) formatArg = args[i].includes('=') ? args[i].split('=')[1] : args[++i];
-  else pos.push(args[i]);
-}
-const [specPath, outArg] = pos;
-if (!specPath) { console.error('usage: slides.mjs <deck.json> [out-dir] [--format pdf,png,html]'); process.exit(2); }
+const args = process.argv.slice(2);
+const keepHtml = args.includes('--html');
+const [specPath, outArg] = args.filter(a => a !== '--html');
+if (!specPath) { console.error('usage: slides.mjs <deck.json> [out-dir] [--html]'); process.exit(2); }
 let deck;
 try { deck = JSON.parse(fs.readFileSync(specPath, 'utf8')); }
 catch (e) { console.error(`SPEC     ${specPath} is not valid JSON: ${e.message}`); process.exit(2); }
@@ -581,11 +575,6 @@ if (specErrors.length) {
   console.error(specErrors.map(e => `SPEC     ${e}`).join('\n'));
   process.exit(2);
 }
-const FORMATS = ['pdf', 'png', 'html'];
-const formats = String(formatArg || 'png').split(',').map(x => x.trim().toLowerCase()).filter(Boolean);
-for (const f of formats) if (!FORMATS.includes(f)) { console.error(`SPEC     unknown format "${f}"; use ${FORMATS.join(', ')}`); process.exit(2); }
-// PNGs come with every build: they are how the slides get checked.
-if (!formats.includes('png')) formats.unshift('png');
 const out = path.resolve(outArg || path.join(path.dirname(specPath), path.basename(specPath, '.json') + '-out'));
 fs.mkdirSync(out, { recursive: true });
 
@@ -609,24 +598,20 @@ build().sizes.forEach((h, i) => { if (h) deck.slides[i]._mh = h; });
 const { out: layout, warn: layoutWarn = [], fonts: missingFonts = [] } = build();
 
 const slideFile = i => `slide-${String(i + 1).padStart(2, '0')}.png`;
-if (formats.includes('png')) deck.slides.forEach((_, i) => {
+deck.slides.forEach((_, i) => {
   const png = path.join(out, slideFile(i));
   chrome(bin, [`--screenshot=${png}`, `--window-size=${W},${H}`, '--force-device-scale-factor=2', `${url}?only=${i + 1}`]);
 });
 // Every slide on one sheet, two per row: one image to read instead of one per slide.
-if (formats.includes('png')) {
-  const cw = 960, ch = 540, gap = 16, rows = Math.ceil(deck.slides.length / 2);
-  const sheet = path.join(out, 'contact.html');
-  const imgs = deck.slides.map((_, i) => `<img src="${slideFile(i)}" width="${cw}" height="${ch}">`).join('');
-  fs.writeFileSync(sheet, `<!doctype html><body style="margin:0;padding:${gap}px;background:#9a9a96;display:grid;grid-template-columns:repeat(2,${cw}px);gap:${gap}px">${imgs}</body>`);
-  chrome(bin, [`--screenshot=${path.join(out, 'contact.png')}`, `--window-size=${2 * cw + 3 * gap},${rows * (ch + gap) + gap}`, pathToFileURL(sheet).href]);
-  fs.rmSync(sheet);
-}
-if (formats.includes('pdf')) chrome(bin, [`--print-to-pdf=${path.join(out, 'deck.pdf')}`, '--no-pdf-header-footer', '--print-to-pdf-no-header', `${url}?print=1`]);
-if (!formats.includes('html')) fs.rmSync(htmlPath);
+const cw = 960, ch = 540, gap = 16, rows = Math.ceil(deck.slides.length / 2);
+const sheet = path.join(out, 'contact.html');
+const imgs = deck.slides.map((_, i) => `<img src="${slideFile(i)}" width="${cw}" height="${ch}">`).join('');
+fs.writeFileSync(sheet, `<!doctype html><body style="margin:0;padding:${gap}px;background:#9a9a96;display:grid;grid-template-columns:repeat(2,${cw}px);gap:${gap}px">${imgs}</body>`);
+chrome(bin, [`--screenshot=${path.join(out, 'contact.png')}`, `--window-size=${2 * cw + 3 * gap},${rows * (ch + gap) + gap}`, pathToFileURL(sheet).href]);
+fs.rmSync(sheet);
+if (!keepHtml) fs.rmSync(htmlPath);
 
-const made = { pdf: 'deck.pdf', png: 'slide-NN.png and contact.png (all slides on one sheet)', html: 'deck.html (open it, arrow keys to present)' };
-console.log(`deck: ${out}  (${deck.slides.length} slides: ${formats.map(f => made[f]).join(', ')})`);
+console.log(`deck: ${out}  (${deck.slides.length} slides: slide-NN.png, contact.png (all slides on one sheet)${keepHtml ? ', deck.html (open it, arrow keys to present)' : ''})`);
 if (missingFonts.length) console.log(`  font     ${missingFonts.join(' and ')} not installed, so the system font was used; run: brew install --cask font-inter`);
 for (const [n, msg] of layoutWarn) console.log(`  layout   slide ${n}: ${msg}`);
 for (const [n, msg] of layout) console.log(`  LAYOUT   slide ${n}: ${msg}`);

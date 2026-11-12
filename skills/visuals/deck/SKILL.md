@@ -1,6 +1,6 @@
 ---
 name: deck
-description: Builds presentation decks as PNG slides, a presentable HTML page or PDF from a JSON spec, for a company-wide audience, in a data style (results, KPIs, trends, before/after, next steps) or a bold style (one message per slide on a bright solid colour). Use when the user wants a presentation, slides or a deck, a bold or colourful deck, or a single slide or visual that shows results and numbers.
+description: Builds presentation decks as PNG slides, or a presentable HTML page from a JSON spec, for a company-wide audience, in a data style (results, KPIs, trends, before/after, next steps) or a bold style (one message per slide on a bright solid colour). Use when the user wants a presentation, slides or a deck, a bold or colourful deck, or a single slide or visual that shows results and numbers.
 ---
 
 # Decks
@@ -19,13 +19,12 @@ You write the content as a JSON spec; `scripts/slides.mjs` owns layout, charts, 
 
 ## Output type
 
-PNG is the default. Pass another `--format` only when the user's words ask for it.
+PNG is the default. Pass `--html` only when the user's words ask for it.
 
 | The user says | Flag | They get |
 |---|---|---|
 | nothing, "PNG", "images", "Slack", "paste in a doc" | (none) | `slide-01.png`, ... (2560×1440) |
-| "HTML", "web page", "present", "in the browser", "share a link", "Artifact" | `--format html` | the PNGs and `deck.html`: one file; arrow keys move, F is fullscreen. Publish `deck.html` as built when an Artifact is asked for |
-| "PDF" | `--format pdf` | the PNGs and `deck.pdf` |
+| "HTML", "web page", "present", "in the browser", "share a link", "Artifact" | `--html` | the PNGs and `deck.html`: one file; arrow keys move, F is fullscreen. Publish `deck.html` as built when an Artifact is asked for |
 
 The script writes the PNGs in every build, because step 6 checks them.
 
@@ -34,7 +33,7 @@ The script writes the PNGs in every build, because step 6 checks them.
 1. **Collect the numbers.** List every gap as `TBD`.
 2. **Outline as titles.** One action title per slide: `title`, `summary`, evidence slides, `next`. A bold deck is `statement` slides only. When the user gave data but no story, show the outline and wait for agreement.
 3. **Write the spec** to `decks/<name>.json` in the project, or the scratchpad for a throwaway.
-4. **Build:** `node scripts/slides.mjs <deck.json> [out-dir] [--format html|pdf]`.
+4. **Build:** `node scripts/slides.mjs <deck.json> [out-dir] [--html]`.
 5. **Fix findings** (rule 7) until the script prints `lint: clean`.
 6. **Read `contact.png`**, every slide on one sheet, on the first clean build. Read a single `slide-NN.png` only to look closer at one slide, and after a later fix only the slides that changed. Never read `deck.html`: the PNGs are the same slides. Done means: each slide's body proves its title, someone outside the team could read every slide, and the same number has the same value on every slide.
 7. **Report** the output paths and the `TBD` list.
