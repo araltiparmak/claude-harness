@@ -40,6 +40,7 @@ sed 's/autoFit: true }/autoFit: false, duration: 0, initialExpandLevel: -1 }/' "
 "$chrome" --headless --disable-gpu --hide-scrollbars \
   --screenshot="$out/$base.png" --window-size="${size/x/,}" \
   --run-all-compositor-stages-before-draw --virtual-time-budget=10000 \
-  --blink-settings=preferredColorScheme=1 "file://$tmp/shot.html" >/dev/null 2>&1
+  --blink-settings=preferredColorScheme=1 "file://$tmp/shot.html" >/dev/null 2>&1 || true   # judged by the check below
+[[ -s "$out/$base.png" ]] || { echo "render.sh: no PNG was written for $src" >&2; exit 1; }
 
 ls -1 "$out/$base".*

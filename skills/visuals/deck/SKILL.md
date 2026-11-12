@@ -1,6 +1,6 @@
 ---
 name: deck
-description: Builds presentation decks as PNG slides, a presentable HTML page or PDF from a JSON spec: team successes, quarterly results, KPIs, cost savings, before/after, roadmap and next steps, written for a company-wide audience, in a data style or a bold style (one message per slide on a bright solid colour). Use when the user wants a presentation, slides or a deck (all-hands, company update, leadership review, team showcase), a bold, simple or colourful deck, or a single slide or visual that shows results and numbers.
+description: Builds presentation decks as PNG slides, a presentable HTML page or PDF from a JSON spec, for a company-wide audience, in a data style (results, KPIs, trends, before/after, next steps) or a bold style (one message per slide on a bright solid colour). Use when the user wants a presentation, slides or a deck, a bold or colourful deck, or a single slide or visual that shows results and numbers.
 ---
 
 # Decks

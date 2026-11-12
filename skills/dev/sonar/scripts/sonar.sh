@@ -31,6 +31,9 @@ if sha != head:
 issues = get("issues/search", componentKeys=project, pullRequest=pr, resolved="false", s="FILE_LINE", ps=500)
 hotspots = get("hotspots/search", projectKey=project, pullRequest=pr, status="TO_REVIEW", ps=500)
 print(f"{issues['total']} issues, {hotspots['paging']['total']} hotspots")
+for kind, total, shown in (("issues", issues["total"], len(issues["issues"])), ("hotspots", hotspots["paging"]["total"], len(hotspots["hotspots"]))):
+    if total > shown:
+        print(f"TRUNCATED: only the first {shown} of {total} {kind} are listed; run again after fixing these")
 for i in issues["issues"]:
     print(f"{i['component'].split(':', 1)[1]}:{i.get('line', 0)} {i['severity']} {i['type']} {i['rule']} {i['message']}")
 for h in hotspots["hotspots"]:

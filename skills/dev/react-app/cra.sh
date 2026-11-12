@@ -48,7 +48,7 @@ LOG="$(mktemp "${TMPDIR:-/tmp}/cra.XXXXXX")"
 pnpm create vite@latest . --template react-ts </dev/null >"$LOG" 2>&1 \
   || die "pnpm create vite failed — see $LOG"
 pnpm install --silent || die "pnpm install failed"
-pnpm add -d tailwindcss@latest @tailwindcss/vite@latest --silent \
+pnpm add -D tailwindcss@latest @tailwindcss/vite@latest --silent \
   || die "installing tailwind failed"
 
 step "wiring tailwind, @/ alias and port $PORT"

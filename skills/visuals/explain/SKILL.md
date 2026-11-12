@@ -1,6 +1,6 @@
 ---
 name: explain
-description: Builds a one-page brief that explains a feature or technical topic to developers, testers and a product manager at once: summary and scope, where it lives (D2, whiteboard style), the flow (Mermaid sequence), states, a decision table, rules with concrete examples, and open questions, shareable as one HTML file or an Artifact. Use when the user wants to explain a feature or change across roles, align developers and testers, write a feature brief or explainer page, spell out a business rule that depends on several conditions, or share a technical topic with a PM.
+description: Builds a one-page brief that explains a feature or technical topic to developers, testers and a product manager at once, with architecture, flow and state diagrams, a decision table, rules with concrete examples and open questions, as one HTML file or an Artifact. Use when the user wants to explain a feature or change across roles, write a feature brief or explainer page, or spell out a business rule that depends on several conditions.
 ---
 
 # Explain

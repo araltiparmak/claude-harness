@@ -25,7 +25,7 @@ case "$ext" in
     chrome="$(find_chrome)"
     cfg="$(mktemp -d)/puppeteer.json"   # mktemp -d: the same on macOS and Linux
     printf '{"executablePath":"%s","args":["--no-sandbox"]}' "$chrome" > "$cfg"
-    if command -v mmdc >/dev/null 2>&1; then mm=(mmdc); else mm=(npx -y @mermaid-js/mermaid-cli); fi
+    if command -v mmdc >/dev/null 2>&1; then mm=(mmdc); else mm=(npx -y @mermaid-js/mermaid-cli@12.2.0); fi
     PUPPETEER_SKIP_DOWNLOAD=1 "${mm[@]}" -p "$cfg" -i "$src" -o "$out/$base.png" -s 2 -b white
     PUPPETEER_SKIP_DOWNLOAD=1 "${mm[@]}" -p "$cfg" -i "$src" -o "$out/$base.svg" -b white
     ;;
@@ -55,11 +55,12 @@ case "$ext" in
     "$chrome" --headless --disable-gpu --hide-scrollbars \
       --screenshot="$out/$base.png" --window-size="${size/x/,}" \
       --run-all-compositor-stages-before-draw --virtual-time-budget=10000 \
-      --force-device-scale-factor=2 "file://$abs" >/dev/null 2>&1
+      --force-device-scale-factor=2 "file://$abs" >/dev/null 2>&1 || true   # judged by the PNG check below
     ;;
   *) echo "unsupported extension: .$ext" >&2; exit 2 ;;
 esac
 
+[[ -s "$out/$base.png" ]] || { echo "render.sh: no PNG was written for $src" >&2; exit 1; }
 for f in "$out/$base".png "$out/$base".svg; do [[ -f "$f" ]] && echo "$f"; done
 
 # Size and aspect, so a picture that breaks the aspect rule is fixed before anyone reads it.
