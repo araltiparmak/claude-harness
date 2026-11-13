@@ -24,9 +24,9 @@ from string import Template
 CONFIG = {"dev_dir": "~/dev", "jira_prefixes": [], "support_prefixes": [], "jira_url": "",
           "jira_cmd": "jira issue view {key} --raw",
           "jira_search_cmd": "jira issue list -q {jql} --raw"}
-config_file = Path(__file__).resolve().parent / "config.json"
-if config_file.exists():
-    CONFIG.update(json.loads(config_file.read_text()))
+HERE = Path(__file__).resolve().parent
+if (HERE / "config.json").exists():
+    CONFIG.update(json.loads((HERE / "config.json").read_text()))
 
 DEV = Path(CONFIG["dev_dir"]).expanduser()
 DATA = DEV / "worklog"
@@ -239,16 +239,6 @@ def ticket(row):
     return (support or row["keys"] or [""])[0]
 
 
-def kind(row):
-    if row["alert"]:
-        return "alert"
-    if row["keys"] and is_support(ticket(row)):
-        return "support"
-    if row["review"] and not row["edits"]:
-        return "review"
-    return "task" if row["keys"] else "other"
-
-
 def repo_of(row):
     cwd = Path(row["cwd"] or "/")
     return cwd.relative_to(DEV).parts[0] if cwd.is_relative_to(DEV) and cwd != DEV else cwd.name or "/"
@@ -267,19 +257,19 @@ def collect(since):
     since = since or min(r["start"][:10] for r in rows)
     jira, worked, incidents, other = Jira(), defaultdict(set), [], defaultdict(list)
     for row in sorted(rows, key=lambda r: r["start"]):
-        key, sort = ticket(row), kind(row)
-        if sort == "alert":
+        key = ticket(row)
+        if row["alert"]:
             incidents.append({"date": row["start"][:10], "what": row["title"] or row["prompt"] or "(no title)",
                               "ticket": key, "repo": repo_of(row)})
         elif key:
             worked[key].add(row["start"][:10])
-        elif sort == "other":
+        elif row["edits"] or not row["review"]:  # a review without edits is in the GitHub review list
             other[repo_of(row)].append(row["start"][:10])
     resolved = jira.resolved(since)
     tickets = []
     for key in list(worked) + [k for k in resolved if k not in worked]:
         tickets.append({"key": key, "summary": jira.issue(key).get("summary", ""), "epic": jira.epic(key),
-                        "days": sorted(worked[key]), "resolved": key in resolved, "support": is_support(key)})
+                        "days": sorted(worked[key]), "resolved": key in resolved})
     prs = pull_requests(since)
     for pr in prs["opened"]:
         found = KEY.search(pr["title"])
@@ -287,8 +277,9 @@ def collect(since):
     if jira.cache:
         (DATA / "jira.json").write_text(json.dumps(jira.cache, indent=1))
     return {"since": since, "last": max(r["start"][:10] for r in rows), "sessions": len(rows),
-            "days": len({r["start"][:10] for r in rows}), "tickets": tickets, "incidents": incidents,
-            "other": other, "prs": prs}
+            "days": len({r["start"][:10] for r in rows}), "incidents": incidents, "other": other, "prs": prs,
+            "tickets": [t for t in tickets if not is_support(t["key"])],
+            "support": [t for t in tickets if is_support(t["key"])]}
 
 
 # ---- page
@@ -320,6 +311,10 @@ def jira_link(key):
     return f"{CONFIG['jira_url'].rstrip('/')}/browse/{key}" if CONFIG["jira_url"] and key else ""
 
 
+def ticket_cell(key):
+    return (key, jira_link(key), "") if key else "-"
+
+
 def worked_on(days):
     if not days:
         return "-"
@@ -335,32 +330,28 @@ def ticket_grid(tickets):
 
 def counts(data):
     """The headline numbers, as short phrases."""
-    prs, tickets = data["prs"], data["tickets"]
-    planned = [t for t in tickets if not t["support"]]
-    support = [t for t in tickets if t["support"]]
+    prs = data["prs"]
     merged = sum(pr["status"] == "merged" for pr in prs["opened"])
-    return [plural(len(planned), "ticket"), plural(len(support), "support ticket"),
+    return [plural(len(data["tickets"]), "ticket"), plural(len(data["support"]), "support ticket"),
             plural(len(data["incidents"]), "incident"),
             f"{plural(len(prs['opened']), 'pull request')} opened ({merged} merged)",
             f"{plural(len(prs['reviewed']), 'pull request')} reviewed"]
 
 
 def page(data):
-    prs, tickets = data["prs"], data["tickets"]
-    planned = [t for t in tickets if not t["support"]]
-    support = [t for t in tickets if t["support"]]
+    prs = data["prs"]
     body = [tag("header", [tag("h1", "Work summary"),
                            tag("p", f"{day(data['since'])} to {day(data['last'])}", class_="period"),
                            tag("p", " · ".join(counts(data)), class_="counts")])]
-    if planned:
-        body.append(section("Tickets", "Jira tickets you worked on or resolved.", ticket_grid(planned)))
-    if support:
-        body.append(section("Support tickets", "", ticket_grid(support)))
+    if data["tickets"]:
+        body.append(section("Tickets", "Jira tickets you worked on or resolved.", ticket_grid(data["tickets"])))
+    if data["support"]:
+        body.append(section("Support tickets", "", ticket_grid(data["support"])))
     if data["incidents"]:
         body.append(section("Incidents and investigations", "Sessions that followed a PagerDuty alert.",
                             grid(["Date", "Session", "Ticket", "Repo"],
-                                 [[day(i["date"]), i["what"], (i["ticket"], jira_link(i["ticket"]), "") if i["ticket"] else "-",
-                                   i["repo"]] for i in data["incidents"]])))
+                                 [[day(i["date"]), i["what"], ticket_cell(i["ticket"]), i["repo"]]
+                                  for i in data["incidents"]])))
     if prs["reviewed"]:
         body.append(section("Code reviews", "Pull requests by teammates that you reviewed.",
                             grid(["Reviewed", "Pull request", "Status"],
@@ -369,8 +360,7 @@ def page(data):
     if prs["opened"]:
         body.append(section("Pull requests", "",
                             grid(["Opened", "Pull request", "Ticket", "Status"],
-                                 [[day(pr["date"]), (pr["title"], pr["url"], pr["repo"]),
-                                   (pr["ticket"], jira_link(pr["ticket"]), "") if pr["ticket"] else "-",
+                                 [[day(pr["date"]), (pr["title"], pr["url"], pr["repo"]), ticket_cell(pr["ticket"]),
                                    STATUS[pr["status"]]] for pr in prs["opened"]])))
     if data["other"]:
         body.append(section("Other work", "Sessions without a Jira ticket, by repo.",
@@ -379,7 +369,7 @@ def page(data):
                                   for repo, days in sorted(data["other"].items(), key=lambda item: -len(set(item[1])))])))
     body.append(tag("footer", "Sources: Jira, GitHub and the records Claude Code keeps on this computer. "
                               f"Generated on {day(date.today())}."))
-    template = Template((Path(__file__).resolve().parent / "report.html").read_text())
+    template = Template((HERE / "report.html").read_text())
     file = DATA / "report.html"
     file.write_text(template.substitute(title=f"Work summary, {day(data['since'])} to {day(data['last'])}", body="\n".join(body)))
     return file
