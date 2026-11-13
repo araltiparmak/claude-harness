@@ -44,7 +44,6 @@ Skills sit in group folders; `update.sh` links each one into `~/.claude/skills/`
 | [diagrams](skills/visuals/diagrams/SKILL.md) | Draws technical diagrams (architecture with AWS icons, message chains, sequence, ER, state, flow) as SVG and PNG with Mermaid and D2, plain or hand-drawn (whiteboard style), for PRs and docs |
 | [explain](skills/visuals/explain/SKILL.md) | Builds a one-page brief that explains a feature to developers, testers and a PM: scope, architecture (D2, whiteboard style), flow and states (Mermaid), a decision table, rules with test examples, open questions |
 | [mindmap](skills/visuals/mindmap/SKILL.md) | Turns a Markdown outline into an interactive mind map (HTML) and a PNG with markmap, for topic trees and study maps |
-| [visual-check](skills/visuals/visual-check/SKILL.md) | Screenshots pages at phone and desktop width in light and dark mode with the local Chrome, and lists content wider than the screen and console errors, before a UI change is called done |
 
 ### Dev
 
@@ -53,7 +52,6 @@ Skills sit in group folders; `update.sh` links each one into `~/.claude/skills/`
 | [mobile-app](skills/dev/mobile-app/SKILL.md) | Recommends the default stack for a new Expo + React Native + TypeScript app, one decision at a time |
 | [react-app](skills/dev/react-app/SKILL.md) | Scaffolds a React + Vite + TS + Tailwind prototype via `cra`, ready for Vercel or Cloudflare (`pnpm ship` checks and deploys), and builds v1 (user-invoked: `/react-app`) |
 | [sonar](skills/dev/sonar/SKILL.md) | Reads a PR's SonarQube Cloud findings (issues and hotspots) from the web API, one line each, and fixes them |
-| [verify](skills/dev/verify/SKILL.md) | Sets up a project's `.claude/verify`, the checks a `Stop` hook runs before Claude may finish when the code changed; a failure sends the error back so Claude fixes it (user-invoked: `/verify`) |
 
 ### Worklog
 

@@ -1,5 +1,0 @@
-#!/usr/bin/env bash
-# Run by the verify skill's Stop hook before Claude finishes a change here.
-set -euo pipefail
-cd "$(dirname "$0")/.."
-scripts/check.sh
