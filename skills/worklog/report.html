@@ -1,0 +1,52 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>$title</title>
+<style>
+  /* worklog.py fills in the title and the body. Colours: light values first, dark below. */
+  :root {
+    color-scheme: light dark;
+    --page: #f9f9f7; --ink: #0b0b0b; --ink-2: #52514e; --muted: #898781;
+    --hairline: #e1e0d9; --axis: #c3c2b7;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --page: #0d0d0d; --ink: #f0efec; --ink-2: #c3c2b7;
+      --hairline: #2c2c2a; --axis: #383835;
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; padding: 40px 16px 72px; background: var(--page); color: var(--ink);
+         font: 16px/1.55 system-ui, -apple-system, "Segoe UI", sans-serif; }
+  main { max-width: 880px; margin: 0 auto; }
+  h1 { font-size: 32px; line-height: 1.15; margin: 0; }
+  h2 { font-size: 21px; line-height: 1.25; margin: 0 0 6px; }
+  section { margin-top: 56px; }
+  a { color: inherit; text-underline-offset: 3px; text-decoration-color: var(--axis); }
+  a:hover { text-decoration-color: currentColor; }
+  small { display: block; color: var(--muted); font-size: 13px; }
+  .period { margin: 6px 0 0; color: var(--ink-2); }
+  .intro { margin: 0 0 20px; color: var(--ink-2); max-width: 70ch; }
+
+  .counts { margin: 16px 0 0; font-size: 17px; max-width: 70ch; }
+
+  .scroll { overflow-x: auto; margin: 8px 0 16px; }
+  table { border-collapse: collapse; width: 100%; font-size: 14px; font-variant-numeric: tabular-nums; }
+  th, td { text-align: left; padding: 8px 14px 8px 0; border-bottom: 1px solid var(--hairline); vertical-align: top; }
+  th { color: var(--ink-2); font-weight: 600; font-size: 13px; }
+  td:first-child, td:last-child { white-space: nowrap; }
+  td small { white-space: normal; }
+  footer { margin-top: 40px; color: var(--muted); font-size: 13px; max-width: 70ch; }
+  @media (max-width: 560px) {
+    h1 { font-size: 26px; }
+  }
+  @media print {
+    body { background: none; padding: 0; font-size: 12px; }
+    section { margin-top: 28px; }
+  }
+</style>
+<main>
+$body
+</main>
+</html>

@@ -47,25 +47,20 @@ Each skill puts its `description` into every session.
 
 ## Settings
 
-- Opus at medium effort by default (`modelSettings`, which `/effort` writes). Raise it with `/effort high` for hard debugging or design; switch to Sonnet with `/model` for quick questions.
+- Opus at medium effort by default (`modelSettings`, which `/effort` writes). `update.sh` puts the default back, so a change made with `/model` or `/effort` lasts until the next run. Raise it with `/effort high` for hard debugging or design; switch to Sonnet with `/model` for quick questions.
 - Subagents run on the session's model: code review and other judgment work hands off to them. Give a custom search agent `model: haiku` in its own definition for cheap sweeps.
 - Keep `autoCompactEnabled` on.
-- Reads of `node_modules`, `dist`, `.next` and `coverage` are denied. Grep and Glob already skip ignored files; the rule covers repos without `.gitignore`, paths from stack traces, and minified bundles. It also blocks Bash commands that read those paths (`grep`, `cat`), so a check that must read build output belongs inside a script. To read library source on purpose, allow that one path for the session.
+- Reads of build output (`node_modules`, `dist`, `.next`, `coverage`), Terraform caches (`.terraform`, `.terragrunt-cache`) and lock files are denied, at any depth. The rules also block Bash commands that read those paths, so a check that must read them belongs inside a script. To read one on purpose, allow that path for the session.
 - The status line runs the globally installed `ccstatusline` (`npm i -g ccstatusline`), not `npx -y ...@latest`, so a refresh makes no network lookup.
 
 ## Habits
 
-- `/clear` between unrelated tasks; a long thread is re-sent on every turn.
-- `/compact` with a focus note at natural breakpoints, before the context is full.
-- Use a subagent for broad searches and noisy output; only its summary returns.
-- Give exact file paths and line ranges when you know them.
+- `/clear` between unrelated tasks, `/compact` with a focus note before the context is full.
+- A subagent for broad searches and noisy output; only its summary returns.
 
 ## Measuring
 
-- `/context`: what fills the context right now.
-- `/insights`: a report of recent sessions, where time and tokens went and what repeated.
-- `/cost` and the status line: spend while working.
-- `codeburn` (`brew install codeburn`) and `agentsview` (`brew install --cask agentsview`) read the local session logs in `~/.claude/projects/` and show tokens and cost by task, tool, model and project.
+`/context` (what fills it now), `/cost` and the status line (spend), `/insights` (recent sessions). `codeburn` and `agentsview` (Homebrew) break the logs in `~/.claude/projects/` down by task, model and project.
 
 ## Before adding a plugin, MCP server or skill
 

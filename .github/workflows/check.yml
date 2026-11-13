@@ -19,3 +19,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - run: scripts/check.sh
+      - name: Build the deck examples
+        run: |
+          for deck in skills/visuals/deck/examples/*.json; do
+            node skills/visuals/deck/scripts/slides.mjs "$deck" "$RUNNER_TEMP/$(basename "$deck" .json)"
+          done

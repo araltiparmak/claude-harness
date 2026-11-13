@@ -7,12 +7,25 @@
     "deny": [
       "Bash(terraform apply:*)",
       "Bash(terraform destroy:*)",
+      "Bash(terragrunt apply:*)",
+      "Bash(terragrunt destroy:*)",
+      "Bash(terragrunt run-all apply:*)",
+      "Bash(terragrunt run-all destroy:*)",
+      "Bash(terragrunt run --all apply:*)",
+      "Bash(terragrunt run --all destroy:*)",
       "Read(./.env)",
+      "Read(./.env.*)",
       "Read(./node_modules/**)",
       "Read(./dist/**)",
       "Read(./.next/**)",
       "Read(./coverage/**)",
-      "Read(~/.aws/credentials)"
+      "Read(./.terraform/**)",
+      "Read(./.terragrunt-cache/**)",
+      "Read(./package-lock.json)",
+      "Read(./pnpm-lock.yaml)",
+      "Read(./yarn.lock)",
+      "Read(~/.aws/credentials)",
+      "Read(~/.ssh/**)"
     ],
     "defaultMode": "auto"
   },
@@ -67,6 +80,10 @@
           {
             "type": "command",
             "command": "$HOME/.config/iterm2/cc-status"
+          },
+          {
+            "type": "command",
+            "command": "python3 $HOME/.claude/skills/worklog/worklog.py record"
           }
         ]
       }
@@ -143,13 +160,6 @@
       "effortLevel": "medium"
     }
   },
-  "tui": "fullscreen",
-  "voice": {
-    "enabled": true,
-    "mode": "hold"
-  },
-  "theme": "dark-ansi",
-  "preferredNotifChannel": "iterm2_with_bell",
   "autoCompactEnabled": true,
   "switchModelsOnFlag": false,
   "autoMode": {
@@ -157,6 +167,5 @@
       "$defaults",
       "Bash(pnpm deploy:*)"
     ]
-  },
-  "voiceEnabled": true
+  }
 }

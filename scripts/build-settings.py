@@ -13,6 +13,10 @@ install, a hand edit). The script then prints the difference and stops, so the
 change can be moved into the repo instead of being overwritten. Set
 HARNESS_FORCE=1 to overwrite anyway; the old file is backed up first.
 
+The keys in SESSION are the exception: /model and /effort write them during
+normal use, so a change to them is not drift, and the repo's values come back
+on the next run.
+
 Exit codes: 0 written or already current, 3 drift found.
 """
 
@@ -22,6 +26,8 @@ import os
 import shutil
 import sys
 import time
+
+SESSION = ("model", "effortLevel", "modelSettings")
 
 
 def merge(base, overlay):
@@ -44,6 +50,10 @@ def dump(data):
     return json.dumps(data, indent=2, ensure_ascii=False) + "\n"
 
 
+def tracked(data):
+    return {key: value for key, value in data.items() if key not in SESSION}
+
+
 def main():
     base_path, overlay_path, target, state = sys.argv[1:5]
     wanted = load(base_path)
@@ -57,17 +67,17 @@ def main():
         return 0
 
     last = load(state) if os.path.exists(state) else None
-    drifted = current is not None and current != last
+    drifted = current is not None and (last is None or tracked(current) != tracked(last))
     if drifted and os.environ.get("HARNESS_FORCE") != "1":
         print(f"warn: {target} was changed outside the harness. Not overwriting it.", file=sys.stderr)
         print("Move the change into claude/settings.json (or the private overlay), or re-run with HARNESS_FORCE=1.", file=sys.stderr)
         print("Lines starting with - are in the repo, lines starting with + are only in the live file:", file=sys.stderr)
-        diff = difflib.unified_diff(dump(wanted).splitlines(), dump(current).splitlines(), "repo", "live", lineterm="", n=1)
+        diff = difflib.unified_diff(dump(tracked(wanted)).splitlines(), dump(tracked(current)).splitlines(), "repo", "live", lineterm="", n=1)
         for line in diff:
             print("  " + line, file=sys.stderr)
         return 3
 
-    if current is not None:
+    if drifted:
         backup = f"{target}.harness-backup-{time.strftime('%Y%m%d-%H%M%S')}"
         shutil.copy2(target, backup)
         print(f"backed up the old settings.json to {backup}")

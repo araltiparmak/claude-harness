@@ -19,6 +19,8 @@ while IFS= read -r file; do
   front="$(awk 'NR==1{next} /^---$/{exit} {print}' "$file")"
   grep -qx "name: $name" <<<"$front" || problem "$name: front matter name is not '$name'"
   grep -qE '^description: .+' <<<"$front" || problem "$name: front matter has no description"
+  # Claude Code reads these, but a strict YAML parser (skills.sh, other agents) stops at ': ' or ' #' in a plain value.
+  if grep -qE '^description: .*(: | #)' <<<"$front"; then problem "$name: description contains ': ' or ' #', which is not valid YAML; reword it"; fi
 done < <(find skills -name SKILL.md | sort)
 dupes="$(printf '%s\n' "${skills[@]}" | sort | uniq -d)"
 [[ -z "$dupes" ]] || problem "skill names must be unique across groups: $dupes"
@@ -49,6 +51,7 @@ scripts_sh=()
 while IFS= read -r f; do scripts_sh+=("$f"); done < <(find scripts skills -name '*.sh' | sort)
 for script in ${scripts_sh[@]+"${scripts_sh[@]}"}; do bash -n "$script" || problem "$script: syntax error"; done
 for py in scripts/*.py; do python3 -m py_compile "$py" || problem "$py: syntax error"; done
+while IFS= read -r mjs; do node --check "$mjs" || problem "$mjs: syntax error"; done < <(find skills -name '*.mjs' | sort)
 if command -v shellcheck >/dev/null; then
   shellcheck "${scripts_sh[@]}" || problem "shellcheck found issues"
 else

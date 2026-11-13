@@ -51,81 +51,87 @@ skipped() {
   return 1
 }
 
-sync_repo "$PRIVATE" "$PRIVATE_URL"
-sync_repo "$MINE" ""
+# Bash reads a script while it runs. main is read whole before it starts, so the pull below
+# can rewrite this file without changing the run in progress.
+main() {
+  sync_repo "$PRIVATE" "$PRIVATE_URL"
+  sync_repo "$MINE" ""
 
-echo "== settings"
-python3 "$MINE/scripts/build-settings.py" \
-  "$MINE/claude/settings.json" "$PRIVATE/claude/settings.json" \
-  "$HOME/.claude/settings.json" "$HOME/.claude/.harness/settings.last.json" \
-  || echo "warn: settings.json not updated (see above)" >&2
+  echo "== settings"
+  python3 "$MINE/scripts/build-settings.py" \
+    "$MINE/claude/settings.json" "$PRIVATE/claude/settings.json" \
+    "$HOME/.claude/settings.json" "$HOME/.claude/.harness/settings.last.json" \
+    || echo "warn: settings.json not updated (see above)" >&2
 
-if [[ -L "$HOME/.claude/CLAUDE.md" || ! -e "$HOME/.claude/CLAUDE.md" ]] \
-  || cmp -s "$HOME/.claude/CLAUDE.md" "$MINE/claude/CLAUDE.md"; then
-  ln -sfn "$MINE/claude/CLAUDE.md" "$HOME/.claude/CLAUDE.md"
-  echo "linked CLAUDE.md"
-else
-  echo "skip CLAUDE.md: ~/.claude/CLAUDE.md differs from claude/CLAUDE.md; merge them, then delete the live file" >&2
-fi
+  if [[ -L "$HOME/.claude/CLAUDE.md" || ! -e "$HOME/.claude/CLAUDE.md" ]] \
+    || cmp -s "$HOME/.claude/CLAUDE.md" "$MINE/claude/CLAUDE.md"; then
+    ln -sfn "$MINE/claude/CLAUDE.md" "$HOME/.claude/CLAUDE.md"
+    echo "linked CLAUDE.md"
+  else
+    echo "skip CLAUDE.md: ~/.claude/CLAUDE.md differs from claude/CLAUDE.md; merge them, then delete the live file" >&2
+  fi
 
-mkdir -p "$DEST"
+  mkdir -p "$DEST"
 
-echo "== link skills"
-mine_names=" "
-for repo in "$MINE" "$PRIVATE"; do
-  [[ -d "$repo/skills" ]] || continue
-  # A folder with SKILL.md is a skill, at any depth; a folder without one is a group.
-  while IFS= read -r file; do
-    src="$(dirname "$file")"
-    name="$(basename "$src")"
-    skipped "${src#"$repo"/skills/}" && continue
-    case "$mine_names" in
-      *" $name "*) echo "skip $src: another skills repo already has $name" >&2; continue ;;
-      *) ;;
-    esac
-    mine_names+="$name "
-    link "$src" && echo "linked  $name ($(basename "$repo"))"
-  done < <(find "$repo/skills" -name SKILL.md | sort)
-done
-
-# Skills from other repos: external-skills.py checks the list, this script clones or pulls
-# each repo, then `external-skills.py resolve` finds every listed skill by its SKILL.md name.
-ext_names=" "
-ext_ok=0
-if [[ -f "$EXTERNAL" ]]; then
-  echo "== link external skills"
-  if pairs="$(python3 -I "$MINE/scripts/external-skills.py")"; then
-    ext_ok=1
-    while IFS= read -r url; do
-      mkdir -p "$(dirname "$CACHE/${url#https://}")"
-      sync_repo "$CACHE/${url#https://}" "$url"
-    done < <(cut -f1 <<< "$pairs" | sort -u)
-    while IFS=$'\t' read -r name src; do
-      skipped "$name" && continue
+  echo "== link skills"
+  mine_names=" "
+  for repo in "$MINE" "$PRIVATE"; do
+    [[ -d "$repo/skills" ]] || continue
+    # A folder with SKILL.md is a skill, at any depth; a folder without one is a group.
+    while IFS= read -r file; do
+      src="$(dirname "$file")"
+      name="$(basename "$src")"
+      skipped "${src#"$repo"/skills/}" && continue
       case "$mine_names" in
-        *" $name "*) echo "skip $name: a skill of your own has that name" >&2; continue ;;
+        *" $name "*) echo "skip $src: another skills repo already has $name" >&2; continue ;;
         *) ;;
       esac
-      ext_names+="$name "
-      link "$src" "$name" && echo "linked  $name (external)"
-    done < <(python3 -I "$MINE/scripts/external-skills.py" resolve)
-  else
-    echo "warn: external-skills.yaml has problems; external links left as they were" >&2
-  fi
-fi
+      mine_names+="$name "
+      link "$src" && echo "linked  $name ($(basename "$repo"))"
+    done < <(find "$repo/skills" -name SKILL.md | sort)
+  done
 
-# Remove links into these repos that are dangling or skipped, and external links no longer listed.
-# With a broken external-skills.yaml, external links stay until the file is fixed.
-for entry in "$DEST"/*; do
-  [[ -L "$entry" ]] || continue
-  case "$(readlink "$entry")" in
-    "$MINE"/skills/*|"$PRIVATE"/skills/*)
-      [[ -e "$entry" && "$mine_names" == *" $(basename "$entry") "* ]] && continue ;;
-    "$CACHE"/*)
-      [[ "$ext_ok" = 1 ]] || continue
-      [[ -e "$entry" && "$ext_names" == *" $(basename "$entry") "* ]] && continue ;;
-    *) continue ;;
-  esac
-  rm "$entry"
-  echo "removed $(basename "$entry")"
-done
+  # Skills from other repos: external-skills.py checks the list, this script clones or pulls
+  # each repo, then `external-skills.py resolve` finds every listed skill by its SKILL.md name.
+  ext_names=" "
+  ext_ok=0
+  if [[ -f "$EXTERNAL" ]]; then
+    echo "== link external skills"
+    if pairs="$(python3 -I "$MINE/scripts/external-skills.py")"; then
+      ext_ok=1
+      while IFS= read -r url; do
+        mkdir -p "$(dirname "$CACHE/${url#https://}")"
+        sync_repo "$CACHE/${url#https://}" "$url"
+      done < <(cut -f1 <<< "$pairs" | sort -u)
+      while IFS=$'\t' read -r name src; do
+        skipped "$name" && continue
+        case "$mine_names" in
+          *" $name "*) echo "skip $name: a skill of your own has that name" >&2; continue ;;
+          *) ;;
+        esac
+        ext_names+="$name "
+        link "$src" "$name" && echo "linked  $name (external)"
+      done < <(python3 -I "$MINE/scripts/external-skills.py" resolve)
+    else
+      echo "warn: external-skills.yaml has problems; external links left as they were" >&2
+    fi
+  fi
+
+  # Remove links into these repos that are dangling or skipped, and external links no longer listed.
+  # With a broken external-skills.yaml, external links stay until the file is fixed.
+  for entry in "$DEST"/*; do
+    [[ -L "$entry" ]] || continue
+    case "$(readlink "$entry")" in
+      "$MINE"/skills/*|"$PRIVATE"/skills/*)
+        [[ -e "$entry" && "$mine_names" == *" $(basename "$entry") "* ]] && continue ;;
+      "$CACHE"/*)
+        [[ "$ext_ok" = 1 ]] || continue
+        [[ -e "$entry" && "$ext_names" == *" $(basename "$entry") "* ]] && continue ;;
+      *) continue ;;
+    esac
+    rm "$entry"
+    echo "removed $(basename "$entry")"
+  done
+}
+
+main

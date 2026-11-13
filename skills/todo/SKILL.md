@@ -1,6 +1,6 @@
 ---
 name: todo
-description: Adds an item to the current project's todo.md checklist, or ticks one off. Use when the user says "add a project todo", "put this on this project's todo list", "add to todo.md", "todo: <something>", or "mark <item> as done" for the project's list. A list that spans all projects is a different skill (todo-general).
+description: Adds an item to the current project's todo.md checklist, or ticks one off. Use when the user says "add a project todo", "put this on this project's todo list", "add to todo.md", "mark <item> as done" for the project's list, or starts a message with "todo" and the item. A list that spans all projects is a different skill (todo-general).
 ---
 
 Arguments passed: $ARGUMENTS
