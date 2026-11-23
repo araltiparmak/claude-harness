@@ -70,6 +70,21 @@ class Report(unittest.TestCase):
         self.assertAlmostEqual(sum(g["cost"] for g in w.groups(data).values()), data["total"])
         self.assertEqual(data["measures"]["cache_hit"], 0.8)
 
+    def test_start_asks_for_a_ticket_only_on_a_branch_without_a_key(self):
+        dev, w.DEV = w.DEV, Path(tempfile.mkdtemp())
+        repo = w.DEV / "api"
+        try:
+            w.KEY, w.PREFIXES, w.JIRA_PREFIXES = re.compile(r"\b(?:ABC)-\d+\b", re.I), "ABC", ["ABC"]
+            w.subprocess.run(["git", "init", "-q", "-b", "main", str(repo)], check=True)
+            self.assertIn("ask once", w.start({"cwd": str(repo)})["hookSpecificOutput"]["additionalContext"])
+            w.subprocess.run(["git", "-C", str(repo), "checkout", "-q", "-b", "abc-12-export"], check=True)
+            self.assertIsNone(w.start({"cwd": str(repo)}))
+            w.PREFIXES = ""
+            self.assertIsNone(w.start({"cwd": str(repo)}))
+        finally:
+            w.subprocess.run(["rm", "-rf", str(w.DEV)])
+            w.DEV = dev
+
     def test_month_before_keeps_the_day_or_takes_the_last(self):
         self.assertEqual((w.month_before("2026-11-23"), w.month_before("2026-03-31")), ("2026-10-23", "2026-02-28"))
 

@@ -2,6 +2,8 @@
 """Keeps a ledger of Claude Code sessions and writes a one-page work summary from it.
 
   worklog.py record                            SessionEnd hook: appends the session on stdin to the ledger
+  worklog.py start                             SessionStart hook: in a work repo on a branch with no ticket key,
+                                               tells Claude to ask which ticket the session is for
   worklog.py report [period] [--no-cost] [--no-usage]
       Records every transcript still in ~/.claude/projects, writes <DEV_DIR>/worklog/report.html and
       report.csv (the tickets), opens the page and prints the counts.
@@ -26,6 +28,7 @@ import html
 import json
 import os
 import re
+import subprocess
 import sys
 import webbrowser
 from collections import defaultdict
@@ -949,6 +952,21 @@ def report(args):
     webbrowser.open(file.as_uri())
 
 
+def start(hook):
+    """The SessionStart reminder, or None: only with JIRA_PREFIXES set, in a git repo under DEV_DIR that is not in
+    EXCLUDE_REPOS, on a branch that names no ticket key. The answer lands in the user's text, where record finds it."""
+    cwd = Path(hook.get("cwd") or ".")
+    if not PREFIXES or not cwd.is_relative_to(DEV) or cwd == DEV or repo_of({"cwd": str(cwd)}) in EXCLUDE_REPOS:
+        return None
+    git = subprocess.run(["git", "-C", str(cwd), "branch", "--show-current"], capture_output=True, text=True)
+    if git.returncode or KEY.search(git.stdout):
+        return None
+    return {"hookSpecificOutput": {"hookEventName": "SessionStart", "additionalContext": (
+        f"Worklog: the branch '{git.stdout.strip() or 'detached'}' names no Jira ticket ({', '.join(JIRA_PREFIXES)}). "
+        "If the user's first request is work for a ticket and names no key, ask once which ticket it is for. "
+        "Do not ask for personal, general or setup questions.")}}
+
+
 def unmapped(args):
     """The sessions in Other work and the period's tickets, as JSON: what /worklog needs to choose a ticket."""
     data = collect(*period(args[0] if args else ""))
@@ -982,6 +1000,10 @@ def main():
         if path and Path(path).exists() and os.fork() == 0:
             os.setsid()
             append([Path(path)])
+    elif command == "start":
+        reminder = start(json.load(sys.stdin))
+        if reminder:
+            print(json.dumps(reminder))
     elif command == "report":
         report(sys.argv[2:])
         if (HERE / "demo.py").exists():  # a local add-on, kept out of the repo
