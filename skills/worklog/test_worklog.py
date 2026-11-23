@@ -26,15 +26,17 @@ def pr(n, text, branch, author="me", status="merged"):
 
 
 class Report(unittest.TestCase):
-    def collect(self, rows, opened=(), reviewed=(), resolved=()):
+    def collect(self, rows, opened=(), reviewed=(), resolved=(), mapped=()):
         tmp = Path(tempfile.mkdtemp())
-        w.DATA, w.LEDGER = tmp, tmp / "sessions.jsonl"
+        w.DATA, w.LEDGER, w.MAPPED = tmp, tmp / "sessions.jsonl", tmp / "mapped.json"
         w.LEDGER.write_text("\n".join(json.dumps(r) for r in rows))
         w.KEY, w.PREFIXES, w.SUPPORT = re.compile(r"\b(?:ABC)-\d+\b", re.I), "ABC", set()
         w.append = lambda paths: None
         w.pull_requests = lambda since, until: {"opened": list(opened), "reviewed": list(reviewed)}
         w.jira.issue = lambda key: ISSUES[key]
         w.jira.resolved = lambda since, until: list(resolved)
+        if mapped:
+            w.map_sessions(list(mapped))
         return w.collect("2026-11-01", "2026-11-30")
 
     def test_sub_task_counts_for_its_parent_with_its_own_cost(self):
@@ -55,6 +57,12 @@ class Report(unittest.TestCase):
         data = self.collect([session(1, edits=False, review=True, pulls=["#7"], repo="scratch")],
                             reviewed=[pr(7, "", "b", author="teammate")])
         self.assertEqual((data["prs"]["reviewed"][0]["cost"], data["reviews"]["unlinked"]), (1.0, 0.0))
+
+    def test_a_mapped_session_counts_for_its_ticket_and_rules_still_win(self):
+        rows = [session(1, repo="tools"), session(2, ["ABC-9"]), session(3, repo="tools")]
+        data = self.collect(rows, mapped=["s1", "abc-1", "s2", "ABC-2"])
+        self.assertEqual(sorted(t.key for t in data["tickets"]), ["ABC-1", "ABC-9"])
+        self.assertEqual([r["id"] for r in data["unmapped"]], ["s3"])
 
     def test_no_session_is_dropped(self):
         rows = [session(1, ["ABC-1"]), session(2, edits=False), session(3, repo="tools")]

@@ -14,7 +14,8 @@ flowchart TB
     s[Session] --> al{PagerDuty<br/>link?} -- yes --> inc[Incident]
     al -- no --> key{Ticket key?<br/>branch, prompt,<br/>commands, PR} -- yes --> tk[Ticket<br/>sub-task under parent]
     key -- no --> rv{Review?} -- yes --> rpr[Reviewed PR]
-    rv -- no --> oth[Other work]
+    rv -- no --> mp{Chosen by<br/>/worklog?<br/>mapped.json} -- yes --> tk
+    mp -- no --> oth[Other work]
   end
   subgraph out [4. Page]
     direction LR
@@ -30,7 +31,7 @@ flowchart TB
   classDef data fill:#fef9c3,stroke:#ca8a04,color:#422006
   classDef fail fill:#fee2e2,stroke:#dc2626,color:#450a0a
   classDef done fill:#dcfce7,stroke:#16a34a,color:#052e16
-  class rc,ghp,jp,s,al,key,rv,chk step
+  class rc,ghp,jp,s,al,key,rv,mp,chk step
   class tr,gh,jc ext
   class led,prs,cache data
   class stop fail

@@ -6,8 +6,12 @@
       Records every transcript still in ~/.claude/projects, writes <DEV_DIR>/worklog/report.html and
       report.csv (the tickets), opens the page and prints the counts.
       period: empty for this month, last-month, or a first day YYYY-MM-DD.
+  worklog.py unmapped [period]                 prints, as JSON, the sessions the rules gave no ticket and the
+                                               period's tickets, for /worklog to choose from
+  worklog.py map SESSION KEY [SESSION KEY...]  saves a ticket for a session the rules gave none
 
-Data: <DEV_DIR>/worklog, with sessions.jsonl (the ledger) and jira.json (the issue cache).
+Data: <DEV_DIR>/worklog, with sessions.jsonl (the ledger), jira.json (the issue cache) and mapped.json
+(the tickets chosen with map).
 github.py and jira.py fetch pull requests and issues; each runs on its own too.
 """
 # Settings: set your own on your machine; the repo keeps these empty.
@@ -36,6 +40,7 @@ HERE = Path(__file__).resolve().parent
 DEV = Path(DEV_DIR).expanduser()
 DATA = DEV / "worklog"
 LEDGER = DATA / "sessions.jsonl"
+MAPPED = DATA / "mapped.json"
 PREFIXES = "|".join(re.escape(p) for p in JIRA_PREFIXES)
 KEY = re.compile(rf"\b(?:{PREFIXES})-\d+\b", re.I) if PREFIXES else re.compile(r"[^\s\S]")  # never matches
 KEY_SHAPE = re.compile(r"\b[A-Za-z][A-Za-z0-9]{1,9}-\d+\b")  # the ledger keeps these; the report filters by KEY
@@ -274,10 +279,15 @@ def keys_of(row):
     return [k for k in dict.fromkeys(found) if KEY.fullmatch(k)]
 
 
-def ticket(row, by_branch, issues):
+def mapped():
+    """{session id: ticket key} saved with map."""
+    return json.loads(MAPPED.read_text()) if MAPPED.exists() else {}
+
+
+def ticket(row, by_branch, issues, chosen):
     """The key a session counts for: a support key it names, else Jira.pick of its keys, else the ticket of a
-    pull request opened from one of its branches. A branch name alone settles it when it names one ticket;
-    otherwise the repo must match too."""
+    pull request opened from one of its branches, else the key saved for it with map. A branch name alone
+    settles it when it names one ticket; otherwise the repo must match too."""
     keys = keys_of(row)
     support = [k for k in keys if is_support(k)]
     if support:
@@ -289,7 +299,7 @@ def ticket(row, by_branch, issues):
             return by_branch[repo_of(row), b]
         if len(by_branch.get(b, ())) == 1:
             return next(iter(by_branch[b]))
-    return ""
+    return chosen.get(row["id"], "")
 
 
 def reviewed_pr(row, reviewed):
@@ -395,7 +405,7 @@ def collect(since, until):
     prs = {kind: [pr for pr in found if pr["repo"] not in EXCLUDE_REPOS]
            for kind, found in pull_requests(since, until).items()}
     issues, tickets, incidents = Jira(), {}, []
-    other = defaultdict(lambda: {"days": set(), "cost": 0.0})
+    other, unmapped = defaultdict(lambda: {"days": set(), "cost": 0.0}), []
     reviews = {"cost": 0.0, "unlinked": 0.0}
 
     def on(key):
@@ -404,6 +414,7 @@ def collect(since, until):
             tickets[top] = Ticket(top, issues)
         return tickets[top]
 
+    chosen = mapped()
     by_branch = {}  # (repo, branch): ticket, and branch: {tickets of the pull requests from a branch of that name}
     for pr in prs["opened"]:
         pr["sub"] = issues.pick(list(dict.fromkeys(k.upper() for k in KEY.findall(pr["text"]))))
@@ -414,7 +425,7 @@ def collect(since, until):
     for pr in prs["reviewed"]:
         pr["cost"] = 0.0
     for row in rows:
-        named = ticket(row, by_branch, issues)
+        named = ticket(row, by_branch, issues, chosen)
         if row["alert"]:
             incidents.append({"date": row["start"][:10], "what": row["title"] or row["prompt"] or "(no title)",
                               "ticket": issues.top(named), "repo": repo_of(row), "cost": cost(row)})
@@ -432,6 +443,7 @@ def collect(since, until):
         else:
             other[repo_of(row)]["days"].add(row["start"][:10])
             other[repo_of(row)]["cost"] += cost(row)
+            unmapped.append(row)
     for pr in prs["opened"]:
         if pr["ticket"]:
             t = on(pr["sub"])
@@ -443,7 +455,7 @@ def collect(since, until):
         t.resolved |= key == t.key
     if issues.cache:
         (DATA / "jira.json").write_text(json.dumps(issues.cache, indent=1))
-    return {"since": since, "until": until, "incidents": incidents, "other": other, "prs": prs,
+    return {"since": since, "until": until, "incidents": incidents, "other": other, "unmapped": unmapped, "prs": prs,
             "reviews": reviews, "sessions": len(rows), "total": sum(cost(r) for r in rows), "excluded": excluded,
             "usage": usage_of(rows),
             "measures": measures(rows), "before": measures(load(month_before(since), month_before(until))[0]),
@@ -937,6 +949,31 @@ def report(args):
     webbrowser.open(file.as_uri())
 
 
+def unmapped(args):
+    """The sessions in Other work and the period's tickets, as JSON: what /worklog needs to choose a ticket."""
+    data = collect(*period(args[0] if args else ""))
+    print(json.dumps({
+        "sessions": [{"id": r["id"], "date": r["start"][:10], "repo": repo_of(r), "branches": r["branches"],
+                      "title": r["title"], "prompt": r["prompt"], "cost": round(cost(r), 2)}
+                     for r in data["unmapped"]],
+        "tickets": [{"key": w.key, "summary": w.summary, "type": w.type, "repos": list(t.repos)}
+                    for t in data["tickets"] + data["support"] for w in t.works]}, indent=1, ensure_ascii=False))
+
+
+def map_sessions(args):
+    """Saves a ticket for each SESSION KEY pair; a key outside JIRA_PREFIXES is refused."""
+    if not args or len(args) % 2:
+        sys.exit("usage: worklog.py map SESSION KEY [SESSION KEY...]")
+    chosen = mapped()
+    for session, key in zip(args[::2], args[1::2]):
+        if not KEY.fullmatch(key.upper()):
+            sys.exit(f"{key} does not match JIRA_PREFIXES")
+        chosen[session] = key.upper()
+    DATA.mkdir(parents=True, exist_ok=True)
+    MAPPED.write_text(json.dumps(chosen, indent=1))
+    print(f"{len(args) // 2} mapped; {len(chosen)} in {MAPPED}")
+
+
 def main():
     command = sys.argv[1] if len(sys.argv) > 1 else ""
     if command == "record":
@@ -950,6 +987,10 @@ def main():
         if (HERE / "demo.py").exists():  # a local add-on, kept out of the repo
             import demo
             demo.main(sys.argv[2:])
+    elif command == "unmapped":
+        unmapped(sys.argv[2:])
+    elif command == "map":
+        map_sessions(sys.argv[2:])
     else:
         sys.exit(__doc__)
 
