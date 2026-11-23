@@ -6,14 +6,13 @@
       Records every transcript still in ~/.claude/projects, writes <dev_dir>/worklog/report.html, opens it
       and prints the counts. period: empty for this month, last-month, or a first day YYYY-MM-DD.
 
-Settings: config.json next to this file (see config.example.json). Data: <dev_dir>/worklog, with
-sessions.jsonl (the ledger) and jira.json (the issue cache).
+Settings: config.json (see config.py). Data: <dev_dir>/worklog, with sessions.jsonl (the ledger) and
+jira.json (the issue cache). github.py and jira.py fetch pull requests and issues; each runs on its own too.
 """
 import html
 import json
 import os
 import re
-import subprocess
 import sys
 import webbrowser
 from collections import defaultdict
@@ -21,12 +20,9 @@ from datetime import date, timedelta
 from pathlib import Path
 from string import Template
 
-CONFIG = {"dev_dir": "~/dev", "jira_prefixes": [], "support_prefixes": [], "jira_url": "", "exclude_repos": [],
-          "jira_cmd": "jira issue view {key} --raw",
-          "jira_search_cmd": "jira issue list -q {jql} --raw"}
-HERE = Path(__file__).resolve().parent
-if (HERE / "config.json").exists():
-    CONFIG.update(json.loads((HERE / "config.json").read_text()))
+import github
+import jira
+from config import CONFIG, HERE
 
 DEV = Path(CONFIG["dev_dir"]).expanduser()
 DATA = DEV / "worklog"
@@ -46,17 +42,6 @@ BIG_CONTEXT = 100_000  # tokens
 # for 5 minutes, 2x for 1 hour; fast mode costs 2x. An id not listed is priced as claude-opus-5-5.
 PRICES = {"claude-opus-5-5": (4, 20, 0.20), "claude-opus-5": (5, 25, 0.50), "claude-opus-4": (5, 25, 0.50),
           "claude-sonnet-5-5": (2, 10, 0.10), "claude-sonnet-5": (2, 10, 0.20), "claude-sonnet-4": (3, 15, 0.30)}
-PR_QUERY = """query($q: String!, $after: String) {
-  viewer { login }
-  search(query: $q, type: ISSUE, first: 50, after: $after) {
-    pageInfo { hasNextPage endCursor }
-    nodes { ... on PullRequest {
-      title url state isDraft createdAt headRefName body author { login } repository { name }
-      reviews(first: 50) { nodes { author { login } submittedAt } }
-      commits(first: 100) { nodes { commit { message } } }
-    } }
-  }
-}"""
 STATUS = {"merged": "✓ Merged", "closed": "✕ Closed, not merged", "open": "○ Open", "draft": "○ Draft"}
 SHOW_COST = True  # report --no-cost turns it off
 SHOW_USAGE = True  # report --no-usage turns it off
@@ -214,31 +199,28 @@ def repo_of(row):
 # ---- Jira and GitHub
 
 class Jira:
-    """Jira through the two commands in the config. Stops asking after the first failure."""
+    """Jira issues through jira.py, cached in jira.json. Stops asking after the first failure."""
 
     def __init__(self):
         file = DATA / "jira.json"
         self.cache, self.down = json.loads(file.read_text()) if file.exists() else {}, not PREFIXES
 
-    def run(self, template, **values):
+    def ask(self, call, *args):
         if self.down:
             return None
         try:
-            cmd = [part.format(**values) for part in CONFIG[template].split()]
-            return json.loads(subprocess.run(cmd, capture_output=True, timeout=60, check=True).stdout)
+            return call(*args)
         except Exception as err:  # CLI missing, not logged in, unknown key, output that is not JSON
             print(f"note: Jira is not answering ({err}); tickets are shown by key only\n", file=sys.stderr)
             self.down = True
 
     def issue(self, key):
-        """Summary, type, whether it is a sub-task, and parent of one issue, cached in jira.json."""
+        """Summary, type, whether it is a sub-task, and parent of one issue."""
         if "subtask" not in self.cache.get(key, {}):
-            fields = (self.run("jira_cmd", key=key) or {}).get("fields")
-            if not fields:
+            found = self.ask(jira.issue, key)
+            if not found:
                 return {}
-            self.cache[key] = {"summary": fields.get("summary", ""), "type": fields["issuetype"]["name"],
-                               "subtask": bool(fields["issuetype"].get("subtask")),
-                               "parent": (fields.get("parent") or {}).get("key", "")}
+            self.cache[key] = found
         return self.cache[key]
 
     def top(self, key):
@@ -255,52 +237,10 @@ class Jira:
         return main or (epics[0] if epics else "")
 
     def resolved(self, since, until):
-        """The keys of the tickets assigned to you and resolved from the first day to the last."""
-        after = date.fromisoformat(until) + timedelta(days=1)
-        jql = f'assignee = currentUser() AND resolved >= "{since}" AND resolved < "{after}"'
-        found = self.run("jira_search_cmd", jql=jql) or []
-        return [i["key"] for i in (found if isinstance(found, list) else found.get("issues", []))]
+        return self.ask(jira.resolved, since, until) or []
 
 
-def search_prs(query):
-    """(your login, the pull requests a GitHub search finds)."""
-    prs, after, login = [], None, ""
-    while True:
-        cmd = ["gh", "api", "graphql", "-f", f"query={PR_QUERY}", "-f", f"q={query}"]
-        try:
-            data = json.loads(subprocess.run(cmd + (["-f", f"after={after}"] if after else []),
-                                             capture_output=True, timeout=60, check=True).stdout)["data"]
-        except Exception as err:
-            print(f"note: could not read pull requests with gh ({err})\n", file=sys.stderr)
-            return login, prs
-        login = data["viewer"]["login"]
-        prs += [pr for pr in data["search"]["nodes"] if pr]
-        after = data["search"]["pageInfo"]["endCursor"]
-        if not data["search"]["pageInfo"]["hasNextPage"]:
-            return login, prs
-
-
-def brief(pr, when):
-    messages = "\n".join(c["commit"]["message"] for c in (pr.get("commits") or {}).get("nodes", []))
-    keys = [k.upper() for k in KEY.findall(f"{pr['title']}\n{pr['headRefName']}\n{pr['body'] or ''}\n{messages}")]
-    state = ("draft" if pr["isDraft"] else "open") if pr["state"] == "OPEN" else pr["state"].lower()
-    return {"date": when, "repo": pr["repository"]["name"], "title": pr["title"], "url": pr["url"],
-            "status": state, "author": (pr["author"] or {}).get("login", ""),
-            "branch": pr["headRefName"], "keys": list(dict.fromkeys(keys)), "ticket": keys[0] if keys else ""}
-
-
-def pull_requests(since, until):
-    """The pull requests you opened, and the ones you reviewed for others, from the first day to the last."""
-    login, mine = search_prs(f"is:pr author:@me created:{since}..{until}")
-    _, theirs = search_prs(f"is:pr reviewed-by:@me -author:@me updated:>={since}")
-    reviewed = []
-    for pr in theirs:
-        days = [r["submittedAt"][:10] for r in pr["reviews"]["nodes"]
-                if (r["author"] or {}).get("login") == login and since <= r["submittedAt"][:10] <= until]
-        if days:
-            reviewed.append(brief(pr, max(days)))
-    return {"opened": sorted((brief(pr, pr["createdAt"][:10]) for pr in mine), key=lambda p: p["date"]),
-            "reviewed": sorted(reviewed, key=lambda p: p["date"])}
+pull_requests = github.pull_requests  # demo and tests swap it
 
 
 # ---- sorting the sessions
@@ -316,8 +256,8 @@ def keys_of(row):
     return [k for k in dict.fromkeys(found) if KEY.fullmatch(k)]
 
 
-def ticket(row, by_branch, jira):
-    """The key a session counts for: a support key it names, else jira.pick of its keys, else the ticket of a
+def ticket(row, by_branch, issues):
+    """The key a session counts for: a support key it names, else Jira.pick of its keys, else the ticket of a
     pull request opened from one of its branches. A branch name alone settles it when it names one ticket;
     otherwise the repo must match too."""
     keys = keys_of(row)
@@ -325,7 +265,7 @@ def ticket(row, by_branch, jira):
     if support:
         return support[0]
     if keys:
-        return jira.pick(keys)
+        return issues.pick(keys)
     for b in row["branches"]:
         if (repo_of(row), b) in by_branch:
             return by_branch[repo_of(row), b]
@@ -349,8 +289,8 @@ def reviewed_pr(row, reviewed):
 class Work:
     """The days, cost, cost per model and pull requests of one ticket or sub-task."""
 
-    def __init__(self, key, jira):
-        issue = jira.issue(key)
+    def __init__(self, key, issues):
+        issue = issues.issue(key)
         self.key, self.summary, self.type = key, issue.get("summary", ""), issue.get("type", "")
         self.days, self.cost, self.models, self.prs = set(), 0.0, defaultdict(float), []
 
@@ -364,15 +304,15 @@ class Work:
 class Ticket:
     """A ticket: its own work, its sub-tasks' work, and the repos of both. Its cost includes the sub-tasks."""
 
-    def __init__(self, key, jira):
-        self.key, self.jira, self.own, self.subs, self.repos = key, jira, Work(key, jira), {}, {}
+    def __init__(self, key, issues):
+        self.key, self.issues, self.own, self.subs, self.repos = key, issues, Work(key, issues), {}, {}
         self.resolved = False
 
     def part(self, key):
         if key == self.key:
             return self.own
         if key not in self.subs:
-            self.subs[key] = Work(key, self.jira)
+            self.subs[key] = Work(key, self.issues)
         return self.subs[key]
 
     @property
@@ -399,30 +339,30 @@ def collect(since, until):
         sys.exit(f"no sessions from {day(since)} to {day(until)}")
     prs = {kind: [pr for pr in found if pr["repo"] not in CONFIG["exclude_repos"]]
            for kind, found in pull_requests(since, until).items()}
-    jira, tickets, incidents = Jira(), {}, []
+    issues, tickets, incidents = Jira(), {}, []
     other = defaultdict(lambda: {"days": set(), "cost": 0.0})
     reviews = {"cost": 0.0, "unlinked": 0.0}
 
     def on(key):
-        top = jira.top(key)
+        top = issues.top(key)
         if top not in tickets:
-            tickets[top] = Ticket(top, jira)
+            tickets[top] = Ticket(top, issues)
         return tickets[top]
 
     by_branch = {}  # (repo, branch): ticket, and branch: {tickets of the pull requests from a branch of that name}
     for pr in prs["opened"]:
-        pr["sub"] = jira.pick(pr["keys"])
-        pr["ticket"] = jira.top(pr["sub"])
+        pr["sub"] = issues.pick(list(dict.fromkeys(k.upper() for k in KEY.findall(pr["text"]))))
+        pr["ticket"] = issues.top(pr["sub"])
         if pr["ticket"]:
             by_branch[pr["repo"], pr["branch"]] = pr["ticket"]
             by_branch.setdefault(pr["branch"], set()).add(pr["ticket"])
     for pr in prs["reviewed"]:
         pr["cost"] = 0.0
     for row in rows:
-        named = ticket(row, by_branch, jira)
+        named = ticket(row, by_branch, issues)
         if row["alert"]:
             incidents.append({"date": row["start"][:10], "what": row["title"] or row["prompt"] or "(no title)",
-                              "ticket": jira.top(named), "repo": repo_of(row), "cost": cost(row)})
+                              "ticket": issues.top(named), "repo": repo_of(row), "cost": cost(row)})
         elif named:
             t = on(named)
             t.part(named).add(row)
@@ -442,12 +382,12 @@ def collect(since, until):
             t = on(pr["sub"])
             t.part(pr["sub"]).prs.append(pr)
             t.repos[pr["repo"]] = None
-    for key in jira.resolved(since, until):  # a resolved sub-task does not resolve its parent
+    for key in issues.resolved(since, until):  # a resolved sub-task does not resolve its parent
         t = on(key)
         t.part(key).resolved = True
         t.resolved |= key == t.key
-    if jira.cache:
-        (DATA / "jira.json").write_text(json.dumps(jira.cache, indent=1))
+    if issues.cache:
+        (DATA / "jira.json").write_text(json.dumps(issues.cache, indent=1))
     return {"since": since, "last": until, "incidents": incidents, "other": other, "prs": prs,
             "reviews": reviews, "sessions": len(rows), "total": sum(cost(r) for r in rows), "excluded": excluded,
             "usage": usage_of(rows),
@@ -768,6 +708,8 @@ def report(args):
     top = sorted(data["usage"].get("skill", {}).items(), key=lambda item: (-item[1][0], item[0]))[:3]
     if top:
         print("Top skills: " + ", ".join(f"{name} {n}" for name, (n, _) in top))
+    if not (HERE / "config.json").exists():
+        print(f"No config.json: copy {HERE / 'config.example.json'} to config.json and set jira_url and jira_prefixes.")
     print(f"Page: {file}")
     webbrowser.open(file.as_uri())
 
