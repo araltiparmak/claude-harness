@@ -1,33 +1,35 @@
 #!/usr/bin/env python3
-"""Jira issues, through the two commands in config.json (jira_cmd and jira_search_cmd; the jira CLI by default).
+"""Jira issues, through the two commands below (the jira CLI by default).
 
   python3 jira.py issue KEY...           prints {key: {summary, type, subtask, parent}} as JSON
   python3 jira.py resolved SINCE UNTIL   prints the keys assigned to you and resolved in the period
 
 Both raise on a command that fails or prints something that is not JSON.
 """
+# The commands that print Jira JSON: one issue ({key}), and the issues a JQL query finds ({jql}).
+ISSUE_CMD = "jira issue view {key} --raw"
+SEARCH_CMD = "jira issue list -q {jql} --raw"
+
 import json
 import subprocess
 import sys
 from datetime import date, timedelta
 
-from config import CONFIG
 
-
-def run(setting, **values):
-    cmd = [part.format(**values) for part in CONFIG[setting].split()]
+def run(template, **values):
+    cmd = [part.format(**values) for part in template.split()]
     return json.loads(subprocess.run(cmd, capture_output=True, timeout=60, check=True).stdout)
 
 
 def issue(key):
-    fields = run("jira_cmd", key=key)["fields"]
+    fields = run(ISSUE_CMD, key=key)["fields"]
     return {"summary": fields.get("summary", ""), "type": fields["issuetype"]["name"],
             "subtask": bool(fields["issuetype"].get("subtask")), "parent": (fields.get("parent") or {}).get("key", "")}
 
 
 def resolved(since, until):
     after = date.fromisoformat(until) + timedelta(days=1)
-    found = run("jira_search_cmd", jql=f'assignee = currentUser() AND resolved >= "{since}" AND resolved < "{after}"')
+    found = run(SEARCH_CMD, jql=f'assignee = currentUser() AND resolved >= "{since}" AND resolved < "{after}"')
     return [i["key"] for i in (found if isinstance(found, list) else found.get("issues", []))]
 
 

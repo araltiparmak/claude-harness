@@ -72,6 +72,16 @@
   .split span:first-child { border-radius: 4px 0 0 4px; } .split span:last-child { border-radius: 0 4px 4px 0; }
   .bar { height: 6px; width: 240px; max-width: 100%; margin-top: 6px; background: var(--track); border-radius: 3px; }
   .bar span { display: block; height: 100%; background: var(--c); border-radius: 3px; }
+  /* Charts: inline SVG; marks take the group colour, text and lines the page's ink */
+  h3 { margin: 22px 0 8px; font-size: 14px; font-weight: 600; color: var(--ink-2); }
+  .chart svg { display: block; width: 100%; height: auto; overflow: visible; }
+  .chart rect, .chart circle { fill: var(--c); }
+  .chart circle { stroke: var(--box); stroke-width: 2px; }
+  .chart rect.empty { fill: var(--track); }
+  .chart text { fill: var(--muted); font-size: 11px; font-family: inherit; }
+  .chart .axis { stroke: var(--line); }
+  .chart .grid { stroke: var(--line); stroke-dasharray: 2 4; }
+  .chart .limit { stroke: var(--ink-2); stroke-dasharray: 4 4; }
 
   .status { font-weight: 500; white-space: nowrap; }
   .state { color: var(--muted); white-space: nowrap; }

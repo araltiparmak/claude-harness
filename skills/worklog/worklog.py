@@ -3,12 +3,19 @@
 
   worklog.py record                            SessionEnd hook: appends the session on stdin to the ledger
   worklog.py report [period] [--no-cost] [--no-usage]
-      Records every transcript still in ~/.claude/projects, writes <dev_dir>/worklog/report.html, opens it
+      Records every transcript still in ~/.claude/projects, writes <DEV_DIR>/worklog/report.html, opens it
       and prints the counts. period: empty for this month, last-month, or a first day YYYY-MM-DD.
 
-Settings: config.json (see config.py). Data: <dev_dir>/worklog, with sessions.jsonl (the ledger) and
-jira.json (the issue cache). github.py and jira.py fetch pull requests and issues; each runs on its own too.
+Data: <DEV_DIR>/worklog, with sessions.jsonl (the ledger) and jira.json (the issue cache).
+github.py and jira.py fetch pull requests and issues; each runs on its own too.
 """
+# Settings: set your own on your machine; the repo keeps these empty.
+JIRA_URL = ""  # such as "https://example.atlassian.net"; ticket keys then link to <JIRA_URL>/browse/<key>
+JIRA_PREFIXES = []  # every Jira project whose keys you use, such as ["ABC"] for ABC-123
+SUPPORT_PREFIXES = []  # the prefixes of support tickets
+EXCLUDE_REPOS = []  # repos (folder or GitHub name) the report leaves out, such as personal ones
+DEV_DIR = "~/dev"  # the folder that holds the repos; the data lives in <DEV_DIR>/worklog
+
 import html
 import json
 import os
@@ -16,21 +23,21 @@ import re
 import sys
 import webbrowser
 from collections import defaultdict
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 from pathlib import Path
 from string import Template
 
 import github
 import jira
-from config import CONFIG, HERE
 
-DEV = Path(CONFIG["dev_dir"]).expanduser()
+HERE = Path(__file__).resolve().parent
+DEV = Path(DEV_DIR).expanduser()
 DATA = DEV / "worklog"
 LEDGER = DATA / "sessions.jsonl"
-PREFIXES = "|".join(re.escape(p) for p in CONFIG["jira_prefixes"])
+PREFIXES = "|".join(re.escape(p) for p in JIRA_PREFIXES)
 KEY = re.compile(rf"\b(?:{PREFIXES})-\d+\b", re.I) if PREFIXES else re.compile(r"[^\s\S]")  # never matches
 KEY_SHAPE = re.compile(r"\b[A-Za-z][A-Za-z0-9]{1,9}-\d+\b")  # the ledger keeps these; the report filters by KEY
-SUPPORT = {p.upper() for p in CONFIG["support_prefixes"]}
+SUPPORT = {p.upper() for p in SUPPORT_PREFIXES}
 REVIEW = re.compile(r"gh pr (diff|review|checkout)|<command-name>/code-review")
 COMMAND = re.compile(r"<command-name>/([\w:.-]+)</command-name>")
 PR_URL = re.compile(r"https://github\.com/[\w.-]+/([\w.-]+)/pull/(\d+)")
@@ -327,8 +334,8 @@ def load(since, until):
         row = json.loads(line)
         rows[row["id"]] = row  # a session is recorded more than once; the last row wins
     rows = sorted((r for r in rows.values() if since <= r["start"][:10] <= until), key=lambda r: r["start"])
-    excluded = sum(cost(r) for r in rows if repo_of(r) in CONFIG["exclude_repos"])
-    return [r for r in rows if repo_of(r) not in CONFIG["exclude_repos"]], excluded
+    excluded = sum(cost(r) for r in rows if repo_of(r) in EXCLUDE_REPOS)
+    return [r for r in rows if repo_of(r) not in EXCLUDE_REPOS], excluded
 
 
 def collect(since, until):
@@ -337,7 +344,7 @@ def collect(since, until):
     rows, excluded = load(since, until)
     if not rows:
         sys.exit(f"no sessions from {day(since)} to {day(until)}")
-    prs = {kind: [pr for pr in found if pr["repo"] not in CONFIG["exclude_repos"]]
+    prs = {kind: [pr for pr in found if pr["repo"] not in EXCLUDE_REPOS]
            for kind, found in pull_requests(since, until).items()}
     issues, tickets, incidents = Jira(), {}, []
     other = defaultdict(lambda: {"days": set(), "cost": 0.0})
@@ -390,7 +397,7 @@ def collect(since, until):
         (DATA / "jira.json").write_text(json.dumps(issues.cache, indent=1))
     return {"since": since, "last": until, "incidents": incidents, "other": other, "prs": prs,
             "reviews": reviews, "sessions": len(rows), "total": sum(cost(r) for r in rows), "excluded": excluded,
-            "usage": usage_of(rows),
+            "usage": {**usage_of(rows), "since": since, "until": until},
             "tickets": [t for t in tickets.values() if not is_support(t.key)],
             "support": [t for t in tickets.values() if is_support(t.key)]}
 
@@ -427,6 +434,16 @@ def usage_of(rows):
                         "avg": sum(r["context"]["avg"] for r in measured) // n, "peak_avg": sum(peaks) // n,
                         "peak": max(peaks, default=0), "big": sum(p > BIG_CONTEXT for p in peaks),
                         "compactions": sum(r["context"]["compactions"] for r in measured)}
+    found["daily"] = defaultdict(lambda: defaultdict(float))  # day: {model family: cost}
+    found["repos"] = defaultdict(float)  # repo: cost
+    found["hours"] = defaultdict(int)  # (weekday, local hour): sessions
+    for r in rows:
+        start = datetime.fromisoformat(r["start"].replace("Z", "+00:00")).astimezone()
+        for model, usd in models_of(r).items():
+            found["daily"][r["start"][:10]][model] += usd
+        found["repos"][repo_of(r)] += cost(r)
+        found["hours"][start.weekday(), start.hour] += 1
+    found["peaks"] = [(r["start"][:10], r["context"]["peak"], r["title"] or r["prompt"][:60]) for r in measured]
     return found
 
 
@@ -504,7 +521,7 @@ def status_cell(name):
 
 
 def jira_link(key):
-    return f"{CONFIG['jira_url'].rstrip('/')}/browse/{key}" if CONFIG["jira_url"] and key else ""
+    return f"{JIRA_URL.rstrip('/')}/browse/{key}" if JIRA_URL and key else ""
 
 
 def pr_links(prs):
@@ -541,7 +558,7 @@ def ticket_boxes(tickets, slot):
         rows = [[(w.key, jira_link(w.key), w.summary)] + ([w.type or "-"] if typed else [])
                 + [worked_on(w.days), pr_links(w.prs), model_split(w.models), money(w.cost)] for w in works]
         name = f"{t.key} {t.own.summary}".strip()
-        title = [tag("a", name, href=jira_link(t.key))] if CONFIG["jira_url"] else name
+        title = [tag("a", name, href=jira_link(t.key))] if JIRA_URL else name
         intro = f"Repos: {', '.join(t.repos)}." if t.repos else ""
         intro += " The total includes the sub-tasks." if t.subs else ""
         boxes.append(section(title, intro.strip(), grid(head, rows, [""] + ["sub"] * len(t.subs)),
@@ -613,6 +630,88 @@ def headline(data, group):
     return boxes
 
 
+MODEL_SLOTS = {"Opus": 1, "Fable": 7, "Sonnet": 2, "Haiku": 3}  # a model keeps its colour on every page; others grey
+
+
+def svg(width, height, marks, label):
+    return tag("div", [f'<svg viewBox="0 0 {width} {height}" role="img" aria-label="{html.escape(label)}">'
+                       + "".join(marks) + "</svg>"], class_="chart")
+
+
+def mark(kind, title, slot, **attrs):
+    """One SVG shape in a palette colour, with a tooltip."""
+    shown = "".join(f' {k.replace("_", "-")}="{v}"' for k, v in attrs.items())
+    return f'<{kind} class="c{slot}"{shown}><title>{html.escape(title)}</title></{kind}>'
+
+
+def text(x, y, words, anchor="start"):
+    return f'<text x="{x}" y="{y}" text-anchor="{anchor}">{html.escape(str(words))}</text>'
+
+
+def daily_chart(daily, since, until):
+    """Cost per day as columns, one segment per model, 2px apart."""
+    days = [str(date.fromisoformat(since) + timedelta(n)) for n in range((date.fromisoformat(until) - date.fromisoformat(since)).days + 1)]
+    models = sorted({m for d in daily.values() for m, usd in d.items() if paid(usd)},
+                    key=lambda m: (MODEL_SLOTS.get(m, 99), m))
+    top = max([sum(d.values()) for d in daily.values()] + [0.01])
+    w, h, left, base = 720, 180, 44, 156
+    step = (w - left) / len(days)
+    marks = [f'<line class="grid" x1="{left}" x2="{w}" y1="{base - 140}" y2="{base - 140}"/>',
+             f'<line class="axis" x1="{left}" x2="{w}" y1="{base}" y2="{base}"/>',
+             text(left - 6, base - 136, money(top), "end"), text(left - 6, base, "$0", "end")]
+    for i, d in enumerate(days):
+        y = base
+        for m in models:
+            usd = daily.get(d, {}).get(m, 0)
+            if paid(usd):
+                height = max(usd / top * 140 - 2, 1)
+                y -= height + 2
+                marks.append(mark("rect", f"{day(d)}, {m}: {money(usd)}", MODEL_SLOTS.get(m, 0), x=f"{left + i * step + 1:.1f}",
+                                  y=f"{y + 2:.1f}", width=f"{max(step - 2, 1):.1f}", height=f"{height:.1f}", rx=2))
+        if i in (0, len(days) // 2, len(days) - 1):
+            marks.append(text(f"{left + i * step + step / 2:.1f}", base + 18, day(d).rsplit(" ", 1)[0], "middle"))
+    legend = tag("ul", [tag("li", [dot(MODEL_SLOTS.get(m, 0)) + html.escape(m)]) for m in models], class_="legend")
+    return legend + svg(w, h + 4, marks, "Cost per day by model")
+
+
+def peaks_chart(peaks):
+    """The peak context of each session, in order, with the 100k line."""
+    top = max([p for _, p, _ in peaks] + [BIG_CONTEXT * 1.2])
+    w, h, left, base = 720, 150, 44, 130
+    step = (w - left - 12) / max(len(peaks) - 1, 1)
+    y = base - BIG_CONTEXT / top * 120
+    marks = [f'<line class="axis" x1="{left}" x2="{w}" y1="{base}" y2="{base}"/>',
+             f'<line class="limit" x1="{left}" x2="{w}" y1="{y:.1f}" y2="{y:.1f}"/>',
+             text(left - 6, y + 4, f"{BIG_CONTEXT // 1000}k", "end"), text(left - 6, base, "0", "end"),
+             text(left - 6, base - 116, f"{top / 1000:.0f}k", "end")]
+    marks += [mark("circle", f"{day(d)}: {p / 1000:.0f}k, {t}", 1, cx=f"{left + 6 + i * step:.1f}",
+                   cy=f"{base - p / top * 120:.1f}", r=4) for i, (d, p, t) in enumerate(peaks)]
+    return svg(w, h, marks, "Peak context per session")
+
+
+def hours_chart(hours):
+    """Sessions by weekday and local hour: darker is more."""
+    top = max(list(hours.values()) + [1])
+    w, cell, left = 720, (720 - 40) / 24, 40
+    marks = [text(left - 6, 14 + row * 18 + 9, name, "end") for row, name in enumerate(["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"])]
+    for row in range(7):
+        for hour in range(24):
+            n = hours.get((row, hour), 0)
+            attrs = {"x": f"{left + hour * cell + 1:.1f}", "y": 4 + row * 18, "width": f"{cell - 2:.1f}", "height": 16, "rx": 2}
+            if n:
+                marks.append(mark("rect", f"{plural(n, 'session')}", 1, fill_opacity=f"{0.2 + 0.8 * n / top:.2f}", **attrs))
+            else:
+                marks.append('<rect class="empty"' + "".join(f' {k}="{v}"' for k, v in attrs.items()) + "/>")
+    marks += [text(f"{left + hour * cell + cell / 2:.1f}", 146, f"{hour:02d}", "middle") for hour in (0, 6, 12, 18, 23)]
+    return svg(w, 150, marks, "Sessions by weekday and hour")
+
+
+def bars(rows, value=lambda v: v):
+    """A table cell with the number and a bar scaled to the largest."""
+    top = max([value(v) for _, v in rows] + [0.01])
+    return lambda v, shown: [html.escape(str(shown)) + tag("div", [tag("span", "", class_="c1", style=f"width:{value(v) / top * 100:.1f}%")], class_="bar")]
+
+
 def usage_sections(usage):
     """The Context box and the Claude Code usage box: what the sessions used, most used first."""
     c = usage["context"]
@@ -622,13 +721,24 @@ def usage_sections(usage):
         return f"{n / 1000:.0f}k"
     context = section("Context", intro, grid(
         ["Average per reply", "Average peak per session", "Largest peak", f"Sessions past {k(BIG_CONTEXT)}",
-         "Compactions"], [[k(c["avg"]), k(c["peak_avg"]), k(c["peak"]), c["big"], c["compactions"]]]))
+         "Compactions"], [[k(c["avg"]), k(c["peak_avg"]), k(c["peak"]), c["big"], c["compactions"]]]),
+        *([tag("h3", "Peak context per session"), peaks_chart(usage["peaks"])] if usage["peaks"] else []))
     heads = {"skill": "Skill", "plugin": "Plugin", "mcp": "MCP server", "hook": "Hook (event:matcher)",
              "agent": "Subagent"}
-    tables = [grid([head, "Uses", "Sessions"], [[name, n, sessions] for name, (n, sessions) in
-                                                sorted(usage[kind].items(), key=lambda item: (-item[1][0], item[0]))])
-              for kind, head in heads.items() if usage.get(kind)]
-    return context, section("Claude Code usage", intro, *tables) if tables else ""
+    tables = []
+    for kind, head in heads.items():
+        if usage.get(kind):
+            rows = sorted(usage[kind].items(), key=lambda item: (-item[1][0], item[0]))
+            bar = bars(rows, lambda v: v[0])
+            tables.append(grid([head, "Uses", "Sessions"], [[name, bar(v, v[0]), v[1]] for name, v in rows]))
+    charts = []
+    if SHOW_COST:
+        repos = sorted(usage["repos"].items(), key=lambda item: -item[1])
+        bar = bars(repos)
+        charts += [tag("h3", "Cost per day by model"), daily_chart(usage["daily"], usage["since"], usage["until"]),
+                   tag("h3", "Cost by repo"), grid(["Repo", "Cost"], [[repo, bar(usd, money(usd))] for repo, usd in repos])]
+    charts += [tag("h3", "When you work: sessions by weekday and hour"), hours_chart(usage["hours"])]
+    return context, section("Claude Code usage", intro, *charts, *tables)
 
 
 def page(data, group, name="report.html"):
@@ -708,8 +818,6 @@ def report(args):
     top = sorted(data["usage"].get("skill", {}).items(), key=lambda item: (-item[1][0], item[0]))[:3]
     if top:
         print("Top skills: " + ", ".join(f"{name} {n}" for name, (n, _) in top))
-    if not (HERE / "config.json").exists():
-        print(f"No config.json: copy {HERE / 'config.example.json'} to config.json and set jira_url and jira_prefixes.")
     print(f"Page: {file}")
     webbrowser.open(file.as_uri())
 
