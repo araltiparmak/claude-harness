@@ -2,11 +2,10 @@
 """Keeps a ledger of Claude Code sessions and writes a one-page work summary from it.
 
   worklog.py record                            SessionEnd hook: appends the session on stdin to the ledger
-  worklog.py report [period] [--no-cost] [--no-usage] [--manager]
-      Records every transcript still in ~/.claude/projects, writes <DEV_DIR>/worklog/report.html (manager.html
-      with --manager) and a .csv of the tickets beside it, opens the page and prints the counts.
-      period: empty for this month, last-month, or a first day YYYY-MM-DD. --manager leaves out costs, usage,
-      the overview and other work.
+  worklog.py report [period] [--no-cost] [--no-usage]
+      Records every transcript still in ~/.claude/projects, writes <DEV_DIR>/worklog/report.html and
+      report.csv (the tickets), opens the page and prints the counts.
+      period: empty for this month, last-month, or a first day YYYY-MM-DD.
 
 Data: <DEV_DIR>/worklog, with sessions.jsonl (the ledger) and jira.json (the issue cache).
 github.py and jira.py fetch pull requests and issues; each runs on its own too.
@@ -57,7 +56,6 @@ PRICES = {"claude-opus-5-5": (4, 20, 0.20), "claude-opus-5": (5, 25, 0.50), "cla
 STATUS = {"merged": "✓ Merged", "closed": "✕ Closed, not merged", "open": "○ Open", "draft": "○ Draft"}
 SHOW_COST = True  # report --no-cost turns it off
 SHOW_USAGE = True  # report --no-usage turns it off
-FOR_MANAGER = False  # report --manager: no costs, no usage, no overview or other work
 
 
 # ---- ledger
@@ -839,9 +837,8 @@ def page(data, group, name="report.html"):
             tag("div", [tag("div", [tag("strong", number), tag("span", label)], class_="tile")
                         for number, label in headline(data, group)], class_="tiles"),
             context, efficiency_section(data) if SHOW_USAGE else "",
-            "" if FOR_MANAGER else section("Overview", "Where the work went, by kind. A share is the group's part "
-                                                       "of the session cost, the closest measure of effort the records "
-                                                       "hold.", overview(list(group.values())))]
+            section("Overview", "Where the work went, by kind. A share is the group's part of the session cost, "
+                                "the closest measure of effort the records hold.", overview(list(group.values())))]
     for gid in ("tickets", "support"):
         if data[gid]:
             body += ticket_boxes(data[gid], group[gid]["slot"])
@@ -856,7 +853,7 @@ def page(data, group, name="report.html"):
             ["Opened", "Pull request", "Status"],
             [[day(pr["date"]), (pr["title"], pr["url"], pr["repo"]), status_cell(pr["status"])]
              for pr in without_ticket])))
-    if data["other"] and not FOR_MANAGER:
+    if data["other"]:
         body.append(boxed("other", "Other work", "Sessions with no Jira ticket, incident or review behind them, by repo.",
                           grid(["Repo", "Worked on", "Cost"],
                                [[repo, worked_on(o["days"]), money(o["cost"])]
@@ -906,16 +903,14 @@ def write_csv(data, file):
 
 
 def report(args):
-    global SHOW_COST, SHOW_USAGE, FOR_MANAGER
-    FOR_MANAGER = "--manager" in args
-    SHOW_COST = "--no-cost" not in args and not FOR_MANAGER
-    SHOW_USAGE = "--no-usage" not in args and not FOR_MANAGER
+    global SHOW_COST, SHOW_USAGE
+    SHOW_COST, SHOW_USAGE = "--no-cost" not in args, "--no-usage" not in args
     data = collect(*period(next((a for a in args if not a.startswith("--")), "")))
     group = groups(data)
     shown = sum(g["cost"] for g in group.values())
     if abs(shown - data["total"]) > 0.01:  # a session left off the page is a bug
         sys.exit(f"the page shows ${shown:.2f} but the sessions cost ${data['total']:.2f}")
-    file = page(data, group, "manager.html" if FOR_MANAGER else "report.html")
+    file = page(data, group)
     table = write_csv(data, file.with_suffix(".csv"))
     print(f"{day(data['since'])} to {day(data['last'])}: "
           + ", ".join(f"{number} {label}" for number, label in headline(data, group)))
