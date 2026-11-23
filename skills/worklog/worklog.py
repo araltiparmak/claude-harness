@@ -51,6 +51,7 @@ PR_QUERY = """query($q: String!, $after: String) {
     nodes { ... on PullRequest {
       title url state isDraft createdAt headRefName body author { login } repository { name }
       reviews(first: 50) { nodes { author { login } submittedAt } }
+      commits(first: 100) { nodes { commit { message } } }
     } }
   }
 }"""
@@ -173,16 +174,23 @@ class Jira:
             self.down = True
 
     def issue(self, key):
-        """Summary, type and parent of one issue, cached in jira.json."""
-        if key not in self.cache:
+        """Summary, type and parent of one issue, cached in jira.json. An entry cached before sub-tasks were
+        noted is read again."""
+        if "subtask" not in self.cache.get(key, {}):
             fields = (self.run("jira_cmd", key=key) or {}).get("fields")
             if not fields:
                 return {}
             parent = fields.get("parent") or {}
             self.cache[key] = {"summary": fields.get("summary", ""), "type": fields["issuetype"]["name"],
+                               "subtask": bool(fields["issuetype"].get("subtask")),
                                "parent": parent.get("key", ""),
                                "parent_summary": (parent.get("fields") or {}).get("summary", "")}
         return self.cache[key]
+
+    def top(self, key):
+        """The ticket the report shows for a key: a sub-task's parent, else the key itself."""
+        issue = self.issue(key) if key else {}
+        return issue["parent"] if issue.get("subtask") and issue.get("parent") else key
 
     def epic(self, key):
         """The epic a ticket belongs to, as 'KEY summary', or '' when Jira does not say."""
@@ -223,7 +231,8 @@ def status(pr):
 
 
 def brief(pr, when):
-    found = KEY.search(f"{pr['title']}\n{pr['headRefName']}\n{pr['body'] or ''}")
+    messages = "\n".join(c["commit"]["message"] for c in (pr.get("commits") or {}).get("nodes", []))
+    found = KEY.search(f"{pr['title']}\n{pr['headRefName']}\n{pr['body'] or ''}\n{messages}")
     return {"date": when, "repo": pr["repository"]["name"], "title": pr["title"], "url": pr["url"],
             "status": status(pr), "author": (pr["author"] or {}).get("login", ""),
             "branch": pr["headRefName"], "ticket": found.group() if found else ""}
@@ -304,13 +313,15 @@ def collect(since, until):
         sys.exit(f"no sessions from {day(since)} to {day(until)}")
     prs = {kind: [pr for pr in found if pr["repo"] not in CONFIG["exclude_repos"]]
            for kind, found in pull_requests(since, until).items()}
-    by_branch = {(pr["repo"], pr["branch"]): pr["ticket"] for pr in prs["opened"] if pr["ticket"]}
     jira, worked, spent, incidents = Jira(), defaultdict(set), defaultdict(float), []
+    for pr in prs["opened"]:
+        pr["ticket"] = jira.top(pr["ticket"])  # a sub-task's work counts for its parent
+    by_branch = {(pr["repo"], pr["branch"]): pr["ticket"] for pr in prs["opened"] if pr["ticket"]}
     touched = defaultdict(dict)  # ticket: {repo: None}, in the order the repos were first worked in
     other = defaultdict(lambda: {"days": [], "cost": 0.0})
     reviews = {"cost": 0.0, "repos": {}}
     for row in sorted(rows, key=lambda r: r["start"]):
-        key = ticket(row, by_branch)
+        key = jira.top(ticket(row, by_branch))
         if row["alert"]:
             incidents.append({"date": row["start"][:10], "what": row["title"] or row["prompt"] or "(no title)",
                               "ticket": key, "repo": repo_of(row), "cost": cost(row)})
@@ -324,14 +335,15 @@ def collect(since, until):
         elif row["edits"]:  # a session that only asked questions is left out
             other[repo_of(row)]["days"].append(row["start"][:10])
             other[repo_of(row)]["cost"] += cost(row)
-    resolved = jira.resolved(since, until)
+    found = jira.resolved(since, until)
+    resolved = [k for k in found if jira.top(k) == k]  # a resolved sub-task does not resolve its parent
     linked = defaultdict(list)
     for pr in prs["opened"]:
         if pr["ticket"]:
             linked[pr["ticket"]].append(pr)
             touched[pr["ticket"]][pr["repo"]] = None
     tickets = []
-    for key in dict.fromkeys(list(worked) + list(linked) + resolved):
+    for key in dict.fromkeys(list(worked) + list(linked) + [jira.top(k) for k in found]):
         tickets.append({"key": key, "summary": jira.issue(key).get("summary", ""), "epic": jira.epic(key),
                         "days": sorted(worked[key]), "resolved": key in resolved, "prs": linked[key],
                         "cost": spent[key], "repos": list(touched[key])})
