@@ -2,9 +2,11 @@
 """Keeps a ledger of Claude Code sessions and writes a one-page work summary from it.
 
   worklog.py record                            SessionEnd hook: appends the session on stdin to the ledger
-  worklog.py report [period] [--no-cost] [--no-usage]
-      Records every transcript still in ~/.claude/projects, writes <DEV_DIR>/worklog/report.html, opens it
-      and prints the counts. period: empty for this month, last-month, or a first day YYYY-MM-DD.
+  worklog.py report [period] [--no-cost] [--no-usage] [--manager]
+      Records every transcript still in ~/.claude/projects, writes <DEV_DIR>/worklog/report.html (manager.html
+      with --manager) and a .csv of the tickets beside it, opens the page and prints the counts.
+      period: empty for this month, last-month, or a first day YYYY-MM-DD. --manager leaves out costs, usage,
+      the overview and other work.
 
 Data: <DEV_DIR>/worklog, with sessions.jsonl (the ledger) and jira.json (the issue cache).
 github.py and jira.py fetch pull requests and issues; each runs on its own too.
@@ -16,6 +18,7 @@ SUPPORT_PREFIXES = []  # the prefixes of support tickets
 EXCLUDE_REPOS = []  # repos (folder or GitHub name) the report leaves out, such as personal ones
 DEV_DIR = "~/dev"  # the folder that holds the repos; the data lives in <DEV_DIR>/worklog
 
+import csv
 import html
 import json
 import os
@@ -44,6 +47,8 @@ PR_URL = re.compile(r"https://github\.com/[\w.-]+/([\w.-]+)/pull/(\d+)")
 PR_CMD = re.compile(r"gh pr (?:diff|review|checkout|view) +#?(\d+)\b(?:.*?(?:--repo|-R)[ =][\w.-]+/([\w.-]+))?")
 ALERT = re.compile(r"https://[\w-]+\.pagerduty\.com/", re.I)
 CONTEXT_FIELDS = ("input_tokens", "cache_creation_input_tokens", "cache_read_input_tokens")
+TOKENS = {"in": "input_tokens", "out": "output_tokens", "write": "cache_creation_input_tokens",
+          "read": "cache_read_input_tokens"}
 BIG_CONTEXT = 100_000  # tokens
 # API list prices in USD per million tokens: input, output, cache read. A cache write costs 1.25x input
 # for 5 minutes, 2x for 1 hour; fast mode costs 2x. An id not listed is priced as claude-opus-5-5.
@@ -52,6 +57,7 @@ PRICES = {"claude-opus-5-5": (4, 20, 0.20), "claude-opus-5": (5, 25, 0.50), "cla
 STATUS = {"merged": "✓ Merged", "closed": "✕ Closed, not merged", "open": "○ Open", "draft": "○ Draft"}
 SHOW_COST = True  # report --no-cost turns it off
 SHOW_USAGE = True  # report --no-usage turns it off
+FOR_MANAGER = False  # report --manager: no costs, no usage, no overview or other work
 
 
 # ---- ledger
@@ -118,7 +124,7 @@ class Session:
         blocks = content if isinstance(content, list) else [{"type": "text", "text": content or ""}]
         if d.get("type") == "assistant":
             if msg.get("usage"):  # a reply is written once per content block, each time with the same usage
-                self.usage[msg.get("id")] = {**msg["usage"], "model": msg.get("model")}
+                self.usage[msg.get("id")] = {**msg["usage"], "model": msg.get("model"), "side": bool(d.get("isSidechain"))}
                 if not d.get("isSidechain"):
                     self.contexts[msg.get("id")] = sum(msg["usage"].get(f) or 0 for f in CONTEXT_FIELDS)
             for b in blocks:
@@ -157,11 +163,17 @@ class Session:
         row["pulls"] = pulls_named(said + "\n" + commands)
         row["alert"] = bool(ALERT.search(said))
         row["review"] |= bool(REVIEW.search(said))
-        models = defaultdict(float)
+        models, tokens = defaultdict(float), {}
         for u in self.usage.values():
-            models[family(u.get("model"))] += price(u)
+            m = family(u.get("model"))
+            models[m] += price(u)
+            t = tokens.setdefault(m, dict.fromkeys(TOKENS, 0))
+            for name, field in TOKENS.items():
+                t[name] += u.get(field) or 0
         row["models"] = {m: round(usd, 4) for m, usd in models.items()}
         row["cost"] = round(sum(models.values()), 4)
+        row["tokens_by_model"] = tokens
+        row["subagent_cost"] = round(sum(price(u) for u in self.usage.values() if u["side"]), 4)
         sizes = list(self.contexts.values()) or [0]
         row["context"] = {"peak": max(sizes), "avg": sum(sizes) // len(sizes), "compactions": self.compactions}
         return row
@@ -338,6 +350,38 @@ def load(since, until):
     return [r for r in rows if repo_of(r) not in EXCLUDE_REPOS], excluded
 
 
+def month_before(day_):
+    """The same day a month earlier, or the month's last day when it has no such day."""
+    d = date.fromisoformat(day_)
+    first = (d.replace(day=1) - timedelta(days=1)).replace(day=1)
+    last = d.replace(day=1) - timedelta(days=1)
+    return str(first.replace(day=min(d.day, last.day)))
+
+
+def measures(rows):
+    """What the sessions cost and how efficiently, from the ledger alone: tokens per model, cache hit rate
+    (cache reads over all input), and the shares of cost in sessions past BIG_CONTEXT, in subagents and in
+    sessions that changed nothing. Rows recorded before tokens were kept count for cost only."""
+    total = sum(cost(r) for r in rows) or 0.0
+    tokens = defaultdict(lambda: dict.fromkeys(TOKENS, 0))
+    for r in rows:
+        for model, t in r.get("tokens_by_model", {}).items():
+            for name in TOKENS:
+                tokens[model][name] += t[name]
+    sent = sum(t["in"] + t["read"] + t["write"] for t in tokens.values())
+
+    def share(field, part):
+        """A share of cost over the rows that recorded field; None when none did."""
+        known = [r for r in rows if field in r]
+        whole = sum(cost(r) for r in known)
+        return sum(part(r) for r in known) / whole if whole else None
+    return {"cost": total, "sessions": len(rows), "tokens": {m: t for m, t in tokens.items() if any(t.values())},
+            "cache_hit": sum(t["read"] for t in tokens.values()) / sent if sent else None,
+            "big": share("context", lambda r: cost(r) if r["context"]["peak"] > BIG_CONTEXT else 0),
+            "subagents": share("subagent_cost", lambda r: r["subagent_cost"]),
+            "idle": share("edits", lambda r: 0 if r["edits"] or r["review"] or r["alert"] else cost(r))}
+
+
 def collect(since, until):
     """Everything the report shows, as plain data. Every session lands in exactly one place."""
     append(sorted((Path.home() / ".claude" / "projects").glob("*/*.jsonl")))
@@ -398,6 +442,7 @@ def collect(since, until):
     return {"since": since, "last": until, "incidents": incidents, "other": other, "prs": prs,
             "reviews": reviews, "sessions": len(rows), "total": sum(cost(r) for r in rows), "excluded": excluded,
             "usage": {**usage_of(rows), "since": since, "until": until},
+            "measures": measures(rows), "before": measures(load(month_before(since), month_before(until))[0]),
             "tickets": [t for t in tickets.values() if not is_support(t.key)],
             "support": [t for t in tickets.values() if is_support(t.key)]}
 
@@ -559,8 +604,10 @@ def ticket_boxes(tickets, slot):
                 + [worked_on(w.days), pr_links(w.prs), model_split(w.models), money(w.cost)] for w in works]
         name = f"{t.key} {t.own.summary}".strip()
         title = [tag("a", name, href=jira_link(t.key))] if JIRA_URL else name
+        titles = list(dict.fromkeys(pr["title"] for w in works for pr in w.prs))
         intro = f"Repos: {', '.join(t.repos)}." if t.repos else ""
-        intro += " The total includes the sub-tasks." if t.subs else ""
+        intro += f" Pull requests: {'; '.join(titles)}." if titles else ""
+        intro += " The total includes the sub-tasks." if t.subs and SHOW_COST else ""
         boxes.append(section(title, intro.strip(), grid(head, rows, [""] + ["sub"] * len(t.subs)),
                              total=t.cost, slot=slot))
     return boxes
@@ -741,6 +788,46 @@ def usage_sections(usage):
     return context, section("Claude Code usage", intro, *charts, *tables)
 
 
+def amount(n):
+    """1234567 as 1.2M, 45678 as 46k."""
+    return f"{n / 1e6:.1f}M" if n >= 1e6 else f"{n / 1e3:.0f}k" if n >= 1e3 else str(n)
+
+
+def efficiency_section(data):
+    """How efficiently the sessions ran, against the same days a month earlier, then tokens per model."""
+    now, before = data["measures"], data["before"]
+    merged = sum(pr["status"] == "merged" for pr in data["prs"]["opened"])
+    done = [t for t in data["tickets"] + data["support"] if t.resolved]
+
+    def pct(v):
+        return "-" if v is None else f"{v:.0%}"
+
+    def points(a, b):
+        return "-" if a is None or b is None else f"{round((a - b) * 100):+d} pts".replace("+0 ", "0 ")
+    rows = [["Sessions", now["sessions"], before["sessions"] or "-",
+             f"{now['sessions'] - before['sessions']:+d}" if before["sessions"] else "-"],
+            ["Cache hit rate (cache reads / all input)", pct(now["cache_hit"]), pct(before["cache_hit"]),
+             points(now["cache_hit"], before["cache_hit"])]]
+    if SHOW_COST:
+        change = f"{now['cost'] / before['cost'] - 1:+.0%}" if before["cost"] else "-"
+        rows = [["Cost", money(now["cost"]), money(before["cost"]), change]] + rows + [
+            ["Cost per merged pull request", money(now["cost"] / merged) if merged else "-", "-", "-"],
+            ["Cost per resolved ticket", money(sum(t.cost for t in done) / len(done)) if done else "-", "-", "-"]]
+    rows += [[label, pct(now[k]), pct(before[k]), points(now[k], before[k])]
+             for label, k in (("Share of cost in sessions past 100k context", "big"),
+                              ("Share of cost in subagents", "subagents"),
+                              ("Share of cost in sessions that changed nothing", "idle"))]
+    models = sorted(now["tokens"].items(), key=lambda item: (MODEL_SLOTS.get(item[0], 99), item[0]))
+    tokens = grid(["Model", "Input", "Output", "Cache read", "Cache write", "Cache hit rate"],
+                  [[[dot(MODEL_SLOTS.get(m, 0)) + html.escape(m)], amount(t["in"]), amount(t["out"]), amount(t["read"]),
+                    amount(t["write"]), pct(t["read"] / max(t["in"] + t["read"] + t["write"], 1))] for m, t in models])
+    return section("Efficiency", f"This period against the same days a month earlier "
+                                 f"({day(month_before(data['since']))} to {day(month_before(data['last']))}). "
+                                 "Rows recorded before tokens were kept count for cost only.",
+                   grid(["Measure", "This period", "Month before", "Change"], rows),
+                   tag("h3", "Tokens per model"), tokens)
+
+
 def page(data, group, name="report.html"):
     prs = data["prs"]
 
@@ -751,9 +838,10 @@ def page(data, group, name="report.html"):
                            tag("p", f"{day(data['since'])} to {day(data['last'])}", class_="period")]),
             tag("div", [tag("div", [tag("strong", number), tag("span", label)], class_="tile")
                         for number, label in headline(data, group)], class_="tiles"),
-            context,
-            section("Overview", "Where the work went, by kind. A share is the group's part of the session cost, "
-                                "the closest measure of effort the records hold.", overview(list(group.values())))]
+            context, efficiency_section(data) if SHOW_USAGE else "",
+            "" if FOR_MANAGER else section("Overview", "Where the work went, by kind. A share is the group's part "
+                                                       "of the session cost, the closest measure of effort the records "
+                                                       "hold.", overview(list(group.values())))]
     for gid in ("tickets", "support"):
         if data[gid]:
             body += ticket_boxes(data[gid], group[gid]["slot"])
@@ -768,7 +856,7 @@ def page(data, group, name="report.html"):
             ["Opened", "Pull request", "Status"],
             [[day(pr["date"]), (pr["title"], pr["url"], pr["repo"]), status_cell(pr["status"])]
              for pr in without_ticket])))
-    if data["other"]:
+    if data["other"] and not FOR_MANAGER:
         body.append(boxed("other", "Other work", "Sessions with no Jira ticket, incident or review behind them, by repo.",
                           grid(["Repo", "Worked on", "Cost"],
                                [[repo, worked_on(o["days"]), money(o["cost"])]
@@ -802,23 +890,45 @@ def period(arg):
     return (arg or str(today.replace(day=1))), str(today)
 
 
+def write_csv(data, file):
+    """One row per ticket and sub-task, for a spreadsheet; no cost column when costs are left out."""
+    with file.open("w", newline="") as out:
+        rows = csv.writer(out)
+        rows.writerow(["ticket", "parent", "type", "summary", "first day", "last day", "days", "pull requests"]
+                      + (["cost USD"] if SHOW_COST else []))
+        for t in sorted(data["tickets"] + data["support"], key=lambda t: -t.cost):
+            for w in [t.own, *t.subs.values()]:
+                days = sorted(w.days)
+                rows.writerow([w.key, "" if w is t.own else t.key, w.type, w.summary, days[0] if days else "",
+                               days[-1] if days else "", len(days), " ".join(pr["url"] for pr in w.prs)]
+                              + ([f"{w.cost:.2f}"] if SHOW_COST else []))
+    return file
+
+
 def report(args):
-    global SHOW_COST, SHOW_USAGE
-    SHOW_COST, SHOW_USAGE = "--no-cost" not in args, "--no-usage" not in args
+    global SHOW_COST, SHOW_USAGE, FOR_MANAGER
+    FOR_MANAGER = "--manager" in args
+    SHOW_COST = "--no-cost" not in args and not FOR_MANAGER
+    SHOW_USAGE = "--no-usage" not in args and not FOR_MANAGER
     data = collect(*period(next((a for a in args if not a.startswith("--")), "")))
     group = groups(data)
     shown = sum(g["cost"] for g in group.values())
     if abs(shown - data["total"]) > 0.01:  # a session left off the page is a bug
         sys.exit(f"the page shows ${shown:.2f} but the sessions cost ${data['total']:.2f}")
-    file = page(data, group)
+    file = page(data, group, "manager.html" if FOR_MANAGER else "report.html")
+    table = write_csv(data, file.with_suffix(".csv"))
     print(f"{day(data['since'])} to {day(data['last'])}: "
           + ", ".join(f"{number} {label}" for number, label in headline(data, group)))
     print(f"All {data['sessions']} sessions are on the page, ${data['total']:.2f}"
           + (f"; exclude_repos left out ${data['excluded']:.2f}" if data["excluded"] else ""))
+    m = data["measures"]
+    if m["cache_hit"] is not None:
+        print(f"Cache hit rate {m['cache_hit']:.0%}; past 100k context {m['big'] or 0:.0%} of cost")
     top = sorted(data["usage"].get("skill", {}).items(), key=lambda item: (-item[1][0], item[0]))[:3]
     if top:
         print("Top skills: " + ", ".join(f"{name} {n}" for name, (n, _) in top))
     print(f"Page: {file}")
+    print(f"CSV: {table}")
     webbrowser.open(file.as_uri())
 
 

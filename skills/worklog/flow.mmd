@@ -18,7 +18,7 @@ flowchart TB
   end
   subgraph out [4. Page]
     direction LR
-    chk{Page total =<br/>sessions' cost?} -- yes --> page[report.html]
+    chk{Page total =<br/>sessions' cost?} -- yes --> page[report.html or<br/>manager.html, + .csv]
     chk -. no .-> stop[Exit with error]
   end
   fetch -- PRs and issues --> sort
