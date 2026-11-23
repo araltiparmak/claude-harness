@@ -4,46 +4,91 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>$title</title>
 <style>
-  /* worklog.py fills in the title and the body. Colours: light values first, dark below. */
+  /* worklog.py fills in the title and the body. Colours: light values first, dark below.
+     --c1 to --c8 give each overview group its colour (a validated categorical palette, in a fixed order);
+     green, blue and red are pull request states. */
   :root {
     color-scheme: light dark;
-    --page: #f9f9f7; --ink: #0b0b0b; --ink-2: #52514e; --muted: #898781;
-    --hairline: #e1e0d9; --axis: #c3c2b7;
+    --page: #eef1f4; --box: #ffffff; --line: #dde2e8; --track: #e6eaef;
+    --ink: #18202a; --ink-2: #4e5966; --muted: #7d8794;
+    --c0: #9aa3ad; --c1: #2a78d6; --c2: #eb6834; --c3: #1baf7a; --c4: #eda100;
+    --c5: #e87ba4; --c6: #008300; --c7: #6250d6; --c8: #e34948;
+    --merged: #1f7a3a; --open: #1d5fb8; --closed: #a23d3d;
   }
   @media (prefers-color-scheme: dark) {
     :root {
-      --page: #0d0d0d; --ink: #f0efec; --ink-2: #c3c2b7;
-      --hairline: #2c2c2a; --axis: #383835;
+      --page: #12161b; --box: #1a2027; --line: #2a323b; --track: #252c34;
+      --ink: #e8ecf0; --ink-2: #aab3bd; --muted: #808a95;
+      --c0: #5d6670; --c1: #3987e5; --c2: #d95926; --c3: #199e70; --c4: #c98500;
+      --c5: #d55181; --c6: #0ca30c; --c7: #9085e9; --c8: #e66767;
+      --merged: #5cc47a; --open: #6aa5f0; --closed: #e07a7a;
     }
   }
   * { box-sizing: border-box; }
   body { margin: 0; padding: 40px 16px 72px; background: var(--page); color: var(--ink);
-         font: 16px/1.55 system-ui, -apple-system, "Segoe UI", sans-serif; }
-  main { max-width: 880px; margin: 0 auto; }
-  h1 { font-size: 32px; line-height: 1.15; margin: 0; }
-  h2 { font-size: 21px; line-height: 1.25; margin: 0 0 6px; }
-  section { margin-top: 56px; }
-  a { color: inherit; text-underline-offset: 3px; text-decoration-color: var(--axis); }
+         font: 15px/1.55 system-ui, -apple-system, "Segoe UI", sans-serif; }
+  main { max-width: 960px; margin: 0 auto; }
+  h1 { font-size: 30px; line-height: 1.15; font-weight: 600; margin: 0; }
+  h2 { font-size: 18px; line-height: 1.3; font-weight: 600; margin: 0; }
+  a { color: inherit; text-underline-offset: 3px; text-decoration-color: var(--muted); }
   a:hover { text-decoration-color: currentColor; }
+  a:focus-visible { outline: 2px solid var(--open); outline-offset: 2px; border-radius: 2px; }
   small { display: block; color: var(--muted); font-size: 13px; }
-  .period { margin: 6px 0 0; color: var(--ink-2); }
-  .intro { margin: 0 0 20px; color: var(--ink-2); max-width: 70ch; }
+  .period { margin: 4px 0 0; color: var(--ink-2); }
 
-  .counts { margin: 16px 0 0; font-size: 17px; max-width: 70ch; }
+  /* Headline numbers */
+  .tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; margin: 24px 0 0; }
+  .tile { background: var(--box); border: 1px solid var(--line); border-radius: 10px; padding: 14px 16px; }
+  .tile strong { display: block; font-size: 26px; line-height: 1.2; font-weight: 600; font-variant-numeric: tabular-nums; }
+  .tile span { display: block; margin-top: 2px; color: var(--ink-2); font-size: 13px; line-height: 1.35; }
 
-  .scroll { overflow-x: auto; margin: 8px 0 16px; }
+  /* Sections */
+  .box { background: var(--box); border: 1px solid var(--line); border-radius: 10px; padding: 20px 20px 8px; margin-top: 16px; }
+  .head { display: flex; justify-content: space-between; align-items: baseline; gap: 16px; }
+  .total { color: var(--ink); font-weight: 600; font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .intro { margin: 4px 0 0; color: var(--ink-2); max-width: 70ch; }
+
+  .scroll { overflow-x: auto; margin: 12px 0; }
   table { border-collapse: collapse; width: 100%; font-size: 14px; font-variant-numeric: tabular-nums; }
-  th, td { text-align: left; padding: 8px 14px 8px 0; border-bottom: 1px solid var(--hairline); vertical-align: top; }
-  th { color: var(--ink-2); font-weight: 600; font-size: 13px; }
+  th, td { text-align: left; padding: 9px 14px 9px 0; border-bottom: 1px solid var(--line); vertical-align: top; }
+  tr:last-child td { border-bottom: 0; }
+  th { color: var(--muted); font-weight: 500; font-size: 13px; }
   td:first-child, td:last-child { white-space: nowrap; }
   td small { white-space: normal; }
-  footer { margin-top: 40px; color: var(--muted); font-size: 13px; max-width: 70ch; }
+
+  /* Group colours: a dot by each name, the bars and the split of the spend */
+  .c0 { --c: var(--c0); } .c1 { --c: var(--c1); } .c2 { --c: var(--c2); } .c3 { --c: var(--c3); }
+  .c4 { --c: var(--c4); } .c5 { --c: var(--c5); } .c6 { --c: var(--c6); } .c7 { --c: var(--c7); } .c8 { --c: var(--c8); }
+  .dot { display: inline-block; width: 10px; height: 10px; border-radius: 50%; background: var(--c); margin-right: 8px; vertical-align: 0; }
+  h2 .dot { width: 12px; height: 12px; margin-right: 10px; }
+  .split { display: flex; gap: 2px; height: 18px; margin: 18px 0 4px; }
+  .split span { background: var(--c); min-width: 3px; }
+  .legend { display: flex; flex-wrap: wrap; gap: 6px 20px; list-style: none; padding: 0; margin: 10px 0 8px; font-size: 14px; }
+  .legend li { white-space: nowrap; }
+  .legend strong { font-weight: 600; margin-left: 2px; }
+  .legend .dot { margin-right: 6px; }
+  .split span:first-child { border-radius: 4px 0 0 4px; } .split span:last-child { border-radius: 0 4px 4px 0; }
+  .bar { height: 6px; width: 240px; max-width: 100%; margin-top: 6px; background: var(--track); border-radius: 3px; }
+  .bar span { display: block; height: 100%; background: var(--c); border-radius: 3px; }
+
+  .status { font-weight: 500; white-space: nowrap; }
+  .state { color: var(--muted); white-space: nowrap; }
+  .state.done { color: var(--merged); font-weight: 500; }
+  h2 a { text-decoration-color: var(--line); }
+  .status.merged { color: var(--merged); }
+  .status.open, .status.draft { color: var(--open); }
+  .status.closed { color: var(--closed); }
+
+  footer { margin-top: 32px; color: var(--muted); font-size: 13px; max-width: 70ch; }
   @media (max-width: 560px) {
-    h1 { font-size: 26px; }
+    h1 { font-size: 25px; }
+    .tiles { grid-template-columns: repeat(2, 1fr); }
+    .tile:last-child:nth-child(odd) { grid-column: 1 / -1; }
+    .box { padding: 16px 14px 4px; }
   }
   @media print {
     body { background: none; padding: 0; font-size: 12px; }
-    section { margin-top: 28px; }
+    .box, .tile { break-inside: avoid; }
   }
 </style>
 <main>

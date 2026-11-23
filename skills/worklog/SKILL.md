@@ -1,6 +1,6 @@
 ---
 name: worklog
-description: Writes a plain one-page work report from the Claude Code sessions, pull requests and Jira - the tickets worked on, support tickets, incidents, code reviews given and pull requests opened - for a performance review or a brag document. Runs only when typed as /worklog.
+description: Writes a plain one-page work report from the Claude Code sessions, pull requests and Jira - the tickets worked on, support tickets, incidents, code reviews given and pull requests opened - with what each ticket cost, for a performance review or a brag document. Runs only when typed as /worklog.
 disable-model-invocation: true
 ---
 
@@ -16,13 +16,12 @@ A `SessionEnd` hook runs `worklog.py record` (this skill's folder), which adds o
 - `jira_url`: the Jira site, such as `https://example.atlassian.net`. When set, ticket keys link to their issue.
 - `jira_cmd`: the command that prints one issue as Jira REST JSON; `{key}` is the issue key.
 - `jira_search_cmd`: the command that prints the issues a JQL query finds as JSON; `{jql}` is the query.
+- `exclude_repos`: repos (folder or GitHub name) whose sessions and pull requests the report leaves out, such as personal projects on a work machine.
 
 ## Report
 
-Run `python3 worklog.py report [since]` from this skill's folder; `since` is a day such as `2026-07-01`. It writes the page, opens it in the browser and prints the counts and `Page: <path>`. Do not read the page; pass the counts on to the user.
+Run `python3 worklog.py report [period] [--no-cost]` from this skill's folder. With no period it reports the current month; pass `last-month` when the arguments ask for last month (in any language), or a first day such as `2026-07-01` to report from that day to today. Pass `--no-cost` when the arguments ask to leave costs out (for example, for a page to share); it removes every cost from the page. It writes the page, opens it in the browser and prints the counts and `Page: <path>`. Do not read the page; pass the counts on to the user.
 
-The page lists, in this order: Jira tickets (with epic, the days worked on and whether resolved), support tickets, incidents, the pull requests reviewed for teammates, the pull requests opened (with their ticket and status), and the sessions without a ticket, by repo.
+The page shows, in order: the outcome numbers (tickets worked on first; reviews for others do not count), an overview of where the cost went, the tickets with their Jira type, support tickets, incidents, pull requests without a ticket, other work (sessions that changed code with no ticket, incident or review behind them), and the code reviews, each linked to its pull request.
 
-## Rules the script applies
-
-A session counts for one ticket: its first support-prefix key, else its first key. A ticket's epic is its Jira parent, read once and cached in `jira.json`. Tickets resolved in the period appear even without a session. A pull request's ticket is the Jira key in its title. A session with a PagerDuty link is an incident; a session with neither a key nor an incident is listed under its repo, except a review without edits, which the GitHub review list already covers.
+When the user asks why a session or pull request landed where it did, read `collect` and the docstrings of `keys_of`, `ticket`, `Jira.pick`, `reviewed_pr` and `cost` in the script; they hold the rules.
