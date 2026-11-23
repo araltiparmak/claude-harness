@@ -1,6 +1,6 @@
 ---
 name: worklog
-description: Writes a plain one-page work report from the Claude Code sessions, pull requests and Jira - the tickets worked on, support tickets, incidents, code reviews given and pull requests opened - for a performance review or a brag document. Runs only when typed as /worklog.
+description: Writes a plain one-page work report from the Claude Code sessions, pull requests and Jira - the tickets worked on, support tickets, incidents, code reviews given and pull requests opened - with what each ticket cost, for a performance review or a brag document. Runs only when typed as /worklog.
 disable-model-invocation: true
 ---
 
@@ -21,8 +21,8 @@ A `SessionEnd` hook runs `worklog.py record` (this skill's folder), which adds o
 
 Run `python3 worklog.py report [since]` from this skill's folder; `since` is a day such as `2026-07-01`. It writes the page, opens it in the browser and prints the counts and `Page: <path>`. Do not read the page; pass the counts on to the user.
 
-The page lists, in this order: Jira tickets (with epic, the days worked on and whether resolved), support tickets, incidents, the pull requests reviewed for teammates, the pull requests opened (with their ticket and status), and the sessions without a ticket, by repo.
+The page lists, in this order: an overview with the tickets and cost of each epic, support, incidents and other work; the Jira tickets, one section per epic (with the days worked on, their pull requests, cost and whether resolved), support tickets, incidents, the pull requests reviewed for teammates, the pull requests opened (with their ticket and status), and the sessions without a ticket, by repo.
 
 ## Rules the script applies
 
-A session counts for one ticket: its first support-prefix key, else its first key. A ticket's epic is its Jira parent, read once and cached in `jira.json`. Tickets resolved in the period appear even without a session. A pull request's ticket is the Jira key in its title. A session with a PagerDuty link is an incident; a session with neither a key nor an incident is listed under its repo, except a review without edits, which the GitHub review list already covers.
+A session counts for one ticket: its first support-prefix key, else its first key. A ticket's epic is its Jira parent, read once and cached in `jira.json`. Tickets resolved in the period appear even without a session. A pull request's ticket is the first Jira key in its title, branch or description. A session without a key counts for the ticket of a pull request opened from its branch. A session's cost is its replies, subagents included, priced per model at API list prices (`PRICES` in the script); a row recorded before costs were kept is priced as Opus 5.5. A session with a PagerDuty link is an incident; a session with neither a key nor an incident is listed under its repo, except a review without edits, which the GitHub review list already covers.
