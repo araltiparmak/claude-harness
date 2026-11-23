@@ -15,4 +15,6 @@ Run `python3 worklog.py report [period] [--no-cost] [--no-usage]` from this skil
 
 The script writes the page, opens it and prints a few lines. Pass those lines on; do not read the page.
 
+Only when the arguments include `share`: after the report, read the page printed after `Page:` and publish it with the Artifact tool (icon `chart`), then give the link. It is private until the user shares it. Without `share`, nothing leaves the machine; the shell alias `worklog` runs the same script with no model.
+
 Settings are the constants at the top of `worklog.py`: `JIRA_URL`, `JIRA_PREFIXES` (every Jira project whose keys you use), `SUPPORT_PREFIXES`, `EXCLUDE_REPOS`; the repo holds placeholders. `github.py` and `jira.py` fetch pull requests and issues; each runs on its own. A `SessionEnd` hook runs `worklog.py record`. When the user asks why a session landed where it did, read the docstrings of `collect`, `ticket` and `Jira.pick`.
