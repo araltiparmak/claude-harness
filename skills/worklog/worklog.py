@@ -211,23 +211,12 @@ class Jira:
         return self.issue(key).get("type", "").lower() == "epic"
 
     def pick(self, keys):
-        """(ticket, epic) for the keys a session or pull request names. An epic is never the ticket while
-        another key is named: the ticket is the first main ticket, else the first sub-task's parent, and the
-        epic is the first epic key named. An epic named alone is the ticket too."""
+        """One ticket for the keys a session or pull request names: the first main ticket, else the first
+        sub-task's parent. An epic is taken only when nothing else is named."""
         epics = [k for k in keys if self.is_epic(k)]
         rest = [k for k in keys if k not in epics]
         main = next((k for k in rest if not self.issue(k).get("subtask")), self.top(rest[0]) if rest else "")
-        epic = epics[0] if epics else ""
-        return main or epic, epic
-
-    def epic(self, key, named=""):
-        """The epic a ticket belongs to, as 'KEY summary': its Jira parent, else the epic key named with it,
-        else the ticket itself when it is an epic; '' when there is none, since an epic is optional."""
-        issue = self.issue(key)
-        if issue.get("parent"):
-            return f"{issue['parent']} {issue['parent_summary']}".strip()
-        epic = named or (key if self.is_epic(key) else "")
-        return f"{epic} {self.issue(epic).get('summary', '')}".strip() if epic else ""
+        return main or (epics[0] if epics else "")
 
     def resolved(self, since, until):
         """The keys of the tickets assigned to you and resolved from the first day to the last."""
@@ -308,7 +297,7 @@ def keys_of(row):
 
 
 def ticket(row, by_branch, jira):
-    """(ticket, epic named) for a session: a support key it names, else jira.pick of the keys it names, else the
+    """The session's ticket: a support key it names, else jira.pick of the keys it names, else the
     ticket of a pull request opened from one of its branches.
     A branch name settles it when it names a single ticket; otherwise the repo must match as well."""
     keys = keys_of(row)
@@ -320,8 +309,8 @@ def ticket(row, by_branch, jira):
         elif len(by_branch.get(b, ())) == 1:
             from_pr.extend(by_branch[b])
     if support:
-        return support[0], ""
-    return jira.pick(keys) if keys else ((from_pr or [""])[0], "")
+        return support[0]
+    return jira.pick(keys) if keys else (from_pr or [""])[0]
 
 
 def pr_ref(pr):
@@ -382,11 +371,8 @@ def collect(since, until):
     prs = {kind: [pr for pr in found if pr["repo"] not in CONFIG["exclude_repos"]]
            for kind, found in pull_requests(since, until).items()}
     jira, worked, spent, incidents = Jira(), defaultdict(set), defaultdict(float), []
-    named = {}  # ticket: the epic key named with it, for a ticket whose Jira parent is not set
     for pr in prs["opened"]:
-        pr["ticket"], epic = jira.pick(pr["keys"])
-        if epic and pr["ticket"] != epic:
-            named.setdefault(pr["ticket"], epic)
+        pr["ticket"] = jira.pick(pr["keys"])
     by_branch = {}  # (repo, branch): ticket, and branch: {tickets of the pull requests from a branch of that name}
     for pr in prs["opened"]:
         if pr["ticket"]:
@@ -398,10 +384,7 @@ def collect(since, until):
     for pr in prs["reviewed"]:
         pr["cost"] = 0.0
     for row in sorted(rows, key=lambda r: r["start"]):
-        key, epic = ticket(row, by_branch, jira)
-        key = jira.top(key)
-        if epic and key != epic:
-            named.setdefault(key, epic)
+        key = jira.top(ticket(row, by_branch, jira))
         if row["alert"]:
             incidents.append({"date": row["start"][:10], "what": row["title"] or row["prompt"] or "(no title)",
                               "ticket": key, "repo": repo_of(row), "cost": cost(row)})
@@ -428,7 +411,7 @@ def collect(since, until):
             touched[pr["ticket"]][pr["repo"]] = None
     tickets = []
     for key in dict.fromkeys(list(worked) + list(linked) + [jira.top(k) for k in found]):
-        tickets.append({"key": key, "summary": jira.issue(key).get("summary", ""), "epic": jira.epic(key, named.get(key, "")),
+        tickets.append({"key": key, "summary": jira.issue(key).get("summary", ""),
                         "days": sorted(worked[key]), "resolved": key in resolved, "prs": linked[key],
                         "cost": spent[key], "repos": list(touched[key])})
     if jira.cache:
@@ -524,14 +507,6 @@ def ticket_grid(tickets):
                  for t in sorted(tickets, key=lambda t: -t["cost"])])
 
 
-def by_epic(tickets):
-    """{epic: its tickets}, the most expensive epic first; tickets without an epic come last."""
-    epics = defaultdict(list)
-    for t in tickets:
-        epics[t["epic"]].append(t)
-    return dict(sorted(epics.items(), key=lambda item: (not item[0], -sum(t["cost"] for t in item[1]))))
-
-
 def repos(tickets):
     """The repos the tickets touched, those of the most expensive ticket first, as one line."""
     found = {r: None for t in sorted(tickets, key=lambda t: -t["cost"]) for r in t["repos"]}
@@ -543,19 +518,13 @@ def repos_line(tickets):
     return f"Repos: {listed}." if listed != "-" else ""
 
 
-def epic_key(epic):
-    """'ABC-1 Billing accuracy' -> 'ABC-1'."""
-    return epic.split()[0] if epic else ""
-
-
 def groups(data):
-    """The big groups of the work, the overview's rows, keyed by id: each epic (its id is the epic), then support,
-    incidents, reviews and other work. Their costs add up to the total; each has a colour slot."""
-    found = {epic: {"name": epic, "url": jira_link(epic_key(epic)), "tickets": len(ts), "repos": repos(ts),
-                    "cost": sum(t["cost"] for t in ts)} for epic, ts in by_epic(data["tickets"]).items() if epic}
-    for t in sorted((t for t in data["tickets"] if not t["epic"]), key=lambda t: -t["cost"]):
-        found[t["key"]] = {"name": f"{t['key']} {t['summary']}".strip(), "url": jira_link(t["key"]), "tickets": 1,
-                           "repos": repos([t]), "cost": t["cost"]}
+    """The big groups of the work, the overview's rows, keyed by id: tickets, support, incidents, reviews and
+    other work. Their costs add up to the total; each has a colour slot."""
+    found = {}
+    if data["tickets"]:
+        found["tickets"] = {"name": "Tickets", "url": "", "tickets": len(data["tickets"]),
+                            "repos": repos(data["tickets"]), "cost": sum(t["cost"] for t in data["tickets"])}
     if data["support"]:
         found["support"] = {"name": "Support tickets", "url": "", "tickets": len(data["support"]),
                             "repos": repos(data["support"]), "cost": sum(t["cost"] for t in data["support"])}
@@ -628,16 +597,11 @@ def page(data, group):
 
     def boxed(gid, title, intro, *parts):
         return section(title, intro, *parts, total=group[gid]["cost"], slot=group[gid]["slot"])
-    for epic, tickets in by_epic(data["tickets"]).items():
-        if not epic:
-            continue
-        title = [tag("a", epic, href=jira_link(epic_key(epic)))] if CONFIG["jira_url"] else epic
+    if data["tickets"]:
+        tickets = data["tickets"]
         done = sum(t["resolved"] for t in tickets)
         intro = " ".join(filter(None, [f"{done} of {plural(len(tickets), 'ticket')} resolved.", repos_line(tickets)]))
-        body.append(boxed(epic, title, intro, ticket_grid(tickets)))
-    alone = [t for t in data["tickets"] if not t["epic"]]
-    if alone:
-        body.append(section("Tickets", "Tickets that belong to no epic.", ticket_grid(alone)))
+        body.append(boxed("tickets", "Tickets", intro, ticket_grid(tickets)))
     if data["support"]:
         body.append(boxed("support", "Support tickets", repos_line(data["support"]), ticket_grid(data["support"])))
     if data["incidents"]:
@@ -657,7 +621,7 @@ def page(data, group):
                           grid(["Repo", "Worked on", "Cost"],
                                [[repo, worked_on(sorted(set(o["days"]))), money(o["cost"])]
                                 for repo, o in sorted(data["other"].items(), key=lambda item: -item[1]["cost"])])))
-    body.append(section("Overview", "Where the work went, by epic, ticket and kind. A share is the group's part of "
+    body.append(section("Overview", "Where the work went, by kind. A share is the group's part of "
                                     "the session cost, the closest measure of effort the records hold.",
                         overview(list(group.values()))))
     if "reviews" in group:
