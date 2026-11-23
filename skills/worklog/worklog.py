@@ -35,7 +35,9 @@ DEV = Path(CONFIG["dev_dir"]).expanduser()
 DATA = DEV / "worklog"
 LEDGER = DATA / "sessions.jsonl"
 PREFIXES = "|".join(re.escape(p) for p in CONFIG["jira_prefixes"])
-KEY = re.compile(rf"\b(?:{PREFIXES})-\d+\b") if PREFIXES else re.compile(r"[^\s\S]")  # never matches
+KEY = re.compile(rf"\b(?:{PREFIXES})-\d+\b", re.I) if PREFIXES else re.compile(r"[^\s\S]")  # never matches
+# The ledger keeps every key-shaped word; the report keeps the ones with a configured prefix.
+KEY_SHAPE = re.compile(r"\b[A-Za-z][A-Za-z0-9]{1,9}-\d+\b")
 REVIEW = re.compile(r"gh pr (diff|review|checkout)|<command-name>/code-review")
 ALERT = re.compile(r"https://[\w-]+\.pagerduty\.com/", re.I)
 TOKENS = {"in": "input_tokens", "out": "output_tokens",
@@ -81,8 +83,8 @@ def note_place(row, d, branches):
         branches.append(d["gitBranch"])
 
 
-def note_tools(row, blocks):
-    """Whether a reply edited files or ran a review."""
+def note_tools(row, blocks, commands):
+    """Whether a reply edited files or ran a review, and the shell commands it ran."""
     for b in blocks:
         if b.get("type") != "tool_use":
             continue
@@ -90,6 +92,8 @@ def note_tools(row, blocks):
         row["edits"] |= name in ("Edit", "Write", "NotebookEdit")
         row["review"] |= name == "Skill" and args.get("skill") == "code-review"
         row["review"] |= name == "Bash" and bool(REVIEW.search(args.get("command", "")))
+        if name == "Bash":
+            commands.append(args.get("command", ""))
 
 
 def price(usage):
@@ -111,7 +115,7 @@ def blocks_of(msg):
 
 def read_session(path):
     """One ledger row for a transcript and its subagent transcripts, or None when no model ran."""
-    usage, text, branches = {}, [], []
+    usage, text, branches, commands = {}, [], [], []
     row = {"id": path.stem, "title": "", "prompt": "", "cwd": "", "start": "", "end": "",
            "review": False, "edits": False}
     for d in records(path):
@@ -126,18 +130,19 @@ def read_session(path):
             # A reply is written once per content block, each time with the same usage.
             if msg.get("usage"):
                 usage[msg.get("id")] = {**msg["usage"], "model": msg.get("model")}
-            note_tools(row, blocks)
+            note_tools(row, blocks, commands)
         elif d.get("type") == "user" and not d.get("isMeta"):
             text += [b.get("text", "") for b in blocks if b.get("type") == "text"]
-    return finish(row, usage, text, branches) if usage else None
+    return finish(row, usage, text, branches, commands) if usage else None
 
 
-def finish(row, usage, text, branches):
+def finish(row, usage, text, branches, commands):
     """Fills in the fields that need the whole session."""
     said = "\n".join(text)
     row["prompt"] = next((t.strip()[:200] for t in text if t.strip() and not t.lstrip().startswith("<")), "")
     row["branches"] = branches
-    row["keys"] = list(dict.fromkeys(KEY.findall(" ".join(branches) + "\n" + said)))
+    words = KEY_SHAPE.findall(" ".join(branches) + "\n" + said + "\n" + "\n".join(commands))
+    row["keys"] = list(dict.fromkeys(k.upper() for k in words))
     row["alert"] = bool(ALERT.search(said))
     row["review"] |= bool(REVIEW.search(said))
     row["tokens"] = {k: sum(u.get(field) or 0 for u in usage.values()) for k, field in TOKENS.items()}
@@ -192,6 +197,10 @@ class Jira:
         issue = self.issue(key) if key else {}
         return issue["parent"] if issue.get("subtask") and issue.get("parent") else key
 
+    def pick(self, keys):
+        """One ticket for several keys: the first that is a main ticket, else the first sub-task's parent."""
+        return next((k for k in keys if not self.issue(k).get("subtask")), self.top(keys[0]) if keys else "")
+
     def epic(self, key):
         """The epic a ticket belongs to, as 'KEY summary', or '' when Jira does not say."""
         issue = self.issue(key)
@@ -232,10 +241,10 @@ def status(pr):
 
 def brief(pr, when):
     messages = "\n".join(c["commit"]["message"] for c in (pr.get("commits") or {}).get("nodes", []))
-    found = KEY.search(f"{pr['title']}\n{pr['headRefName']}\n{pr['body'] or ''}\n{messages}")
+    keys = [k.upper() for k in KEY.findall(f"{pr['title']}\n{pr['headRefName']}\n{pr['body'] or ''}\n{messages}")]
     return {"date": when, "repo": pr["repository"]["name"], "title": pr["title"], "url": pr["url"],
             "status": status(pr), "author": (pr["author"] or {}).get("login", ""),
-            "branch": pr["headRefName"], "ticket": found.group() if found else ""}
+            "branch": pr["headRefName"], "keys": list(dict.fromkeys(keys)), "ticket": keys[0] if keys else ""}
 
 
 def pull_requests(since, until):
@@ -265,14 +274,30 @@ def day(stamp):
 
 
 def is_support(key):
-    return key.split("-")[0] in CONFIG["support_prefixes"]
+    return key.split("-")[0].upper() in [p.upper() for p in CONFIG["support_prefixes"]]
 
 
-def ticket(row, by_branch):
-    """The session's ticket: a key it names, else the ticket of a pull request opened from its repo and branch."""
-    support = [k for k in row["keys"] if is_support(k)]
-    from_pr = [by_branch[repo_of(row), b] for b in row["branches"] if (repo_of(row), b) in by_branch]
-    return (support or row["keys"] or from_pr or [""])[0]
+def keys_of(row):
+    """The ticket keys a session names, read with the prefixes configured now: its branches are scanned again,
+    so a prefix added later also counts for sessions recorded before."""
+    found = [k.upper() for k in row["keys"] + KEY.findall(" ".join(row["branches"]))]
+    return [k for k in dict.fromkeys(found) if KEY.fullmatch(k)]
+
+
+def ticket(row, by_branch, jira):
+    """The session's ticket: a support key it names, else jira.pick of the keys it names, else the ticket of a pull request opened from one of its branches.
+    A branch name settles it when it names a single ticket; otherwise the repo must match as well."""
+    keys = keys_of(row)
+    support = [k for k in keys if is_support(k)]
+    from_pr = []
+    for b in row["branches"]:
+        if (repo_of(row), b) in by_branch:
+            from_pr.append(by_branch[repo_of(row), b])
+        elif len(by_branch.get(b, ())) == 1:
+            from_pr.extend(by_branch[b])
+    if support:
+        return support[0]
+    return jira.pick(keys) if keys else (from_pr or [""])[0]
 
 
 def cost(row):
@@ -315,13 +340,17 @@ def collect(since, until):
            for kind, found in pull_requests(since, until).items()}
     jira, worked, spent, incidents = Jira(), defaultdict(set), defaultdict(float), []
     for pr in prs["opened"]:
-        pr["ticket"] = jira.top(pr["ticket"])  # a sub-task's work counts for its parent
-    by_branch = {(pr["repo"], pr["branch"]): pr["ticket"] for pr in prs["opened"] if pr["ticket"]}
+        pr["ticket"] = jira.pick(pr["keys"])  # a main ticket it names, else a sub-task's parent
+    by_branch = {}  # (repo, branch): ticket, and branch: {tickets of the pull requests from a branch of that name}
+    for pr in prs["opened"]:
+        if pr["ticket"]:
+            by_branch[pr["repo"], pr["branch"]] = pr["ticket"]
+            by_branch.setdefault(pr["branch"], set()).add(pr["ticket"])
     touched = defaultdict(dict)  # ticket: {repo: None}, in the order the repos were first worked in
     other = defaultdict(lambda: {"days": [], "cost": 0.0})
     reviews = {"cost": 0.0, "repos": {}}
     for row in sorted(rows, key=lambda r: r["start"]):
-        key = jira.top(ticket(row, by_branch))
+        key = jira.top(ticket(row, by_branch, jira))
         if row["alert"]:
             incidents.append({"date": row["start"][:10], "what": row["title"] or row["prompt"] or "(no title)",
                               "ticket": key, "repo": repo_of(row), "cost": cost(row)})
