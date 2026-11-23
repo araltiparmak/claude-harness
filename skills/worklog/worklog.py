@@ -1,16 +1,13 @@
 #!/usr/bin/env python3
 """Keeps a ledger of Claude Code sessions and writes a one-page work summary from it.
 
-  worklog.py record           SessionEnd hook: reads the hook JSON on stdin, appends that session
-  worklog.py report [period] [--no-cost]
-                              writes <dev_dir>/worklog/report.html, opens it and prints the counts.
-                              period is empty for this month, last-month, or a first day YYYY-MM-DD
-                              (up to today); --no-cost leaves every cost out.
-                              First records every transcript still in ~/.claude/projects, so a
-                              session whose hook did not run is not lost.
+  worklog.py record                            SessionEnd hook: appends the session on stdin to the ledger
+  worklog.py report [period] [--no-cost] [--no-usage]
+      Records every transcript still in ~/.claude/projects, writes <dev_dir>/worklog/report.html, opens it
+      and prints the counts. period: empty for this month, last-month, or a first day YYYY-MM-DD.
 
-Settings come from config.json next to this file (see config.example.json); all are optional.
-The data lives in <dev_dir>/worklog: sessions.jsonl (the ledger) and jira.json (issue cache).
+Settings: config.json next to this file (see config.example.json). Data: <dev_dir>/worklog, with
+sessions.jsonl (the ledger) and jira.json (the issue cache).
 """
 import html
 import json
@@ -36,14 +33,15 @@ DATA = DEV / "worklog"
 LEDGER = DATA / "sessions.jsonl"
 PREFIXES = "|".join(re.escape(p) for p in CONFIG["jira_prefixes"])
 KEY = re.compile(rf"\b(?:{PREFIXES})-\d+\b", re.I) if PREFIXES else re.compile(r"[^\s\S]")  # never matches
-# The ledger keeps every key-shaped word; the report keeps the ones with a configured prefix.
-KEY_SHAPE = re.compile(r"\b[A-Za-z][A-Za-z0-9]{1,9}-\d+\b")
+KEY_SHAPE = re.compile(r"\b[A-Za-z][A-Za-z0-9]{1,9}-\d+\b")  # the ledger keeps these; the report filters by KEY
+SUPPORT = {p.upper() for p in CONFIG["support_prefixes"]}
 REVIEW = re.compile(r"gh pr (diff|review|checkout)|<command-name>/code-review")
+COMMAND = re.compile(r"<command-name>/([\w:.-]+)</command-name>")
 PR_URL = re.compile(r"https://github\.com/[\w.-]+/([\w.-]+)/pull/(\d+)")
 PR_CMD = re.compile(r"gh pr (?:diff|review|checkout|view) +#?(\d+)\b(?:.*?(?:--repo|-R)[ =][\w.-]+/([\w.-]+))?")
 ALERT = re.compile(r"https://[\w-]+\.pagerduty\.com/", re.I)
-TOKENS = {"in": "input_tokens", "out": "output_tokens",
-          "cache_write": "cache_creation_input_tokens", "cache_read": "cache_read_input_tokens"}
+CONTEXT_FIELDS = ("input_tokens", "cache_creation_input_tokens", "cache_read_input_tokens")
+BIG_CONTEXT = 100_000  # tokens
 # API list prices in USD per million tokens: input, output, cache read. A cache write costs 1.25x input
 # for 5 minutes, 2x for 1 hour; fast mode costs 2x. An id not listed is priced as claude-opus-5-5.
 PRICES = {"claude-opus-5-5": (4, 20, 0.20), "claude-opus-5": (5, 25, 0.50), "claude-opus-4": (5, 25, 0.50),
@@ -59,8 +57,9 @@ PR_QUERY = """query($q: String!, $after: String) {
     } }
   }
 }"""
-SHOW_COST = True  # report --no-cost turns it off
 STATUS = {"merged": "✓ Merged", "closed": "✕ Closed, not merged", "open": "○ Open", "draft": "○ Draft"}
+SHOW_COST = True  # report --no-cost turns it off
+SHOW_USAGE = True  # report --no-usage turns it off
 
 
 # ---- ledger
@@ -75,29 +74,6 @@ def records(path):
                 pass
 
 
-def note_place(row, d, branches):
-    """When and where the session ran."""
-    stamp = d.get("timestamp") or ""
-    row["start"] = row["start"] or stamp
-    row["end"] = max(row["end"], stamp)
-    row["cwd"] = row["cwd"] or d.get("cwd") or ""
-    if d.get("gitBranch") and d["gitBranch"] not in branches:
-        branches.append(d["gitBranch"])
-
-
-def note_tools(row, blocks, commands):
-    """Whether a reply edited files or ran a review, and the shell commands it ran."""
-    for b in blocks:
-        if b.get("type") != "tool_use":
-            continue
-        name, args = b.get("name"), b.get("input") or {}
-        row["edits"] |= name in ("Edit", "Write", "NotebookEdit")
-        row["review"] |= name == "Skill" and args.get("skill") == "code-review"
-        row["review"] |= name == "Bash" and bool(REVIEW.search(args.get("command", "")))
-        if name == "Bash":
-            commands.append(args.get("command", ""))
-
-
 def price(usage):
     """What one reply cost in USD at API list prices."""
     model = usage.get("model") or ""
@@ -105,52 +81,98 @@ def price(usage):
                  PRICES["claude-opus-5-5"])
     hour = (usage.get("cache_creation") or {}).get("ephemeral_1h_input_tokens") or 0
     minutes = (usage.get("cache_creation_input_tokens") or 0) - hour
-    paid = [(usage.get("input_tokens") or 0) + 1.25 * minutes + 2 * hour,
-            usage.get("output_tokens") or 0, usage.get("cache_read_input_tokens") or 0]
-    return sum(n * rate for n, rate in zip(paid, rates)) / 1e6 * (2 if usage.get("speed") == "fast" else 1)
+    tokens = [(usage.get("input_tokens") or 0) + 1.25 * minutes + 2 * hour,
+              usage.get("output_tokens") or 0, usage.get("cache_read_input_tokens") or 0]
+    return sum(n * rate for n, rate in zip(tokens, rates)) / 1e6 * (2 if usage.get("speed") == "fast" else 1)
 
 
-def blocks_of(msg):
-    content = msg.get("content")
-    return content if isinstance(content, list) else [{"type": "text", "text": content or ""}]
+def family(model):
+    """claude-opus-5-5 -> Opus; an id that is not a Claude model is kept as it is."""
+    found = re.match(r"claude-([a-z]+)", model or "")
+    return found[1].capitalize() if found else (model or "Unknown")
 
 
-def read_session(path):
-    """One ledger row for a transcript and its subagent transcripts, or None when no model ran."""
-    usage, text, branches, commands = {}, [], [], []
-    row = {"id": path.stem, "title": "", "prompt": "", "cwd": "", "start": "", "end": "",
-           "review": False, "edits": False}
-    for d in records(path):
+class Session:
+    """Reads one transcript, with its subagent transcripts, into a ledger row."""
+
+    def __init__(self, path):
+        self.row = {"id": path.stem, "title": "", "prompt": "", "cwd": "", "start": "",
+                    "review": False, "edits": False, "used": {}}
+        self.usage, self.contexts, self.text, self.branches, self.commands = {}, {}, [], [], []
+        self.compactions = 0
+        for d in records(path):
+            self.read(d)
+
+    def count(self, kind, name):
+        used = self.row["used"].setdefault(kind, {})
+        used[name] = used.get(name, 0) + 1
+
+    def read(self, d):
+        row = self.row
         if d.get("type") == "ai-title":
             row["title"] = d.get("aiTitle", "")
+        hook = d.get("attachment")
+        if isinstance(hook, dict) and str(hook.get("type", "")).startswith("hook_") and hook.get("hookName"):
+            self.count("hook", hook["hookName"])
+        self.compactions += d.get("subtype") == "compact_boundary"
         msg = d.get("message")
         if not isinstance(msg, dict):
-            continue
-        note_place(row, d, branches)
-        blocks = blocks_of(msg)
+            return
+        row["start"] = row["start"] or d.get("timestamp") or ""
+        row["cwd"] = row["cwd"] or d.get("cwd") or ""
+        if d.get("gitBranch") and d["gitBranch"] not in self.branches:
+            self.branches.append(d["gitBranch"])
+        content = msg.get("content")
+        blocks = content if isinstance(content, list) else [{"type": "text", "text": content or ""}]
         if d.get("type") == "assistant":
-            # A reply is written once per content block, each time with the same usage.
-            if msg.get("usage"):
-                usage[msg.get("id")] = {**msg["usage"], "model": msg.get("model")}
-            note_tools(row, blocks, commands)
+            if msg.get("usage"):  # a reply is written once per content block, each time with the same usage
+                self.usage[msg.get("id")] = {**msg["usage"], "model": msg.get("model")}
+                if not d.get("isSidechain"):
+                    self.contexts[msg.get("id")] = sum(msg["usage"].get(f) or 0 for f in CONTEXT_FIELDS)
+            for b in blocks:
+                if b.get("type") == "tool_use":
+                    self.tool(b.get("name"), b.get("input") or {})
         elif d.get("type") == "user" and not d.get("isMeta"):
-            text += [b.get("text", "") for b in blocks if b.get("type") == "text"]
-    return finish(row, usage, text, branches, commands) if usage else None
+            said = [b.get("text", "") for b in blocks if b.get("type") == "text"]
+            self.text += said
+            for name in COMMAND.findall("\n".join(said)):
+                self.count("command", name)
 
+    def tool(self, name, args):
+        row = self.row
+        if name == "Skill":
+            self.count("skill", args.get("skill") or "?")
+        elif name in ("Agent", "Task"):
+            self.count("agent", args.get("subagent_type") or "general-purpose")
+        elif name.startswith("mcp__"):
+            self.count("mcp", name.split("__")[1])
+        elif name == "Bash":
+            self.commands.append(args.get("command", ""))
+        row["edits"] |= name in ("Edit", "Write", "NotebookEdit")
+        row["review"] |= (name == "Skill" and args.get("skill") == "code-review"
+                          or name == "Bash" and bool(REVIEW.search(args.get("command", ""))))
 
-def finish(row, usage, text, branches, commands):
-    """Fills in the fields that need the whole session."""
-    said = "\n".join(text)
-    row["prompt"] = next((t.strip()[:200] for t in text if t.strip() and not t.lstrip().startswith("<")), "")
-    row["branches"] = branches
-    words = KEY_SHAPE.findall(" ".join(branches) + "\n" + said + "\n" + "\n".join(commands))
-    row["keys"] = list(dict.fromkeys(k.upper() for k in words))
-    row["pulls"] = pulls_named(said + "\n" + "\n".join(commands))
-    row["alert"] = bool(ALERT.search(said))
-    row["review"] |= bool(REVIEW.search(said))
-    row["tokens"] = {k: sum(u.get(field) or 0 for u in usage.values()) for k, field in TOKENS.items()}
-    row["cost"] = round(sum(price(u) for u in usage.values()), 4)
-    return row
+    def result(self):
+        """The ledger row, or None when no model ran."""
+        if not self.usage:
+            return None
+        row, said = self.row, "\n".join(self.text)
+        commands = "\n".join(self.commands)
+        row["prompt"] = next((t.strip()[:200] for t in self.text if t.strip() and not t.lstrip().startswith("<")), "")
+        row["branches"] = self.branches
+        row["keys"] = list(dict.fromkeys(k.upper() for k in KEY_SHAPE.findall(
+            " ".join(self.branches) + "\n" + said + "\n" + commands)))
+        row["pulls"] = pulls_named(said + "\n" + commands)
+        row["alert"] = bool(ALERT.search(said))
+        row["review"] |= bool(REVIEW.search(said))
+        models = defaultdict(float)
+        for u in self.usage.values():
+            models[family(u.get("model"))] += price(u)
+        row["models"] = {m: round(usd, 4) for m, usd in models.items()}
+        row["cost"] = round(sum(models.values()), 4)
+        sizes = list(self.contexts.values()) or [0]
+        row["context"] = {"peak": max(sizes), "avg": sum(sizes) // len(sizes), "compactions": self.compactions}
+        return row
 
 
 def pulls_named(text):
@@ -164,9 +186,29 @@ def append(paths):
     DATA.mkdir(parents=True, exist_ok=True)
     with LEDGER.open("a") as out:
         for path in paths:
-            row = read_session(path)
+            row = Session(path).result()
             if row:
                 out.write(json.dumps(row) + "\n")
+
+
+def cost(row):
+    """A row recorded before costs were kept is priced as claude-opus-5-5 with 1-hour cache writes."""
+    if "cost" in row:
+        return row["cost"]
+    t = row["tokens"]
+    return price({"input_tokens": t["in"], "output_tokens": t["out"], "cache_read_input_tokens": t["cache_read"],
+                  "cache_creation_input_tokens": t["cache_write"],
+                  "cache_creation": {"ephemeral_1h_input_tokens": t["cache_write"]}})
+
+
+def models_of(row):
+    """{model family: cost}; a row recorded before these were kept is all Unknown."""
+    return row.get("models") or {"Unknown": cost(row)}
+
+
+def repo_of(row):
+    cwd = Path(row["cwd"] or "/")
+    return cwd.relative_to(DEV).parts[0] if cwd.is_relative_to(DEV) and cwd != DEV else cwd.name or "/"
 
 
 # ---- Jira and GitHub
@@ -189,17 +231,14 @@ class Jira:
             self.down = True
 
     def issue(self, key):
-        """Summary, type and parent of one issue, cached in jira.json. An entry cached before sub-tasks were
-        noted is read again."""
+        """Summary, type, whether it is a sub-task, and parent of one issue, cached in jira.json."""
         if "subtask" not in self.cache.get(key, {}):
             fields = (self.run("jira_cmd", key=key) or {}).get("fields")
             if not fields:
                 return {}
-            parent = fields.get("parent") or {}
             self.cache[key] = {"summary": fields.get("summary", ""), "type": fields["issuetype"]["name"],
                                "subtask": bool(fields["issuetype"].get("subtask")),
-                               "parent": parent.get("key", ""),
-                               "parent_summary": (parent.get("fields") or {}).get("summary", "")}
+                               "parent": (fields.get("parent") or {}).get("key", "")}
         return self.cache[key]
 
     def top(self, key):
@@ -207,15 +246,12 @@ class Jira:
         issue = self.issue(key) if key else {}
         return issue["parent"] if issue.get("subtask") and issue.get("parent") else key
 
-    def is_epic(self, key):
-        return self.issue(key).get("type", "").lower() == "epic"
-
     def pick(self, keys):
-        """One ticket for the keys a session or pull request names: the first main ticket, else the first
-        sub-task's parent. An epic is taken only when nothing else is named."""
-        epics = [k for k in keys if self.is_epic(k)]
+        """One key for the keys a session or pull request names: the first main ticket, else the first
+        sub-task. An epic is taken only when nothing else is named."""
+        epics = [k for k in keys if self.issue(k).get("type", "").lower() == "epic"]
         rest = [k for k in keys if k not in epics]
-        main = next((k for k in rest if not self.issue(k).get("subtask")), self.top(rest[0]) if rest else "")
+        main = next((k for k in rest if not self.issue(k).get("subtask")), rest[0] if rest else "")
         return main or (epics[0] if epics else "")
 
     def resolved(self, since, until):
@@ -223,12 +259,11 @@ class Jira:
         after = date.fromisoformat(until) + timedelta(days=1)
         jql = f'assignee = currentUser() AND resolved >= "{since}" AND resolved < "{after}"'
         found = self.run("jira_search_cmd", jql=jql) or []
-        issues = found if isinstance(found, list) else found.get("issues", [])
-        return [i["key"] for i in issues]
+        return [i["key"] for i in (found if isinstance(found, list) else found.get("issues", []))]
 
 
 def search_prs(query):
-    """(your login, the pull requests a GitHub search finds), with their reviews."""
+    """(your login, the pull requests a GitHub search finds)."""
     prs, after, login = [], None, ""
     while True:
         cmd = ["gh", "api", "graphql", "-f", f"query={PR_QUERY}", "-f", f"q={query}"]
@@ -245,17 +280,12 @@ def search_prs(query):
             return login, prs
 
 
-def status(pr):
-    if pr["state"] == "OPEN":
-        return "draft" if pr["isDraft"] else "open"
-    return pr["state"].lower()
-
-
 def brief(pr, when):
     messages = "\n".join(c["commit"]["message"] for c in (pr.get("commits") or {}).get("nodes", []))
     keys = [k.upper() for k in KEY.findall(f"{pr['title']}\n{pr['headRefName']}\n{pr['body'] or ''}\n{messages}")]
+    state = ("draft" if pr["isDraft"] else "open") if pr["state"] == "OPEN" else pr["state"].lower()
     return {"date": when, "repo": pr["repository"]["name"], "title": pr["title"], "url": pr["url"],
-            "status": status(pr), "author": (pr["author"] or {}).get("login", ""),
+            "status": state, "author": (pr["author"] or {}).get("login", ""),
             "branch": pr["headRefName"], "keys": list(dict.fromkeys(keys)), "ticket": keys[0] if keys else ""}
 
 
@@ -273,7 +303,194 @@ def pull_requests(since, until):
             "reviewed": sorted(reviewed, key=lambda p: p["date"])}
 
 
-# ---- report
+# ---- sorting the sessions
+
+def is_support(key):
+    return key.split("-")[0].upper() in SUPPORT
+
+
+def keys_of(row):
+    """The ticket keys a session names, filtered by the prefixes configured now; its branches are scanned
+    again, so a prefix added later also counts for sessions recorded before."""
+    found = [k.upper() for k in row["keys"] + KEY.findall(" ".join(row["branches"]))]
+    return [k for k in dict.fromkeys(found) if KEY.fullmatch(k)]
+
+
+def ticket(row, by_branch, jira):
+    """The key a session counts for: a support key it names, else jira.pick of its keys, else the ticket of a
+    pull request opened from one of its branches. A branch name alone settles it when it names one ticket;
+    otherwise the repo must match too."""
+    keys = keys_of(row)
+    support = [k for k in keys if is_support(k)]
+    if support:
+        return support[0]
+    if keys:
+        return jira.pick(keys)
+    for b in row["branches"]:
+        if (repo_of(row), b) in by_branch:
+            return by_branch[repo_of(row), b]
+        if len(by_branch.get(b, ())) == 1:
+            return next(iter(by_branch[b]))
+    return ""
+
+
+def reviewed_pr(row, reviewed):
+    """The reviewed pull request a review session names: by repo and number, or by number alone when only one
+    reviewed pull request has it; None otherwise. The repo folder says nothing: reviews often run in a scratch
+    checkout."""
+    refs = {f"{m[1]}#{m[2]}": pr for pr in reviewed if (m := PR_URL.search(pr["url"]))}
+    for ref in row.get("pulls", []):
+        found = [pr for r, pr in refs.items() if r == ref or ref.startswith("#") and r.endswith(ref)]
+        if len(found) == 1:
+            return found[0]
+    return None
+
+
+class Work:
+    """The days, cost, cost per model and pull requests of one ticket or sub-task."""
+
+    def __init__(self, key, jira):
+        issue = jira.issue(key)
+        self.key, self.summary, self.type = key, issue.get("summary", ""), issue.get("type", "")
+        self.days, self.cost, self.models, self.prs = set(), 0.0, defaultdict(float), []
+
+    def add(self, row):
+        self.days.add(row["start"][:10])
+        self.cost += cost(row)
+        for model, usd in models_of(row).items():
+            self.models[model] += usd
+
+
+class Ticket:
+    """A ticket: its own work, its sub-tasks' work, and the repos of both. Its cost includes the sub-tasks."""
+
+    def __init__(self, key, jira):
+        self.key, self.jira, self.own, self.subs, self.repos = key, jira, Work(key, jira), {}, {}
+        self.resolved = False
+
+    def part(self, key):
+        if key == self.key:
+            return self.own
+        if key not in self.subs:
+            self.subs[key] = Work(key, self.jira)
+        return self.subs[key]
+
+    @property
+    def cost(self):
+        return self.own.cost + sum(s.cost for s in self.subs.values())
+
+
+def load(since, until):
+    """The sessions that started in the period, the last row of each, and the cost of those in exclude_repos."""
+    rows = {}
+    for line in LEDGER.open():
+        row = json.loads(line)
+        rows[row["id"]] = row  # a session is recorded more than once; the last row wins
+    rows = sorted((r for r in rows.values() if since <= r["start"][:10] <= until), key=lambda r: r["start"])
+    excluded = sum(cost(r) for r in rows if repo_of(r) in CONFIG["exclude_repos"])
+    return [r for r in rows if repo_of(r) not in CONFIG["exclude_repos"]], excluded
+
+
+def collect(since, until):
+    """Everything the report shows, as plain data. Every session lands in exactly one place."""
+    append(sorted((Path.home() / ".claude" / "projects").glob("*/*.jsonl")))
+    rows, excluded = load(since, until)
+    if not rows:
+        sys.exit(f"no sessions from {day(since)} to {day(until)}")
+    prs = {kind: [pr for pr in found if pr["repo"] not in CONFIG["exclude_repos"]]
+           for kind, found in pull_requests(since, until).items()}
+    jira, tickets, incidents = Jira(), {}, []
+    other = defaultdict(lambda: {"days": set(), "cost": 0.0})
+    reviews = {"cost": 0.0, "unlinked": 0.0}
+
+    def on(key):
+        top = jira.top(key)
+        if top not in tickets:
+            tickets[top] = Ticket(top, jira)
+        return tickets[top]
+
+    by_branch = {}  # (repo, branch): ticket, and branch: {tickets of the pull requests from a branch of that name}
+    for pr in prs["opened"]:
+        pr["sub"] = jira.pick(pr["keys"])
+        pr["ticket"] = jira.top(pr["sub"])
+        if pr["ticket"]:
+            by_branch[pr["repo"], pr["branch"]] = pr["ticket"]
+            by_branch.setdefault(pr["branch"], set()).add(pr["ticket"])
+    for pr in prs["reviewed"]:
+        pr["cost"] = 0.0
+    for row in rows:
+        named = ticket(row, by_branch, jira)
+        if row["alert"]:
+            incidents.append({"date": row["start"][:10], "what": row["title"] or row["prompt"] or "(no title)",
+                              "ticket": jira.top(named), "repo": repo_of(row), "cost": cost(row)})
+        elif named:
+            t = on(named)
+            t.part(named).add(row)
+            t.repos[repo_of(row)] = None
+        elif row["review"] and not row["edits"]:
+            reviews["cost"] += cost(row)
+            pr = reviewed_pr(row, prs["reviewed"])
+            if pr:
+                pr["cost"] += cost(row)
+            else:
+                reviews["unlinked"] += cost(row)
+        else:
+            other[repo_of(row)]["days"].add(row["start"][:10])
+            other[repo_of(row)]["cost"] += cost(row)
+    for pr in prs["opened"]:
+        if pr["ticket"]:
+            t = on(pr["sub"])
+            t.part(pr["sub"]).prs.append(pr)
+            t.repos[pr["repo"]] = None
+    for key in jira.resolved(since, until):  # a resolved sub-task does not resolve its parent
+        t = on(key)
+        t.part(key).resolved = True
+        t.resolved |= key == t.key
+    if jira.cache:
+        (DATA / "jira.json").write_text(json.dumps(jira.cache, indent=1))
+    return {"since": since, "last": until, "incidents": incidents, "other": other, "prs": prs,
+            "reviews": reviews, "sessions": len(rows), "total": sum(cost(r) for r in rows), "excluded": excluded,
+            "usage": usage_of(rows),
+            "tickets": [t for t in tickets.values() if not is_support(t.key)],
+            "support": [t for t in tickets.values() if is_support(t.key)]}
+
+
+def usage_of(rows):
+    """{kind: {name: [uses, sessions]}} for skills, plugins, MCP servers, hooks and subagents, plus the context
+    sizes. A slash command is a skill when a skill of that name is installed or it names a plugin skill. A plugin
+    is the part before ':' in a skill name, or <plugin> in an MCP server named plugin_<plugin>_<server>."""
+    folder = Path.home() / ".claude" / "skills"
+    installed = {p.name for p in folder.iterdir()} if folder.is_dir() else set()
+    found = defaultdict(lambda: defaultdict(lambda: [0, 0]))
+    measured = [r for r in rows if "used" in r]  # rows recorded before these were kept have none
+    for r in measured:
+        used = r["used"]
+        skills = dict(used.get("skill", {}))
+        for name, n in used.get("command", {}).items():
+            if name in installed or ":" in name:
+                skills[name] = skills.get(name, 0) + n
+        plugins = defaultdict(int)
+        for name, n in skills.items():
+            if ":" in name:
+                plugins[name.split(":")[0]] += n
+        for name, n in used.get("mcp", {}).items():
+            if name.startswith("plugin_"):
+                plugins[name.split("_")[1]] += n
+        for kind, counts in (("skill", skills), ("plugin", plugins), ("mcp", used.get("mcp", {})),
+                             ("hook", used.get("hook", {})), ("agent", used.get("agent", {}))):
+            for name, n in counts.items():
+                found[kind][name][0] += n
+                found[kind][name][1] += 1
+    peaks = [r["context"]["peak"] for r in measured]
+    n = max(len(measured), 1)
+    found["context"] = {"sessions": len(measured), "of": len(rows),
+                        "avg": sum(r["context"]["avg"] for r in measured) // n, "peak_avg": sum(peaks) // n,
+                        "peak": max(peaks, default=0), "big": sum(p > BIG_CONTEXT for p in peaks),
+                        "compactions": sum(r["context"]["compactions"] for r in measured)}
+    return found
+
+
+# ---- page
 
 def plural(n, word):
     return f"{n} {word}{'' if n == 1 else 's'}"
@@ -285,144 +502,24 @@ def day(stamp):
     return f"{d.day} {d:%b %Y}"
 
 
-def is_support(key):
-    return key.split("-")[0].upper() in [p.upper() for p in CONFIG["support_prefixes"]]
+def worked_on(days):
+    """'10 Nov to 14 Nov, 2 days'; the year is in the page's period."""
+    if not days:
+        return "-"
+    days = sorted(days)
+    span = " to ".join(dict.fromkeys(day(d).rsplit(" ", 1)[0] for d in (days[0], days[-1])))
+    return f"{span}, {plural(len(days), 'day')}"
 
 
-def keys_of(row):
-    """The ticket keys a session names, read with the prefixes configured now: its branches are scanned again,
-    so a prefix added later also counts for sessions recorded before."""
-    found = [k.upper() for k in row["keys"] + KEY.findall(" ".join(row["branches"]))]
-    return [k for k in dict.fromkeys(found) if KEY.fullmatch(k)]
+def paid(usd):
+    """Whether a cost is worth showing: under half a cent rounds to nothing."""
+    return usd >= 0.005
 
 
-def ticket(row, by_branch, jira):
-    """The session's ticket: a support key it names, else jira.pick of the keys it names, else the
-    ticket of a pull request opened from one of its branches.
-    A branch name settles it when it names a single ticket; otherwise the repo must match as well."""
-    keys = keys_of(row)
-    support = [k for k in keys if is_support(k)]
-    from_pr = []
-    for b in row["branches"]:
-        if (repo_of(row), b) in by_branch:
-            from_pr.append(by_branch[repo_of(row), b])
-        elif len(by_branch.get(b, ())) == 1:
-            from_pr.extend(by_branch[b])
-    if support:
-        return support[0]
-    return jira.pick(keys) if keys else (from_pr or [""])[0]
+def money(usd):
+    """Dollars, or '-' for nothing, so a ticket without sessions does not read as no effort."""
+    return f"${usd:,.2f}" if paid(usd) else "-"
 
-
-def pr_ref(pr):
-    """'repo#number' of a pull request, from its url."""
-    found = PR_URL.search(pr["url"])
-    return f"{found[1]}#{found[2]}" if found else ""
-
-
-def reviewed_pr(row, reviewed):
-    """The reviewed pull request a review session names: by repo and number, or by number alone when only one
-    reviewed pull request has it. None when the session names none of them. Then the session's repo folder
-    says nothing either: reviews often run in a scratch checkout."""
-    for ref in row.get("pulls", []):
-        repo, number = ref.split("#")
-        found = [pr for pr in reviewed if pr_ref(pr) == ref
-                 or not repo and pr_ref(pr).endswith(f"#{number}")]
-        if len(found) == 1:
-            return found[0]
-    return None
-
-
-def cost(row):
-    """A row recorded before costs were kept is priced as claude-opus-5-5 with 1-hour cache writes."""
-    if "cost" in row:
-        return row["cost"]
-    t = row["tokens"]
-    return price({"input_tokens": t["in"], "output_tokens": t["out"], "cache_read_input_tokens": t["cache_read"],
-                  "cache_creation_input_tokens": t["cache_write"],
-                  "cache_creation": {"ephemeral_1h_input_tokens": t["cache_write"]}})
-
-
-def repo_of(row):
-    cwd = Path(row["cwd"] or "/")
-    return cwd.relative_to(DEV).parts[0] if cwd.is_relative_to(DEV) and cwd != DEV else cwd.name or "/"
-
-
-def period(arg):
-    """(first day, last day) as YYYY-MM-DD: this month by default, the month before for 'last-month',
-    or from a given day to today."""
-    today = date.today()
-    if arg == "last-month":
-        last = today.replace(day=1) - timedelta(days=1)
-        return str(last.replace(day=1)), str(last)
-    return (arg or str(today.replace(day=1))), str(today)
-
-
-def collect(since, until):
-    """Everything the report shows, as plain data. Records the transcripts still on disk first."""
-    append(sorted((Path.home() / ".claude" / "projects").glob("*/*.jsonl")))
-    rows = {}
-    for line in LEDGER.open():
-        row = json.loads(line)
-        rows[row["id"]] = row  # a session is recorded more than once; the last row wins
-    rows = [r for r in rows.values()
-            if since <= r["start"][:10] <= until and repo_of(r) not in CONFIG["exclude_repos"]]
-    if not rows:
-        sys.exit(f"no sessions from {day(since)} to {day(until)}")
-    prs = {kind: [pr for pr in found if pr["repo"] not in CONFIG["exclude_repos"]]
-           for kind, found in pull_requests(since, until).items()}
-    jira, worked, spent, incidents = Jira(), defaultdict(set), defaultdict(float), []
-    for pr in prs["opened"]:
-        pr["ticket"] = jira.pick(pr["keys"])
-    by_branch = {}  # (repo, branch): ticket, and branch: {tickets of the pull requests from a branch of that name}
-    for pr in prs["opened"]:
-        if pr["ticket"]:
-            by_branch[pr["repo"], pr["branch"]] = pr["ticket"]
-            by_branch.setdefault(pr["branch"], set()).add(pr["ticket"])
-    touched = defaultdict(dict)  # ticket: {repo: None}, in the order the repos were first worked in
-    other = defaultdict(lambda: {"days": [], "cost": 0.0})
-    reviews = {"cost": 0.0, "unlinked": 0.0}
-    for pr in prs["reviewed"]:
-        pr["cost"] = 0.0
-    for row in sorted(rows, key=lambda r: r["start"]):
-        key = jira.top(ticket(row, by_branch, jira))
-        if row["alert"]:
-            incidents.append({"date": row["start"][:10], "what": row["title"] or row["prompt"] or "(no title)",
-                              "ticket": key, "repo": repo_of(row), "cost": cost(row)})
-        elif key:
-            worked[key].add(row["start"][:10])
-            spent[key] += cost(row)
-            touched[key][repo_of(row)] = None
-        elif row["review"] and not row["edits"]:
-            reviews["cost"] += cost(row)
-            pr = reviewed_pr(row, prs["reviewed"])
-            if pr:
-                pr["cost"] += cost(row)
-            else:
-                reviews["unlinked"] += cost(row)
-        elif row["edits"]:  # a session that only asked questions is left out
-            other[repo_of(row)]["days"].append(row["start"][:10])
-            other[repo_of(row)]["cost"] += cost(row)
-    found = jira.resolved(since, until)
-    resolved = [k for k in found if jira.top(k) == k]  # a resolved sub-task does not resolve its parent
-    linked = defaultdict(list)
-    for pr in prs["opened"]:
-        if pr["ticket"]:
-            linked[pr["ticket"]].append(pr)
-            touched[pr["ticket"]][pr["repo"]] = None
-    tickets = []
-    for key in dict.fromkeys(list(worked) + list(linked) + [jira.top(k) for k in found]):
-        tickets.append({"key": key, "summary": jira.issue(key).get("summary", ""), "type": jira.issue(key).get("type", ""),
-                        "days": sorted(worked[key]), "resolved": key in resolved, "prs": linked[key],
-                        "cost": spent[key], "repos": list(touched[key])})
-    if jira.cache:
-        (DATA / "jira.json").write_text(json.dumps(jira.cache, indent=1))
-    return {"since": since, "last": until, "incidents": incidents, "other": other,
-            "prs": prs, "reviews": reviews,
-            "tickets": [t for t in tickets if not is_support(t["key"])],
-            "support": [t for t in tickets if is_support(t["key"])]}
-
-
-# ---- page
 
 def tag(name, text, **attrs):
     """One HTML element. Text is escaped; pass a list for content that is already HTML."""
@@ -431,7 +528,7 @@ def tag(name, text, **attrs):
     return f"<{name}{shown}>{inner}</{name}>"
 
 
-def grid(head, rows):
+def grid(head, rows, classes=None):
     """An HTML table. A cell that is a (text, url, small print) tuple becomes a link (when there is a url)
     with a line under it. The Cost column is left out under --no-cost."""
     if not SHOW_COST and "Cost" in head:
@@ -444,7 +541,8 @@ def grid(head, rows):
         text, url, small = c
         return tag("td", [tag("a", text, href=url) if url else html.escape(text)] + ([tag("small", small)] if small else []))
     return tag("div", [tag("table", [tag("tr", [tag("th", h) for h in head])] + [
-        tag("tr", [cell(c) for c in row]) for row in rows])], class_="scroll")
+        tag("tr", [cell(c) for c in row], **({"class_": cls} if cls else {}))
+        for row, cls in zip(rows, classes or [""] * len(rows))])], class_="scroll")
 
 
 def dot(slot):
@@ -469,28 +567,6 @@ def jira_link(key):
     return f"{CONFIG['jira_url'].rstrip('/')}/browse/{key}" if CONFIG["jira_url"] and key else ""
 
 
-def ticket_cell(key):
-    return (key, jira_link(key), "") if key else "-"
-
-
-def worked_on(days):
-    """'10 Nov to 14 Nov, 2 days'; the year is in the page's period."""
-    if not days:
-        return "-"
-    span = " to ".join(dict.fromkeys(day(d).rsplit(" ", 1)[0] for d in (days[0], days[-1])))
-    return f"{span}, {plural(len(days), 'day')}"
-
-
-def paid(usd):
-    """Whether a cost is worth showing: under half a cent rounds to nothing."""
-    return usd >= 0.005
-
-
-def money(usd):
-    """Dollars, or '-' for nothing, so a ticket without sessions does not read as no effort."""
-    return f"${usd:,.2f}" if paid(usd) else "-"
-
-
 def pr_links(prs):
     """Each pull request as 'repo#123 status', one per line."""
     links = [tag("a", f"{pr['repo']}#{pr['url'].rsplit('/', 1)[-1]}", href=pr["url"], title=pr["title"])
@@ -499,49 +575,54 @@ def pr_links(prs):
     return ["<br>".join(links)] if links else "-"
 
 
-def ticket_grid(tickets):
-    """The tickets as a table; the Type column only when Jira gave a type."""
-    rows = [[(t["key"], jira_link(t["key"]), t["summary"]), t.get("type") or "-", worked_on(t["days"]),
-             pr_links(t["prs"]), money(t["cost"]),
-             [tag("span", "Resolved", class_="state done") if t["resolved"] else tag("span", "Open", class_="state")]]
-            for t in sorted(tickets, key=lambda t: -t["cost"])]
-    if not any(t.get("type") for t in tickets):
-        return grid(["Ticket", "Worked on", "Pull requests", "Cost", "Status"], [r[:1] + r[2:] for r in rows])
-    return grid(["Ticket", "Type", "Worked on", "Pull requests", "Cost", "Status"], rows)
+def model_split(models):
+    """'Opus $4.10 (80%), Sonnet $1.02 (20%)', the most used first; percentages only under --no-cost."""
+    total = sum(models.values())
+    if not paid(total):
+        return "-"
+    parts = sorted(((m, usd) for m, usd in models.items() if paid(usd)), key=lambda item: -item[1])
+    return ", ".join(f"{m} {money(usd) + ' ' if SHOW_COST else ''}({usd / total:.0%})" for m, usd in parts)
 
 
 def repos(tickets):
     """The repos the tickets touched, those of the most expensive ticket first, as one line."""
-    found = {r: None for t in sorted(tickets, key=lambda t: -t["cost"]) for r in t["repos"]}
+    found = {r: None for t in sorted(tickets, key=lambda t: -t.cost) for r in t.repos}
     return ", ".join(found) or "-"
 
 
-def repos_line(tickets):
-    listed = repos(tickets)
-    return f"Repos: {listed}." if listed != "-" else ""
+def ticket_boxes(tickets, slot):
+    """One box per ticket, the most expensive first: its total cost in the title, then a table with the
+    ticket's own work and each sub-task, indented, with its own cost."""
+    typed = any(w.type for t in tickets for w in [t.own, *t.subs.values()])
+    head = ["Ticket"] + (["Type"] if typed else []) + ["Worked on", "Pull requests", "Models", "Cost"]
+    boxes = []
+    for t in sorted(tickets, key=lambda t: -t.cost):
+        works = [t.own] + sorted(t.subs.values(), key=lambda w: -w.cost)
+        rows = [[(w.key, jira_link(w.key), w.summary)] + ([w.type or "-"] if typed else [])
+                + [worked_on(w.days), pr_links(w.prs), model_split(w.models), money(w.cost)] for w in works]
+        name = f"{t.key} {t.own.summary}".strip()
+        title = [tag("a", name, href=jira_link(t.key))] if CONFIG["jira_url"] else name
+        intro = f"Repos: {', '.join(t.repos)}." if t.repos else ""
+        intro += " The total includes the sub-tasks." if t.subs else ""
+        boxes.append(section(title, intro.strip(), grid(head, rows, [""] + ["sub"] * len(t.subs)),
+                             total=t.cost, slot=slot))
+    return boxes
 
 
 def groups(data):
-    """The big groups of the work, the overview's rows, keyed by id: tickets, support, incidents, reviews and
-    other work. Their costs add up to the total; each has a colour slot."""
-    found = {}
-    if data["tickets"]:
-        found["tickets"] = {"name": "Tickets", "url": "", "tickets": len(data["tickets"]),
-                            "repos": repos(data["tickets"]), "cost": sum(t["cost"] for t in data["tickets"])}
-    if data["support"]:
-        found["support"] = {"name": "Support tickets", "url": "", "tickets": len(data["support"]),
-                            "repos": repos(data["support"]), "cost": sum(t["cost"] for t in data["support"])}
-    if data["incidents"]:
-        found["incidents"] = {"name": "Incidents and investigations", "url": "", "tickets": "-",
-                              "repos": ", ".join(dict.fromkeys(i["repo"] for i in data["incidents"])),
-                              "cost": sum(i["cost"] for i in data["incidents"])}
-    if data["prs"]["reviewed"] or paid(data["reviews"]["cost"]):
-        found["reviews"] = {"name": "Code reviews", "url": "", "tickets": "-",
-                            "repos": "-", "cost": data["reviews"]["cost"]}
-    if data["other"]:
-        found["other"] = {"name": "Other work", "url": "", "tickets": "-",
-                          "repos": ", ".join(sorted(data["other"], key=lambda r: -data["other"][r]["cost"])),
-                          "cost": sum(o["cost"] for o in data["other"].values())}
+    """The overview's rows, keyed by id: tickets, support, incidents, reviews and other work. Their costs add up
+    to the total; each has a colour slot."""
+    tickets, support, incidents, other = data["tickets"], data["support"], data["incidents"], data["other"]
+    rows = [("tickets", "Tickets", len(tickets), repos(tickets), sum(t.cost for t in tickets), tickets),
+            ("support", "Support tickets", len(support), repos(support), sum(t.cost for t in support), support),
+            ("incidents", "Incidents and investigations", "-", ", ".join(dict.fromkeys(i["repo"] for i in incidents)),
+             sum(i["cost"] for i in incidents), incidents),
+            ("reviews", "Code reviews", "-", "-", data["reviews"]["cost"],
+             data["prs"]["reviewed"] or paid(data["reviews"]["cost"])),
+            ("other", "Other work", "-", ", ".join(sorted(other, key=lambda r: -other[r]["cost"])),
+             sum(o["cost"] for o in other.values()), other)]
+    found = {gid: {"name": name, "tickets": n, "repos": r, "cost": usd}
+             for gid, name, n, r, usd, shown in rows if shown}
     for i, g in enumerate(found.values()):
         g["slot"] = i + 1 if i < 8 else 0  # eight palette colours in a fixed order; past them, grey
     return found
@@ -551,23 +632,21 @@ def overview(rows):
     """The groups as a table, after a bar and legend that split the whole spend between them."""
     top, total = max([g["cost"] for g in rows] + [0.01]), sum(g["cost"] for g in rows) or 0.01
 
-    def name(g):
-        return [dot(g["slot"]) + (tag("a", g["name"], href=g["url"]) if g["url"] else html.escape(g["name"]))]
+    def share(g):
+        part = g["cost"] / total
+        return "-" if not paid(g["cost"]) else "<1%" if part < 0.005 else f"{part:.0%}"
 
     def spend(g):
         bar = tag("div", [tag("span", "", class_=f"c{g['slot']}", style=f"width:{g['cost'] / top * 100:.1f}%")], class_="bar")
         return [html.escape(money(g["cost"])) + bar]
-
-    def share(g):
-        part = g["cost"] / total
-        return "-" if not paid(g["cost"]) else "<1%" if part < 0.005 else f"{part:.0%}"
     charged = [g for g in rows if paid(g["cost"])]
     split = tag("div", [tag("span", "", class_=f"c{g['slot']}", style=f"flex-grow:{g['cost'] / total:.4f}",
                             title=f"{g['name']}: {share(g)}") for g in charged], class_="split")
     legend = tag("ul", [tag("li", [dot(g["slot"]) + html.escape(g["name"]) + " " + tag("strong", share(g))])
                         for g in charged], class_="legend")
     return split + legend + grid(["Group", "Tickets", "Repos", "Share", "Cost"],
-                                 [[name(g), g["tickets"], g["repos"], share(g), spend(g)] for g in rows])
+                                 [[[dot(g["slot"]) + html.escape(g["name"])], g["tickets"], g["repos"], share(g),
+                                   spend(g)] for g in rows])
 
 
 def headline(data, group):
@@ -576,12 +655,12 @@ def headline(data, group):
 
     def s(n):
         return "" if n == 1 else "s"
-    resolved = sum(t["resolved"] for t in tickets)
-    support_resolved = sum(t["resolved"] for t in support)
+    resolved = sum(t.resolved for t in tickets)
+    support_resolved = sum(t.resolved for t in support)
     merged = sum(pr["status"] == "merged" for pr in prs["opened"])
     incidents, reviewed = len(data["incidents"]), len(prs["reviewed"])
-    # The tickets you worked on: your sessions, pull requests and resolved tickets; reviews for others do not count.
-    touched = {t["key"] for t in tickets + support} | {i["ticket"] for i in data["incidents"] if i["ticket"]}
+    # The tickets you worked on: sessions, pull requests and resolved tickets; reviews for others do not count.
+    touched = {t.key for t in tickets + support} | {i["ticket"] for i in data["incidents"] if i["ticket"]}
     boxes = [(len(touched), f"ticket{s(len(touched))} worked on", touched),
              (resolved, f"ticket{s(resolved)} resolved, of {len(tickets)}", tickets),
              (support_resolved, f"support ticket{s(support_resolved)} resolved, of {len(support)}", support),
@@ -594,60 +673,103 @@ def headline(data, group):
     return boxes
 
 
-def page(data, group):
+def usage_sections(usage):
+    """The Context box and the Claude Code usage box: what the sessions used, most used first."""
+    c = usage["context"]
+    intro = f"From the {c['sessions']} of {c['of']} sessions recorded with these details."
+
+    def k(n):
+        return f"{n / 1000:.0f}k"
+    context = section("Context", intro, grid(
+        ["Average per reply", "Average peak per session", "Largest peak", f"Sessions past {k(BIG_CONTEXT)}",
+         "Compactions"], [[k(c["avg"]), k(c["peak_avg"]), k(c["peak"]), c["big"], c["compactions"]]]))
+    heads = {"skill": "Skill", "plugin": "Plugin", "mcp": "MCP server", "hook": "Hook (event:matcher)",
+             "agent": "Subagent"}
+    tables = [grid([head, "Uses", "Sessions"], [[name, n, sessions] for name, (n, sessions) in
+                                                sorted(usage[kind].items(), key=lambda item: (-item[1][0], item[0]))])
+              for kind, head in heads.items() if usage.get(kind)]
+    return context, section("Claude Code usage", intro, *tables) if tables else ""
+
+
+def page(data, group, name="report.html"):
     prs = data["prs"]
-    body = [tag("header", [tag("h1", "Work summary"),
-                           tag("p", f"{day(data['since'])} to {day(data['last'])}", class_="period")]),
-            tag("div", [tag("div", [tag("strong", number), tag("span", label)], class_="tile")
-                        for number, label in headline(data, group)], class_="tiles")]
 
     def boxed(gid, title, intro, *parts):
         return section(title, intro, *parts, total=group[gid]["cost"], slot=group[gid]["slot"])
-    body.append(section("Overview", "Where the work went, by kind. A share is the group's part of "
-                                    "the session cost, the closest measure of effort the records hold.",
-                        overview(list(group.values()))))
-    if data["tickets"]:
-        tickets = data["tickets"]
-        done = sum(t["resolved"] for t in tickets)
-        intro = " ".join(filter(None, [f"{done} of {plural(len(tickets), 'ticket')} resolved.", repos_line(tickets)]))
-        body.append(boxed("tickets", "Tickets", intro, ticket_grid(tickets)))
-    if data["support"]:
-        body.append(boxed("support", "Support tickets", repos_line(data["support"]), ticket_grid(data["support"])))
+    context, usage = usage_sections(data["usage"]) if SHOW_USAGE else ("", "")
+    body = [tag("header", [tag("h1", "Work summary"),
+                           tag("p", f"{day(data['since'])} to {day(data['last'])}", class_="period")]),
+            tag("div", [tag("div", [tag("strong", number), tag("span", label)], class_="tile")
+                        for number, label in headline(data, group)], class_="tiles"),
+            context,
+            section("Overview", "Where the work went, by kind. A share is the group's part of the session cost, "
+                                "the closest measure of effort the records hold.", overview(list(group.values())))]
+    for gid in ("tickets", "support"):
+        if data[gid]:
+            body += ticket_boxes(data[gid], group[gid]["slot"])
     if data["incidents"]:
         body.append(boxed("incidents", "Incidents and investigations", "Sessions that followed a PagerDuty alert.",
                           grid(["Date", "Session", "Ticket", "Repo", "Cost"],
-                               [[day(i["date"]), i["what"], ticket_cell(i["ticket"]), i["repo"], money(i["cost"])]
-                                for i in data["incidents"]])))
-    prs_without_ticket = [pr for pr in prs["opened"] if not pr["ticket"]]  # the others are under their ticket
-    if prs_without_ticket:
-        body.append(section("Pull requests without a ticket", "",
-                            grid(["Opened", "Pull request", "Status"],
-                                 [[day(pr["date"]), (pr["title"], pr["url"], pr["repo"]), status_cell(pr["status"])]
-                                  for pr in prs_without_ticket])))
+                               [[day(i["date"]), i["what"], (i["ticket"], jira_link(i["ticket"]), "") if i["ticket"]
+                                 else "-", i["repo"], money(i["cost"])] for i in data["incidents"]])))
+    without_ticket = [pr for pr in prs["opened"] if not pr["ticket"]]
+    if without_ticket:
+        body.append(section("Pull requests without a ticket", "", grid(
+            ["Opened", "Pull request", "Status"],
+            [[day(pr["date"]), (pr["title"], pr["url"], pr["repo"]), status_cell(pr["status"])]
+             for pr in without_ticket])))
     if data["other"]:
-        body.append(boxed("other", "Other work", "Sessions that changed code with no Jira ticket, incident or "
-                                                 "review behind them, by repo.",
+        body.append(boxed("other", "Other work", "Sessions with no Jira ticket, incident or review behind them, by repo.",
                           grid(["Repo", "Worked on", "Cost"],
-                               [[repo, worked_on(sorted(set(o["days"]))), money(o["cost"])]
+                               [[repo, worked_on(o["days"]), money(o["cost"])]
                                 for repo, o in sorted(data["other"].items(), key=lambda item: -item[1]["cost"])])))
     if "reviews" in group:
         unlinked = data["reviews"]["unlinked"]
-        intro = " ".join(filter(None, [
-            "Pull requests by teammates that you reviewed." if prs["reviewed"]
-            else "GitHub listed no reviews in the period.",
-            f"Review sessions that named none of them: {money(unlinked)}." if SHOW_COST and paid(unlinked) else ""]))
-        body.append(boxed("reviews", "Code reviews", intro,
-                          *([grid(["Reviewed", "Pull request", "Status", "Cost"],
-                                  [[day(pr["date"]), (pr["title"], pr["url"], f"{pr['repo']} · {pr['author']}"),
-                                    status_cell(pr["status"]), money(pr["cost"])] for pr in prs["reviewed"]])]
-                            if prs["reviewed"] else [])))
-    body.append(tag("footer", "Sources: Jira, GitHub and the records Claude Code keeps on this computer. "
-                              + ("Costs are what the sessions would cost at Claude API list prices. " if SHOW_COST else "")
-                              + f"Generated on {day(date.today())}."))
-    template = Template((HERE / "report.html").read_text())
-    file = DATA / "report.html"
-    file.write_text(template.substitute(title=f"Work summary, {day(data['since'])} to {day(data['last'])}", body="\n".join(body)))
+        intro = ("Pull requests by teammates that you reviewed." if prs["reviewed"]
+                 else "GitHub listed no reviews in the period.")
+        if SHOW_COST and paid(unlinked):
+            intro += f" Review sessions that named none of them: {money(unlinked)}."
+        body.append(boxed("reviews", "Code reviews", intro, *([grid(
+            ["Reviewed", "Pull request", "Status", "Cost"],
+            [[day(pr["date"]), (pr["title"], pr["url"], f"{pr['repo']} · {pr['author']}"), status_cell(pr["status"]),
+              money(pr["cost"])] for pr in prs["reviewed"]])] if prs["reviewed"] else [])))
+    body += [usage, tag("footer", "Sources: Jira, GitHub and the records Claude Code keeps on this computer. "
+                        + ("Costs are what the sessions would cost at Claude API list prices. " if SHOW_COST else "")
+                        + f"Generated on {day(date.today())}.")]
+    file = DATA / name
+    file.write_text(Template((HERE / "report.html").read_text()).substitute(
+        title=f"Work summary, {day(data['since'])} to {day(data['last'])}", body="\n".join(b for b in body if b)))
     return file
+
+
+def period(arg):
+    """(first day, last day) as YYYY-MM-DD: this month by default, the month before for 'last-month', or from
+    a given day to today."""
+    today = date.today()
+    if arg == "last-month":
+        last = today.replace(day=1) - timedelta(days=1)
+        return str(last.replace(day=1)), str(last)
+    return (arg or str(today.replace(day=1))), str(today)
+
+
+def report(args):
+    global SHOW_COST, SHOW_USAGE
+    SHOW_COST, SHOW_USAGE = "--no-cost" not in args, "--no-usage" not in args
+    data = collect(*period(next((a for a in args if not a.startswith("--")), "")))
+    group = groups(data)
+    shown = sum(g["cost"] for g in group.values())
+    if abs(shown - data["total"]) > 0.01:  # a session left off the page is a bug
+        sys.exit(f"the page shows ${shown:.2f} but the sessions cost ${data['total']:.2f}")
+    file = page(data, group)
+    print(f"{day(data['since'])} to {day(data['last'])}: "
+          + ", ".join(f"{number} {label}" for number, label in headline(data, group)))
+    print(f"All {data['sessions']} sessions are on the page, ${data['total']:.2f}"
+          + (f"; exclude_repos left out ${data['excluded']:.2f}" if data["excluded"] else ""))
+    top = sorted(data["usage"].get("skill", {}).items(), key=lambda item: (-item[1][0], item[0]))[:3]
+    if top:
+        print("Top skills: " + ", ".join(f"{name} {n}" for name, (n, _) in top))
+    print(f"Page: {file}")
+    webbrowser.open(file.as_uri())
 
 
 def main():
@@ -659,15 +781,10 @@ def main():
             os.setsid()
             append([Path(path)])
     elif command == "report":
-        global SHOW_COST
-        SHOW_COST = "--no-cost" not in sys.argv
-        data = collect(*period(next((a for a in sys.argv[2:] if not a.startswith("--")), "")))
-        group = groups(data)
-        file = page(data, group)
-        numbers = ", ".join(f"{number} {label}" for number, label in headline(data, group))
-        print(f"{day(data['since'])} to {day(data['last'])}: {numbers}")
-        print(f"Page: {file}")
-        webbrowser.open(file.as_uri())
+        report(sys.argv[2:])
+        if (HERE / "demo.py").exists():  # a local add-on, kept out of the repo
+            import demo
+            demo.main(sys.argv[2:])
     else:
         sys.exit(__doc__)
 
