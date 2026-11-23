@@ -197,14 +197,27 @@ class Jira:
         issue = self.issue(key) if key else {}
         return issue["parent"] if issue.get("subtask") and issue.get("parent") else key
 
-    def pick(self, keys):
-        """One ticket for several keys: the first that is a main ticket, else the first sub-task's parent."""
-        return next((k for k in keys if not self.issue(k).get("subtask")), self.top(keys[0]) if keys else "")
+    def is_epic(self, key):
+        return self.issue(key).get("type", "").lower() == "epic"
 
-    def epic(self, key):
-        """The epic a ticket belongs to, as 'KEY summary', or '' when Jira does not say."""
+    def pick(self, keys):
+        """(ticket, epic) for the keys a session or pull request names. An epic is never the ticket while
+        another key is named: the ticket is the first main ticket, else the first sub-task's parent, and the
+        epic is the first epic key named. An epic named alone is the ticket too."""
+        epics = [k for k in keys if self.is_epic(k)]
+        rest = [k for k in keys if k not in epics]
+        main = next((k for k in rest if not self.issue(k).get("subtask")), self.top(rest[0]) if rest else "")
+        epic = epics[0] if epics else ""
+        return main or epic, epic
+
+    def epic(self, key, named=""):
+        """The epic a ticket belongs to, as 'KEY summary': its Jira parent, else the epic key named with it,
+        else the ticket itself when it is an epic; '' when there is none, since an epic is optional."""
         issue = self.issue(key)
-        return f"{issue['parent']} {issue['parent_summary']}".strip() if issue.get("parent") else ""
+        if issue.get("parent"):
+            return f"{issue['parent']} {issue['parent_summary']}".strip()
+        epic = named or (key if self.is_epic(key) else "")
+        return f"{epic} {self.issue(epic).get('summary', '')}".strip() if epic else ""
 
     def resolved(self, since, until):
         """The keys of the tickets assigned to you and resolved from the first day to the last."""
@@ -285,7 +298,8 @@ def keys_of(row):
 
 
 def ticket(row, by_branch, jira):
-    """The session's ticket: a support key it names, else jira.pick of the keys it names, else the ticket of a pull request opened from one of its branches.
+    """(ticket, epic named) for a session: a support key it names, else jira.pick of the keys it names, else the
+    ticket of a pull request opened from one of its branches.
     A branch name settles it when it names a single ticket; otherwise the repo must match as well."""
     keys = keys_of(row)
     support = [k for k in keys if is_support(k)]
@@ -296,8 +310,8 @@ def ticket(row, by_branch, jira):
         elif len(by_branch.get(b, ())) == 1:
             from_pr.extend(by_branch[b])
     if support:
-        return support[0]
-    return jira.pick(keys) if keys else (from_pr or [""])[0]
+        return support[0], ""
+    return jira.pick(keys) if keys else ((from_pr or [""])[0], "")
 
 
 def cost(row):
@@ -339,8 +353,11 @@ def collect(since, until):
     prs = {kind: [pr for pr in found if pr["repo"] not in CONFIG["exclude_repos"]]
            for kind, found in pull_requests(since, until).items()}
     jira, worked, spent, incidents = Jira(), defaultdict(set), defaultdict(float), []
+    named = {}  # ticket: the epic key named with it, for a ticket whose Jira parent is not set
     for pr in prs["opened"]:
-        pr["ticket"] = jira.pick(pr["keys"])  # a main ticket it names, else a sub-task's parent
+        pr["ticket"], epic = jira.pick(pr["keys"])
+        if epic and pr["ticket"] != epic:
+            named.setdefault(pr["ticket"], epic)
     by_branch = {}  # (repo, branch): ticket, and branch: {tickets of the pull requests from a branch of that name}
     for pr in prs["opened"]:
         if pr["ticket"]:
@@ -350,7 +367,10 @@ def collect(since, until):
     other = defaultdict(lambda: {"days": [], "cost": 0.0})
     reviews = {"cost": 0.0, "repos": {}}
     for row in sorted(rows, key=lambda r: r["start"]):
-        key = jira.top(ticket(row, by_branch, jira))
+        key, epic = ticket(row, by_branch, jira)
+        key = jira.top(key)
+        if epic and key != epic:
+            named.setdefault(key, epic)
         if row["alert"]:
             incidents.append({"date": row["start"][:10], "what": row["title"] or row["prompt"] or "(no title)",
                               "ticket": key, "repo": repo_of(row), "cost": cost(row)})
@@ -373,7 +393,7 @@ def collect(since, until):
             touched[pr["ticket"]][pr["repo"]] = None
     tickets = []
     for key in dict.fromkeys(list(worked) + list(linked) + [jira.top(k) for k in found]):
-        tickets.append({"key": key, "summary": jira.issue(key).get("summary", ""), "epic": jira.epic(key),
+        tickets.append({"key": key, "summary": jira.issue(key).get("summary", ""), "epic": jira.epic(key, named.get(key, "")),
                         "days": sorted(worked[key]), "resolved": key in resolved, "prs": linked[key],
                         "cost": spent[key], "repos": list(touched[key])})
     if jira.cache:
