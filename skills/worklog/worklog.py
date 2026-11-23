@@ -197,6 +197,10 @@ class Jira:
         issue = self.issue(key) if key else {}
         return issue["parent"] if issue.get("subtask") and issue.get("parent") else key
 
+    def pick(self, keys):
+        """One ticket for several keys: the first that is a main ticket, else the first sub-task's parent."""
+        return next((k for k in keys if not self.issue(k).get("subtask")), self.top(keys[0]) if keys else "")
+
     def epic(self, key):
         """The epic a ticket belongs to, as 'KEY summary', or '' when Jira does not say."""
         issue = self.issue(key)
@@ -237,10 +241,10 @@ def status(pr):
 
 def brief(pr, when):
     messages = "\n".join(c["commit"]["message"] for c in (pr.get("commits") or {}).get("nodes", []))
-    found = KEY.search(f"{pr['title']}\n{pr['headRefName']}\n{pr['body'] or ''}\n{messages}")
+    keys = [k.upper() for k in KEY.findall(f"{pr['title']}\n{pr['headRefName']}\n{pr['body'] or ''}\n{messages}")]
     return {"date": when, "repo": pr["repository"]["name"], "title": pr["title"], "url": pr["url"],
             "status": status(pr), "author": (pr["author"] or {}).get("login", ""),
-            "branch": pr["headRefName"], "ticket": found.group().upper() if found else ""}
+            "branch": pr["headRefName"], "keys": list(dict.fromkeys(keys)), "ticket": keys[0] if keys else ""}
 
 
 def pull_requests(since, until):
@@ -280,8 +284,8 @@ def keys_of(row):
     return [k for k in dict.fromkeys(found) if KEY.fullmatch(k)]
 
 
-def ticket(row, by_branch):
-    """The session's ticket: a key it names, else the ticket of a pull request opened from one of its branches.
+def ticket(row, by_branch, jira):
+    """The session's ticket: a support key it names, else jira.pick of the keys it names, else the ticket of a pull request opened from one of its branches.
     A branch name settles it when it names a single ticket; otherwise the repo must match as well."""
     keys = keys_of(row)
     support = [k for k in keys if is_support(k)]
@@ -291,7 +295,9 @@ def ticket(row, by_branch):
             from_pr.append(by_branch[repo_of(row), b])
         elif len(by_branch.get(b, ())) == 1:
             from_pr.extend(by_branch[b])
-    return (support or keys or from_pr or [""])[0]
+    if support:
+        return support[0]
+    return jira.pick(keys) if keys else (from_pr or [""])[0]
 
 
 def cost(row):
@@ -334,7 +340,7 @@ def collect(since, until):
            for kind, found in pull_requests(since, until).items()}
     jira, worked, spent, incidents = Jira(), defaultdict(set), defaultdict(float), []
     for pr in prs["opened"]:
-        pr["ticket"] = jira.top(pr["ticket"])  # a sub-task's work counts for its parent
+        pr["ticket"] = jira.pick(pr["keys"])  # a main ticket it names, else a sub-task's parent
     by_branch = {}  # (repo, branch): ticket, and branch: {tickets of the pull requests from a branch of that name}
     for pr in prs["opened"]:
         if pr["ticket"]:
@@ -344,7 +350,7 @@ def collect(since, until):
     other = defaultdict(lambda: {"days": [], "cost": 0.0})
     reviews = {"cost": 0.0, "repos": {}}
     for row in sorted(rows, key=lambda r: r["start"]):
-        key = jira.top(ticket(row, by_branch))
+        key = jira.top(ticket(row, by_branch, jira))
         if row["alert"]:
             incidents.append({"date": row["start"][:10], "what": row["title"] or row["prompt"] or "(no title)",
                               "ticket": key, "repo": repo_of(row), "cost": cost(row)})
