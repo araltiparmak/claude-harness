@@ -35,7 +35,9 @@ DEV = Path(CONFIG["dev_dir"]).expanduser()
 DATA = DEV / "worklog"
 LEDGER = DATA / "sessions.jsonl"
 PREFIXES = "|".join(re.escape(p) for p in CONFIG["jira_prefixes"])
-KEY = re.compile(rf"\b(?:{PREFIXES})-\d+\b") if PREFIXES else re.compile(r"[^\s\S]")  # never matches
+KEY = re.compile(rf"\b(?:{PREFIXES})-\d+\b", re.I) if PREFIXES else re.compile(r"[^\s\S]")  # never matches
+# The ledger keeps every key-shaped word; the report keeps the ones with a configured prefix.
+KEY_SHAPE = re.compile(r"\b[A-Za-z][A-Za-z0-9]{1,9}-\d+\b")
 REVIEW = re.compile(r"gh pr (diff|review|checkout)|<command-name>/code-review")
 ALERT = re.compile(r"https://[\w-]+\.pagerduty\.com/", re.I)
 TOKENS = {"in": "input_tokens", "out": "output_tokens",
@@ -81,8 +83,8 @@ def note_place(row, d, branches):
         branches.append(d["gitBranch"])
 
 
-def note_tools(row, blocks):
-    """Whether a reply edited files or ran a review."""
+def note_tools(row, blocks, commands):
+    """Whether a reply edited files or ran a review, and the shell commands it ran."""
     for b in blocks:
         if b.get("type") != "tool_use":
             continue
@@ -90,6 +92,8 @@ def note_tools(row, blocks):
         row["edits"] |= name in ("Edit", "Write", "NotebookEdit")
         row["review"] |= name == "Skill" and args.get("skill") == "code-review"
         row["review"] |= name == "Bash" and bool(REVIEW.search(args.get("command", "")))
+        if name == "Bash":
+            commands.append(args.get("command", ""))
 
 
 def price(usage):
@@ -111,7 +115,7 @@ def blocks_of(msg):
 
 def read_session(path):
     """One ledger row for a transcript and its subagent transcripts, or None when no model ran."""
-    usage, text, branches = {}, [], []
+    usage, text, branches, commands = {}, [], [], []
     row = {"id": path.stem, "title": "", "prompt": "", "cwd": "", "start": "", "end": "",
            "review": False, "edits": False}
     for d in records(path):
@@ -126,18 +130,19 @@ def read_session(path):
             # A reply is written once per content block, each time with the same usage.
             if msg.get("usage"):
                 usage[msg.get("id")] = {**msg["usage"], "model": msg.get("model")}
-            note_tools(row, blocks)
+            note_tools(row, blocks, commands)
         elif d.get("type") == "user" and not d.get("isMeta"):
             text += [b.get("text", "") for b in blocks if b.get("type") == "text"]
-    return finish(row, usage, text, branches) if usage else None
+    return finish(row, usage, text, branches, commands) if usage else None
 
 
-def finish(row, usage, text, branches):
+def finish(row, usage, text, branches, commands):
     """Fills in the fields that need the whole session."""
     said = "\n".join(text)
     row["prompt"] = next((t.strip()[:200] for t in text if t.strip() and not t.lstrip().startswith("<")), "")
     row["branches"] = branches
-    row["keys"] = list(dict.fromkeys(KEY.findall(" ".join(branches) + "\n" + said)))
+    words = KEY_SHAPE.findall(" ".join(branches) + "\n" + said + "\n" + "\n".join(commands))
+    row["keys"] = list(dict.fromkeys(k.upper() for k in words))
     row["alert"] = bool(ALERT.search(said))
     row["review"] |= bool(REVIEW.search(said))
     row["tokens"] = {k: sum(u.get(field) or 0 for u in usage.values()) for k, field in TOKENS.items()}
@@ -235,7 +240,7 @@ def brief(pr, when):
     found = KEY.search(f"{pr['title']}\n{pr['headRefName']}\n{pr['body'] or ''}\n{messages}")
     return {"date": when, "repo": pr["repository"]["name"], "title": pr["title"], "url": pr["url"],
             "status": status(pr), "author": (pr["author"] or {}).get("login", ""),
-            "branch": pr["headRefName"], "ticket": found.group() if found else ""}
+            "branch": pr["headRefName"], "ticket": found.group().upper() if found else ""}
 
 
 def pull_requests(since, until):
@@ -265,14 +270,28 @@ def day(stamp):
 
 
 def is_support(key):
-    return key.split("-")[0] in CONFIG["support_prefixes"]
+    return key.split("-")[0].upper() in [p.upper() for p in CONFIG["support_prefixes"]]
+
+
+def keys_of(row):
+    """The ticket keys a session names, read with the prefixes configured now: its branches are scanned again,
+    so a prefix added later also counts for sessions recorded before."""
+    found = [k.upper() for k in row["keys"] + KEY.findall(" ".join(row["branches"]))]
+    return [k for k in dict.fromkeys(found) if KEY.fullmatch(k)]
 
 
 def ticket(row, by_branch):
-    """The session's ticket: a key it names, else the ticket of a pull request opened from its repo and branch."""
-    support = [k for k in row["keys"] if is_support(k)]
-    from_pr = [by_branch[repo_of(row), b] for b in row["branches"] if (repo_of(row), b) in by_branch]
-    return (support or row["keys"] or from_pr or [""])[0]
+    """The session's ticket: a key it names, else the ticket of a pull request opened from one of its branches.
+    A branch name settles it when it names a single ticket; otherwise the repo must match as well."""
+    keys = keys_of(row)
+    support = [k for k in keys if is_support(k)]
+    from_pr = []
+    for b in row["branches"]:
+        if (repo_of(row), b) in by_branch:
+            from_pr.append(by_branch[repo_of(row), b])
+        elif len(by_branch.get(b, ())) == 1:
+            from_pr.extend(by_branch[b])
+    return (support or keys or from_pr or [""])[0]
 
 
 def cost(row):
@@ -316,7 +335,11 @@ def collect(since, until):
     jira, worked, spent, incidents = Jira(), defaultdict(set), defaultdict(float), []
     for pr in prs["opened"]:
         pr["ticket"] = jira.top(pr["ticket"])  # a sub-task's work counts for its parent
-    by_branch = {(pr["repo"], pr["branch"]): pr["ticket"] for pr in prs["opened"] if pr["ticket"]}
+    by_branch = {}  # (repo, branch): ticket, and branch: {tickets of the pull requests from a branch of that name}
+    for pr in prs["opened"]:
+        if pr["ticket"]:
+            by_branch[pr["repo"], pr["branch"]] = pr["ticket"]
+            by_branch.setdefault(pr["branch"], set()).add(pr["ticket"])
     touched = defaultdict(dict)  # ticket: {repo: None}, in the order the repos were first worked in
     other = defaultdict(lambda: {"days": [], "cost": 0.0})
     reviews = {"cost": 0.0, "repos": {}}
