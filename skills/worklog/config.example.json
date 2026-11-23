@@ -6,5 +6,6 @@
   "support_prefixes": [],
   "jira_url": "https://example.atlassian.net",
   "jira_cmd": "jira issue view {key} --raw",
-  "jira_search_cmd": "jira issue list -q {jql} --raw"
+  "jira_search_cmd": "jira issue list -q {jql} --raw",
+  "exclude_repos": []
 }
