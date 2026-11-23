@@ -22,6 +22,6 @@ A `SessionEnd` hook runs `worklog.py record` (this skill's folder), which adds o
 
 Run `python3 worklog.py report [period] [--no-cost]` from this skill's folder. With no period it reports the current month; pass `last-month` when the arguments ask for last month (in any language), or a first day such as `2026-07-01` to report from that day to today. Pass `--no-cost` when the arguments ask to leave costs out (for example, for a page to share); it removes every cost from the page. It writes the page, opens it in the browser and prints the counts and `Page: <path>`. Do not read the page; pass the counts on to the user.
 
-The page shows, in order: the outcome numbers, the tickets, support tickets, incidents, pull requests without a ticket, other work (sessions that changed code with no ticket, incident or review behind them), an overview of where the cost went, and the code reviews, each linked to its pull request.
+The page shows, in order: the outcome numbers (tickets worked on first; reviews for others do not count), an overview of where the cost went, the tickets with their Jira type, support tickets, incidents, pull requests without a ticket, other work (sessions that changed code with no ticket, incident or review behind them), and the code reviews, each linked to its pull request.
 
 When the user asks why a session or pull request landed where it did, read `collect` and the docstrings of `keys_of`, `ticket`, `Jira.pick`, `reviewed_pr` and `cost` in the script; they hold the rules.
