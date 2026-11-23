@@ -45,14 +45,15 @@ COMMAND = re.compile(r"<command-name>/([\w:.-]+)</command-name>")
 PR_URL = re.compile(r"https://github\.com/[\w.-]+/([\w.-]+)/pull/(\d+)")
 PR_CMD = re.compile(r"gh pr (?:diff|review|checkout|view) +#?(\d+)\b(?:.*?(?:--repo|-R)[ =][\w.-]+/([\w.-]+))?")
 ALERT = re.compile(r"https://[\w-]+\.pagerduty\.com/", re.I)
-CONTEXT_FIELDS = ("input_tokens", "cache_creation_input_tokens", "cache_read_input_tokens")
 TOKENS = {"in": "input_tokens", "out": "output_tokens", "write": "cache_creation_input_tokens",
           "read": "cache_read_input_tokens"}
+SENT = ("in", "write", "read")  # the input a reply is sent: its context
 BIG_CONTEXT = 100_000  # tokens
 # API list prices in USD per million tokens: input, output, cache read. A cache write costs 1.25x input
 # for 5 minutes, 2x for 1 hour; fast mode costs 2x. An id not listed is priced as claude-opus-5-5.
 PRICES = {"claude-opus-5-5": (4, 20, 0.20), "claude-opus-5": (5, 25, 0.50), "claude-opus-4": (5, 25, 0.50),
           "claude-sonnet-5-5": (2, 10, 0.10), "claude-sonnet-5": (2, 10, 0.20), "claude-sonnet-4": (3, 15, 0.30)}
+MODEL_SLOTS = {"Opus": 1, "Fable": 7, "Sonnet": 2, "Haiku": 3}  # a model keeps its colour on every page; others grey
 STATUS = {"merged": "✓ Merged", "closed": "✕ Closed, not merged", "open": "○ Open", "draft": "○ Draft"}
 SHOW_COST = True  # report --no-cost turns it off
 SHOW_USAGE = True  # report --no-usage turns it off
@@ -124,7 +125,7 @@ class Session:
             if msg.get("usage"):  # a reply is written once per content block, each time with the same usage
                 self.usage[msg.get("id")] = {**msg["usage"], "model": msg.get("model"), "side": bool(d.get("isSidechain"))}
                 if not d.get("isSidechain"):
-                    self.contexts[msg.get("id")] = sum(msg["usage"].get(f) or 0 for f in CONTEXT_FIELDS)
+                    self.contexts[msg.get("id")] = sum(msg["usage"].get(TOKENS[k]) or 0 for k in SENT)
             for b in blocks:
                 if b.get("type") == "tool_use":
                     self.tool(b.get("name"), b.get("input") or {})
@@ -336,6 +337,11 @@ class Ticket:
     def cost(self):
         return self.own.cost + sum(s.cost for s in self.subs.values())
 
+    @property
+    def works(self):
+        """Its own work, then its sub-tasks, the most expensive first."""
+        return [self.own] + sorted(self.subs.values(), key=lambda w: -w.cost)
+
 
 def load(since, until):
     """The sessions that started in the period, the last row of each, and the cost of those in exclude_repos."""
@@ -366,7 +372,7 @@ def measures(rows):
         for model, t in r.get("tokens_by_model", {}).items():
             for name in TOKENS:
                 tokens[model][name] += t[name]
-    sent = sum(t["in"] + t["read"] + t["write"] for t in tokens.values())
+    sent = sum(t[k] for t in tokens.values() for k in SENT)
 
     def share(field, part):
         """A share of cost over the rows that recorded field; None when none did."""
@@ -437,12 +443,17 @@ def collect(since, until):
         t.resolved |= key == t.key
     if issues.cache:
         (DATA / "jira.json").write_text(json.dumps(issues.cache, indent=1))
-    return {"since": since, "last": until, "incidents": incidents, "other": other, "prs": prs,
+    return {"since": since, "until": until, "incidents": incidents, "other": other, "prs": prs,
             "reviews": reviews, "sessions": len(rows), "total": sum(cost(r) for r in rows), "excluded": excluded,
-            "usage": {**usage_of(rows), "since": since, "until": until},
+            "usage": usage_of(rows),
             "measures": measures(rows), "before": measures(load(month_before(since), month_before(until))[0]),
             "tickets": [t for t in tickets.values() if not is_support(t.key)],
             "support": [t for t in tickets.values() if is_support(t.key)]}
+
+
+def most_used(counts):
+    """{name: [uses, sessions]} as (name, [uses, sessions]) pairs, most used first, then by name."""
+    return sorted(counts.items(), key=lambda item: (-item[1][0], item[0]))
 
 
 def usage_of(rows):
@@ -593,16 +604,15 @@ def repos(tickets):
 def ticket_boxes(tickets, slot):
     """One box per ticket, the most expensive first: its total cost in the title, then a table with the
     ticket's own work and each sub-task, indented, with its own cost."""
-    typed = any(w.type for t in tickets for w in [t.own, *t.subs.values()])
+    typed = any(w.type for t in tickets for w in t.works)
     head = ["Ticket"] + (["Type"] if typed else []) + ["Worked on", "Pull requests", "Models", "Cost"]
     boxes = []
     for t in sorted(tickets, key=lambda t: -t.cost):
-        works = [t.own] + sorted(t.subs.values(), key=lambda w: -w.cost)
         rows = [[(w.key, jira_link(w.key), w.summary)] + ([w.type or "-"] if typed else [])
-                + [worked_on(w.days), pr_links(w.prs), model_split(w.models), money(w.cost)] for w in works]
+                + [worked_on(w.days), pr_links(w.prs), model_split(w.models), money(w.cost)] for w in t.works]
         name = f"{t.key} {t.own.summary}".strip()
         title = [tag("a", name, href=jira_link(t.key))] if JIRA_URL else name
-        titles = list(dict.fromkeys(pr["title"] for w in works for pr in w.prs))
+        titles = list(dict.fromkeys(pr["title"] for w in t.works for pr in w.prs))
         intro = f"Repos: {', '.join(t.repos)}." if t.repos else ""
         intro += f" Pull requests: {'; '.join(titles)}." if titles else ""
         intro += " The total includes the sub-tasks." if t.subs and SHOW_COST else ""
@@ -675,9 +685,6 @@ def headline(data, group):
     return boxes
 
 
-MODEL_SLOTS = {"Opus": 1, "Fable": 7, "Sonnet": 2, "Haiku": 3}  # a model keeps its colour on every page; others grey
-
-
 def svg(width, height, marks, label):
     return tag("div", [f'<svg viewBox="0 0 {width} {height}" role="img" aria-label="{html.escape(label)}">'
                        + "".join(marks) + "</svg>"], class_="chart")
@@ -695,7 +702,8 @@ def text(x, y, words, anchor="start"):
 
 def daily_chart(daily, since, until):
     """Cost per day as columns, one segment per model, 2px apart."""
-    days = [str(date.fromisoformat(since) + timedelta(n)) for n in range((date.fromisoformat(until) - date.fromisoformat(since)).days + 1)]
+    first, last = date.fromisoformat(since), date.fromisoformat(until)
+    days = [str(first + timedelta(n)) for n in range((last - first).days + 1)]
     models = sorted({m for d in daily.values() for m, usd in d.items() if paid(usd)},
                     key=lambda m: (MODEL_SLOTS.get(m, 99), m))
     top = max([sum(d.values()) for d in daily.values()] + [0.01])
@@ -751,14 +759,15 @@ def hours_chart(hours):
     return svg(w, 150, marks, "Sessions by weekday and hour")
 
 
-def bars(rows, value=lambda v: v):
-    """A table cell with the number and a bar scaled to the largest."""
-    top = max([value(v) for _, v in rows] + [0.01])
-    return lambda v, shown: [html.escape(str(shown)) + tag("div", [tag("span", "", class_="c1", style=f"width:{value(v) / top * 100:.1f}%")], class_="bar")]
+def bar_cell(shown, value, top):
+    """A table cell: what is shown, over a bar as long as value is against top."""
+    bar = tag("span", "", class_="c1", style=f"width:{value / max(top, 0.01) * 100:.1f}%")
+    return [html.escape(str(shown)) + tag("div", [bar], class_="bar")]
 
 
-def usage_sections(usage):
+def usage_sections(data):
     """The Context box and the Claude Code usage box: what the sessions used, most used first."""
+    usage = data["usage"]
     c = usage["context"]
     intro = f"From the {c['sessions']} of {c['of']} sessions recorded with these details."
 
@@ -773,15 +782,16 @@ def usage_sections(usage):
     tables = []
     for kind, head in heads.items():
         if usage.get(kind):
-            rows = sorted(usage[kind].items(), key=lambda item: (-item[1][0], item[0]))
-            bar = bars(rows, lambda v: v[0])
-            tables.append(grid([head, "Uses", "Sessions"], [[name, bar(v, v[0]), v[1]] for name, v in rows]))
+            rows = most_used(usage[kind])
+            top = rows[0][1][0]
+            tables.append(grid([head, "Uses", "Sessions"], [[name, bar_cell(n, n, top), sessions]
+                                                            for name, (n, sessions) in rows]))
     charts = []
     if SHOW_COST:
         repos = sorted(usage["repos"].items(), key=lambda item: -item[1])
-        bar = bars(repos)
-        charts += [tag("h3", "Cost per day by model"), daily_chart(usage["daily"], usage["since"], usage["until"]),
-                   tag("h3", "Cost by repo"), grid(["Repo", "Cost"], [[repo, bar(usd, money(usd))] for repo, usd in repos])]
+        charts += [tag("h3", "Cost per day by model"), daily_chart(usage["daily"], data["since"], data["until"]),
+                   tag("h3", "Cost by repo"),
+                   grid(["Repo", "Cost"], [[repo, bar_cell(money(usd), usd, repos[0][1])] for repo, usd in repos])]
     charts += [tag("h3", "When you work: sessions by weekday and hour"), hours_chart(usage["hours"])]
     return context, section("Claude Code usage", intro, *charts, *tables)
 
@@ -818,9 +828,9 @@ def efficiency_section(data):
     models = sorted(now["tokens"].items(), key=lambda item: (MODEL_SLOTS.get(item[0], 99), item[0]))
     tokens = grid(["Model", "Input", "Output", "Cache read", "Cache write", "Cache hit rate"],
                   [[[dot(MODEL_SLOTS.get(m, 0)) + html.escape(m)], amount(t["in"]), amount(t["out"]), amount(t["read"]),
-                    amount(t["write"]), pct(t["read"] / max(t["in"] + t["read"] + t["write"], 1))] for m, t in models])
+                    amount(t["write"]), pct(t["read"] / max(sum(t[k] for k in SENT), 1))] for m, t in models])
     return section("Efficiency", f"This period against the same days a month earlier "
-                                 f"({day(month_before(data['since']))} to {day(month_before(data['last']))}). "
+                                 f"({day(month_before(data['since']))} to {day(month_before(data['until']))}). "
                                  "Rows recorded before tokens were kept count for cost only.",
                    grid(["Measure", "This period", "Month before", "Change"], rows),
                    tag("h3", "Tokens per model"), tokens)
@@ -831,9 +841,9 @@ def page(data, group, name="report.html"):
 
     def boxed(gid, title, intro, *parts):
         return section(title, intro, *parts, total=group[gid]["cost"], slot=group[gid]["slot"])
-    context, usage = usage_sections(data["usage"]) if SHOW_USAGE else ("", "")
+    context, usage = usage_sections(data) if SHOW_USAGE else ("", "")
     body = [tag("header", [tag("h1", "Work summary"),
-                           tag("p", f"{day(data['since'])} to {day(data['last'])}", class_="period")]),
+                           tag("p", f"{day(data['since'])} to {day(data['until'])}", class_="period")]),
             tag("div", [tag("div", [tag("strong", number), tag("span", label)], class_="tile")
                         for number, label in headline(data, group)], class_="tiles"),
             context, efficiency_section(data) if SHOW_USAGE else "",
@@ -873,7 +883,7 @@ def page(data, group, name="report.html"):
                         + f"Generated on {day(date.today())}.")]
     file = DATA / name
     file.write_text(Template((HERE / "report.html").read_text()).substitute(
-        title=f"Work summary, {day(data['since'])} to {day(data['last'])}", body="\n".join(b for b in body if b)))
+        title=f"Work summary, {day(data['since'])} to {day(data['until'])}", body="\n".join(b for b in body if b)))
     return file
 
 
@@ -894,7 +904,7 @@ def write_csv(data, file):
         rows.writerow(["ticket", "parent", "type", "summary", "first day", "last day", "days", "pull requests"]
                       + (["cost USD"] if SHOW_COST else []))
         for t in sorted(data["tickets"] + data["support"], key=lambda t: -t.cost):
-            for w in [t.own, *t.subs.values()]:
+            for w in t.works:
                 days = sorted(w.days)
                 rows.writerow([w.key, "" if w is t.own else t.key, w.type, w.summary, days[0] if days else "",
                                days[-1] if days else "", len(days), " ".join(pr["url"] for pr in w.prs)]
@@ -912,14 +922,14 @@ def report(args):
         sys.exit(f"the page shows ${shown:.2f} but the sessions cost ${data['total']:.2f}")
     file = page(data, group)
     table = write_csv(data, file.with_suffix(".csv"))
-    print(f"{day(data['since'])} to {day(data['last'])}: "
+    print(f"{day(data['since'])} to {day(data['until'])}: "
           + ", ".join(f"{number} {label}" for number, label in headline(data, group)))
     print(f"All {data['sessions']} sessions are on the page, ${data['total']:.2f}"
           + (f"; exclude_repos left out ${data['excluded']:.2f}" if data["excluded"] else ""))
     m = data["measures"]
     if m["cache_hit"] is not None:
         print(f"Cache hit rate {m['cache_hit']:.0%}; past 100k context {m['big'] or 0:.0%} of cost")
-    top = sorted(data["usage"].get("skill", {}).items(), key=lambda item: (-item[1][0], item[0]))[:3]
+    top = most_used(data["usage"].get("skill", {}))[:3]
     if top:
         print("Top skills: " + ", ".join(f"{name} {n}" for name, (n, _) in top))
     print(f"Page: {file}")
