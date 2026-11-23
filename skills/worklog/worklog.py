@@ -39,10 +39,8 @@ TOKENS = {"in": "input_tokens", "out": "output_tokens",
           "cache_write": "cache_creation_input_tokens", "cache_read": "cache_read_input_tokens"}
 # API list prices in USD per million tokens: input, output, cache read. A cache write costs 1.25x input
 # for 5 minutes, 2x for 1 hour; fast mode costs 2x. An id not listed is priced as claude-opus-5-5.
-PRICES = {"claude-fable-5-2": (8, 40, 0.20), "claude-fable-5-1": (10, 50, 0.25), "claude-fable-5": (10, 50, 1),
-          "claude-opus-5-5": (4, 20, 0.20), "claude-opus-5": (5, 25, 0.50), "claude-opus-4": (5, 25, 0.50),
-          "claude-sonnet-5-5": (2, 10, 0.10), "claude-sonnet-5": (2, 10, 0.20), "claude-sonnet-4": (3, 15, 0.30),
-          "claude-haiku-5-5": (0.10, 0.50, 0.01), "claude-haiku-4": (1, 5, 0.10)}
+PRICES = {"claude-opus-5-5": (4, 20, 0.20), "claude-opus-5": (5, 25, 0.50), "claude-opus-4": (5, 25, 0.50),
+          "claude-sonnet-5-5": (2, 10, 0.10), "claude-sonnet-5": (2, 10, 0.20), "claude-sonnet-4": (3, 15, 0.30)}
 PR_QUERY = """query($q: String!, $after: String) {
   viewer { login }
   search(query: $q, type: ISSUE, first: 50, after: $after) {
