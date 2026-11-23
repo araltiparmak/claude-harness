@@ -411,7 +411,7 @@ def collect(since, until):
             touched[pr["ticket"]][pr["repo"]] = None
     tickets = []
     for key in dict.fromkeys(list(worked) + list(linked) + [jira.top(k) for k in found]):
-        tickets.append({"key": key, "summary": jira.issue(key).get("summary", ""),
+        tickets.append({"key": key, "summary": jira.issue(key).get("summary", ""), "type": jira.issue(key).get("type", ""),
                         "days": sorted(worked[key]), "resolved": key in resolved, "prs": linked[key],
                         "cost": spent[key], "repos": list(touched[key])})
     if jira.cache:
@@ -500,11 +500,14 @@ def pr_links(prs):
 
 
 def ticket_grid(tickets):
-    return grid(["Ticket", "Worked on", "Pull requests", "Cost", "Status"],
-                [[(t["key"], jira_link(t["key"]), t["summary"]), worked_on(t["days"]),
-                  pr_links(t["prs"]), money(t["cost"]),
-                  [tag("span", "Resolved", class_="state done") if t["resolved"] else tag("span", "Open", class_="state")]]
-                 for t in sorted(tickets, key=lambda t: -t["cost"])])
+    """The tickets as a table; the Type column only when Jira gave a type."""
+    rows = [[(t["key"], jira_link(t["key"]), t["summary"]), t.get("type") or "-", worked_on(t["days"]),
+             pr_links(t["prs"]), money(t["cost"]),
+             [tag("span", "Resolved", class_="state done") if t["resolved"] else tag("span", "Open", class_="state")]]
+            for t in sorted(tickets, key=lambda t: -t["cost"])]
+    if not any(t.get("type") for t in tickets):
+        return grid(["Ticket", "Worked on", "Pull requests", "Cost", "Status"], [r[:1] + r[2:] for r in rows])
+    return grid(["Ticket", "Type", "Worked on", "Pull requests", "Cost", "Status"], rows)
 
 
 def repos(tickets):
@@ -577,7 +580,10 @@ def headline(data, group):
     support_resolved = sum(t["resolved"] for t in support)
     merged = sum(pr["status"] == "merged" for pr in prs["opened"])
     incidents, reviewed = len(data["incidents"]), len(prs["reviewed"])
-    boxes = [(resolved, f"ticket{s(resolved)} resolved, of {len(tickets)}", tickets),
+    # The tickets you worked on: your sessions, pull requests and resolved tickets; reviews for others do not count.
+    touched = {t["key"] for t in tickets + support} | {i["ticket"] for i in data["incidents"] if i["ticket"]}
+    boxes = [(len(touched), f"ticket{s(len(touched))} worked on", touched),
+             (resolved, f"ticket{s(resolved)} resolved, of {len(tickets)}", tickets),
              (support_resolved, f"support ticket{s(support_resolved)} resolved, of {len(support)}", support),
              (merged, f"pull request{s(merged)} merged, of {len(prs['opened'])} opened", prs["opened"]),
              (incidents, f"incident{s(incidents)} handled", incidents),
@@ -597,6 +603,9 @@ def page(data, group):
 
     def boxed(gid, title, intro, *parts):
         return section(title, intro, *parts, total=group[gid]["cost"], slot=group[gid]["slot"])
+    body.append(section("Overview", "Where the work went, by kind. A share is the group's part of "
+                                    "the session cost, the closest measure of effort the records hold.",
+                        overview(list(group.values()))))
     if data["tickets"]:
         tickets = data["tickets"]
         done = sum(t["resolved"] for t in tickets)
@@ -621,9 +630,6 @@ def page(data, group):
                           grid(["Repo", "Worked on", "Cost"],
                                [[repo, worked_on(sorted(set(o["days"]))), money(o["cost"])]
                                 for repo, o in sorted(data["other"].items(), key=lambda item: -item[1]["cost"])])))
-    body.append(section("Overview", "Where the work went, by kind. A share is the group's part of "
-                                    "the session cost, the closest measure of effort the records hold.",
-                        overview(list(group.values()))))
     if "reviews" in group:
         unlinked = data["reviews"]["unlinked"]
         intro = " ".join(filter(None, [
