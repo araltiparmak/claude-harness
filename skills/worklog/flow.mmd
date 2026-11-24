@@ -12,7 +12,7 @@ flowchart TB
   subgraph sort [3. Sort every session into one place]
     direction LR
     s[Session] --> key{Ticket key?<br/>branch, prompt,<br/>commands, PR} -- yes --> tk[Ticket<br/>sub-task under parent]
-    key -- no --> rv{Review?} -- yes --> rpr[Reviewed PR]
+    key -- no --> rv{Review?} -- yes --> rpr[Code reviews<br/>one total]
     rv -- no --> mp{Chosen by<br/>/worklog?<br/>mapped.json} -- yes --> tk
     mp -- no --> oth[Other work]
   end
