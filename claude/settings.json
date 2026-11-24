@@ -95,10 +95,6 @@
           {
             "type": "command",
             "command": "$HOME/.config/iterm2/cc-status"
-          },
-          {
-            "type": "command",
-            "command": "python3 $HOME/.claude/skills/worklog/worklog.py start"
           }
         ]
       }
