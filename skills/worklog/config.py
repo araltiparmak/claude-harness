@@ -25,3 +25,5 @@ DEFAULTS = {"jira_url": "", "jira_prefixes": [], "support_prefixes": [], "exclud
             "jira_issue_cmd": "jira issue view {key} --raw", "jira_search_cmd": "jira issue list -q {jql} --raw",
             "jira_in_progress": "In Progress"}
 settings = {**DEFAULTS, **(json.loads(FILE.read_text()) if FILE.exists() else {})}
+DEV = Path(settings["dev_dir"]).expanduser()  # the folder that holds the repos
+DATA = DEV / "worklog"  # the ledger, the Jira cache, the saved mappings and notes, the pages

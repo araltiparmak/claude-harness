@@ -1,226 +1,59 @@
 #!/usr/bin/env python3
-"""Keeps a ledger of Claude Code sessions and writes a one-page work summary from it.
+"""Measures how you work with Claude Code and what the work was: sessions sorted into Jira tickets, pull requests
+and reviews, with time, cost and tips. Everything stays on this computer.
 
-  worklog.py record                            SessionEnd hook: appends the session on stdin to the ledger
-  worklog.py report [period] [--no-cost] [--no-usage]
-      Records every transcript still in ~/.claude/projects, writes <DEV_DIR>/worklog/report.html, opens it
-      and prints the counts.
+  worklog.py report [period] [--share]
+      Updates the ledger from the transcripts still on disk, writes <DEV_DIR>/worklog/report.html, opens it and
+      prints the headline. --share writes share.html instead: the work, outcomes and time for other readers,
+      without costs or the Using Claude sections.
       period: empty for this month, last-month, or a first day YYYY-MM-DD.
   worklog.py prepare [period]                  prints, as JSON, what /worklog needs: the sessions the rules gave
                                                no ticket, the period's tickets with their pull request and session
                                                titles, and the other Jira issues assigned to you and updated
   worklog.py map SESSION KEY [SESSION KEY...]  saves a ticket for a session the rules gave none
   worklog.py note KEY TEXT [KEY TEXT...]       saves a one-line outcome for a ticket, shown under its name
+  worklog.py check                             checks the setup: settings, hook, ledger, git, gh and Jira
+  worklog.py record                            the SessionEnd hook: adds the session on stdin to the ledger
 
-Settings: ~/.config/worklog.json, described in config.py.
-Data: <DEV_DIR>/worklog, with sessions.jsonl (the ledger), jira.json (the issue cache), mapped.json (the
-tickets chosen with map) and notes.json (the outcomes saved with note).
-github.py and jira.py fetch pull requests and issues; each runs on its own too.
+Settings: ~/.config/worklog.json, described in config.py. Data: <DEV_DIR>/worklog, with sessions.jsonl (the
+ledger), jira.json (the issue cache), mapped.json (the tickets chosen with map) and notes.json (the outcomes).
+ledger.py reads transcripts, page.py writes the HTML, github.py and jira.py fetch pull requests and issues.
 """
-import html
 import json
 import os
 import re
+import shutil
+import subprocess
 import sys
 import webbrowser
 from collections import defaultdict
-from datetime import date, datetime, timedelta
+from datetime import date, timedelta
 from pathlib import Path
-from string import Template
 
 import github
 import jira
-from config import settings
+import ledger
+import page
+from config import DATA, DEV, FILE, settings
+from ledger import BIG_CONTEXT, SENT, TOKENS, cost, models_of, repo_of
 
-JIRA_URL, JIRA_PREFIXES, SUPPORT_PREFIXES, EXCLUDE_REPOS, DEV_DIR = (
-    settings[k] for k in ("jira_url", "jira_prefixes", "support_prefixes", "exclude_repos", "dev_dir"))
-
-HERE = Path(__file__).resolve().parent
-DEV = Path(DEV_DIR).expanduser()
-DATA = DEV / "worklog"
-LEDGER = DATA / "sessions.jsonl"
+JIRA_PREFIXES, SUPPORT_PREFIXES, EXCLUDE_REPOS = (
+    settings[k] for k in ("jira_prefixes", "support_prefixes", "exclude_repos"))
 MAPPED = DATA / "mapped.json"
 NOTES = DATA / "notes.json"
 PREFIXES = "|".join(re.escape(p) for p in JIRA_PREFIXES)
 KEY = re.compile(rf"\b(?:{PREFIXES})-\d+\b", re.I) if PREFIXES else re.compile(r"[^\s\S]")  # never matches
-KEY_SHAPE = re.compile(r"\b[A-Za-z][A-Za-z0-9]{1,9}-\d+\b")  # the ledger keeps these; the report filters by KEY
 SUPPORT = {p.upper() for p in SUPPORT_PREFIXES}
-REVIEW = re.compile(r"gh pr (diff|review|checkout)|<command-name>/code-review")
-COMMAND = re.compile(r"<command-name>/([\w:.-]+)</command-name>")
-TOKENS = {"in": "input_tokens", "out": "output_tokens", "write": "cache_creation_input_tokens",
-          "read": "cache_read_input_tokens"}
-SENT = ("in", "write", "read")  # the input a reply is sent: its context
-BIG_CONTEXT = 100_000  # tokens
-SMALL = 1.0  # USD; tickets that cost less share one box
-IDLE = 15  # minutes; a longer gap between two messages of a session is a break, not work
-# API list prices in USD per million tokens: input, output, cache read. A cache write costs 1.25x input
-# for 5 minutes, 2x for 1 hour; fast mode costs 2x. An id not listed is priced as claude-opus-5-5.
-PRICES = {"claude-opus-5-5": (4, 20, 0.20), "claude-opus-5": (5, 25, 0.50), "claude-opus-4": (5, 25, 0.50),
-          "claude-sonnet-5-5": (2, 10, 0.10), "claude-sonnet-5": (2, 10, 0.20), "claude-sonnet-4": (3, 15, 0.30)}
-MODEL_SLOTS = {"Opus": 1, "Sonnet": 2, "Haiku": 3}  # a model keeps its colour on every page; others grey
-STATUS = {"merged": "✓ Merged", "closed": "✕ Closed, not merged", "open": "○ Open", "draft": "○ Draft"}
-SHOW_COST = True  # report --no-cost turns it off
-SHOW_USAGE = True  # report --no-usage turns it off
+TOP = 10  # the most expensive sessions listed
+MIN_SESSIONS = 5  # fewer sessions than this give no tips
+# A tip shows when its measure crosses its line. The lines are rules of thumb, not targets.
+LINES = {"big": 0.5, "cache_hit": 0.85, "idle": 0.25, "opus_questions": 0.10, "interrupted": 0.2,
+         "compacted": 3, "subagents": 0.3, "errors": 3}
+
+pull_requests, commit_pulls = github.pull_requests, github.commit_pulls  # demo and tests swap them
 
 
-# ---- ledger
-
-def records(path):
-    """The parsed lines of a transcript and of its subagent transcripts."""
-    for file in [path, *sorted(path.with_suffix("").glob("subagents/*.jsonl"))]:
-        for line in file.open(encoding="utf-8", errors="replace"):
-            try:
-                yield json.loads(line)
-            except ValueError:
-                pass
-
-
-def price(usage):
-    """What one reply cost in USD at API list prices."""
-    model = usage.get("model") or ""
-    rates = next((PRICES[m] for m in sorted(PRICES, key=len, reverse=True) if model.startswith(m)),
-                 PRICES["claude-opus-5-5"])
-    hour = (usage.get("cache_creation") or {}).get("ephemeral_1h_input_tokens") or 0
-    minutes = (usage.get("cache_creation_input_tokens") or 0) - hour
-    tokens = [(usage.get("input_tokens") or 0) + 1.25 * minutes + 2 * hour,
-              usage.get("output_tokens") or 0, usage.get("cache_read_input_tokens") or 0]
-    return sum(n * rate for n, rate in zip(tokens, rates)) / 1e6 * (2 if usage.get("speed") == "fast" else 1)
-
-
-def family(model):
-    """claude-opus-5-5 -> Opus; an id that is not a Claude model is kept as it is."""
-    found = re.match(r"claude-([a-z]+)", model or "")
-    return found[1].capitalize() if found else (model or "Unknown")
-
-
-class Session:
-    """Reads one transcript, with its subagent transcripts, into a ledger row."""
-
-    def __init__(self, path):
-        self.row = {"id": path.stem, "title": "", "prompt": "", "cwd": "", "start": "",
-                    "review": False, "edits": False, "used": {}}
-        self.usage, self.contexts, self.text, self.branches, self.commands = {}, {}, [], [], []
-        self.compactions, self.times = 0, []
-        for d in records(path):
-            self.read(d)
-
-    def count(self, kind, name):
-        used = self.row["used"].setdefault(kind, {})
-        used[name] = used.get(name, 0) + 1
-
-    def read(self, d):
-        row = self.row
-        if d.get("type") == "ai-title":
-            row["title"] = d.get("aiTitle", "")
-        hook = d.get("attachment")
-        if isinstance(hook, dict) and str(hook.get("type", "")).startswith("hook_") and hook.get("hookName"):
-            self.count("hook", hook["hookName"])
-        self.compactions += d.get("subtype") == "compact_boundary"
-        msg = d.get("message")
-        if not isinstance(msg, dict):
-            return
-        row["start"] = row["start"] or d.get("timestamp") or ""
-        if d.get("timestamp") and not d.get("isSidechain"):
-            self.times.append(d["timestamp"])
-        row["cwd"] = row["cwd"] or d.get("cwd") or ""
-        if d.get("gitBranch") and d["gitBranch"] not in self.branches:
-            self.branches.append(d["gitBranch"])
-        content = msg.get("content")
-        blocks = content if isinstance(content, list) else [{"type": "text", "text": content or ""}]
-        if d.get("type") == "assistant":
-            if msg.get("usage"):  # a reply is written once per content block, each time with the same usage
-                self.usage[msg.get("id")] = {**msg["usage"], "model": msg.get("model"), "side": bool(d.get("isSidechain"))}
-                if not d.get("isSidechain"):
-                    self.contexts[msg.get("id")] = sum(msg["usage"].get(TOKENS[k]) or 0 for k in SENT)
-            for b in blocks:
-                if b.get("type") == "tool_use":
-                    self.tool(b.get("name"), b.get("input") or {})
-        elif d.get("type") == "user" and not d.get("isMeta"):
-            said = [b.get("text", "") for b in blocks if b.get("type") == "text"]
-            self.text += said
-            for name in COMMAND.findall("\n".join(said)):
-                self.count("command", name)
-
-    def tool(self, name, args):
-        row = self.row
-        if name == "Skill":
-            self.count("skill", args.get("skill") or "?")
-        elif name in ("Agent", "Task"):
-            self.count("agent", args.get("subagent_type") or "general-purpose")
-        elif name.startswith("mcp__"):
-            self.count("mcp", name.split("__")[1])
-        elif name == "Bash":
-            self.commands.append(args.get("command", ""))
-        row["edits"] |= name in ("Edit", "Write", "NotebookEdit")
-        row["review"] |= (name == "Skill" and args.get("skill") == "code-review"
-                          or name == "Bash" and bool(REVIEW.search(args.get("command", ""))))
-
-    def result(self):
-        """The ledger row, or None when no model ran."""
-        if not self.usage:
-            return None
-        row, said = self.row, "\n".join(self.text)
-        commands = "\n".join(self.commands)
-        row["prompt"] = next((t.strip()[:200] for t in self.text if t.strip() and not t.lstrip().startswith("<")), "")
-        row["branches"] = self.branches
-        row["keys"] = list(dict.fromkeys(k.upper() for k in KEY_SHAPE.findall(
-            " ".join(self.branches) + "\n" + said + "\n" + commands)))
-        row["review"] |= bool(REVIEW.search(said))
-        models, tokens = defaultdict(float), {}
-        for u in self.usage.values():
-            m = family(u.get("model"))
-            models[m] += price(u)
-            t = tokens.setdefault(m, dict.fromkeys(TOKENS, 0))
-            for name, field in TOKENS.items():
-                t[name] += u.get(field) or 0
-        row["models"] = {m: round(usd, 4) for m, usd in models.items()}
-        row["cost"] = round(sum(models.values()), 4)
-        row["tokens_by_model"] = tokens
-        row["subagent_cost"] = round(sum(price(u) for u in self.usage.values() if u["side"]), 4)
-        sizes = list(self.contexts.values()) or [0]
-        row["context"] = {"peak": max(sizes), "avg": sum(sizes) // len(sizes), "compactions": self.compactions}
-        row["active"] = active_minutes(self.times)
-        row["end"] = max(self.times, default=row["start"])
-        return row
-
-
-def active_minutes(stamps):
-    """Minutes of work in a session: the gaps between its messages, leaving out each gap longer than IDLE."""
-    times = sorted(datetime.fromisoformat(s.replace("Z", "+00:00")) for s in stamps)
-    gaps = [(b - a).total_seconds() / 60 for a, b in zip(times, times[1:])]
-    return round(sum(g for g in gaps if g <= IDLE), 1)
-
-
-def append(paths):
-    DATA.mkdir(parents=True, exist_ok=True)
-    with LEDGER.open("a") as out:
-        for path in paths:
-            row = Session(path).result()
-            if row:
-                out.write(json.dumps(row) + "\n")
-
-
-def cost(row):
-    """A row recorded before costs were kept is priced as claude-opus-5-5 with 1-hour cache writes."""
-    if "cost" in row:
-        return row["cost"]
-    t = row["tokens"]
-    return price({"input_tokens": t["in"], "output_tokens": t["out"], "cache_read_input_tokens": t["cache_read"],
-                  "cache_creation_input_tokens": t["cache_write"],
-                  "cache_creation": {"ephemeral_1h_input_tokens": t["cache_write"]}})
-
-
-def models_of(row):
-    """{model family: cost}; a row recorded before these were kept is all Unknown."""
-    return row.get("models") or {"Unknown": cost(row)}
-
-
-def repo_of(row):
-    cwd = Path(row["cwd"] or "/")
-    return cwd.relative_to(DEV).parts[0] if cwd.is_relative_to(DEV) and cwd != DEV else cwd.name or "/"
-
-
-# ---- Jira and GitHub
+# ---- Jira
 
 class Jira:
     """Jira issues through jira.py, cached in jira.json. Stops asking after the first failure."""
@@ -263,8 +96,9 @@ class Jira:
     def resolved(self, since, until):
         return self.ask(jira.resolved, since, until) or []
 
-
-pull_requests, commit_pulls = github.pull_requests, github.commit_pulls  # demo and tests swap them
+    def save(self):
+        if self.cache:
+            (DATA / "jira.json").write_text(json.dumps(self.cache, indent=1))
 
 
 # ---- sorting the sessions
@@ -316,7 +150,7 @@ class Work:
         issue = issues.issue(key)
         self.key, self.summary, self.type = key, issue.get("summary", ""), issue.get("type", "")
         self.days, self.cost, self.models, self.prs = set(), 0.0, defaultdict(float), []
-        self.minutes, self.titles, self.mapped = 0.0, [], 0
+        self.minutes, self.titles, self.mapped, self.resolved = 0.0, [], 0, False
 
     def add(self, row, mapped=False):
         self.days.add(row["start"][:10])
@@ -329,7 +163,8 @@ class Work:
 
 
 class Ticket:
-    """A ticket: its own work, its sub-tasks' work, and the repos of both. Its cost includes the sub-tasks."""
+    """A ticket: its own work, its sub-tasks' work, and the repos of both. Its cost and time include the
+    sub-tasks."""
 
     def __init__(self, key, issues):
         self.key, self.issues, self.own, self.subs, self.repos = key, issues, Work(key, issues), {}, {}
@@ -343,61 +178,32 @@ class Ticket:
         return self.subs[key]
 
     @property
+    def works(self):
+        """Its own work, then its sub-tasks, the most expensive first."""
+        return [self.own] + sorted(self.subs.values(), key=lambda w: -w.cost)
+
+    @property
     def cost(self):
-        return self.own.cost + sum(s.cost for s in self.subs.values())
+        return sum(w.cost for w in self.works)
 
     @property
     def minutes(self):
         return sum(w.minutes for w in self.works)
 
-    @property
-    def works(self):
-        """Its own work, then its sub-tasks, the most expensive first."""
-        return [self.own] + sorted(self.subs.values(), key=lambda w: -w.cost)
 
-
-def load(since, until):
-    """The sessions that started in the period, the last row of each, and the cost of those in exclude_repos."""
-    rows = {}
-    with LEDGER.open() as ledger:
-        for line in ledger:
-            row = json.loads(line)
-            rows[row["id"]] = row  # a session is recorded more than once; the last row wins
-    rows = sorted((r for r in rows.values() if since <= r["start"][:10] <= until), key=lambda r: r["start"])
+def in_period(rows, since, until):
+    """The sessions that started in the period, oldest first, and the cost of those in exclude_repos."""
+    rows = sorted((r for r in rows if since <= r["start"][:10] <= until), key=lambda r: r["start"])
     excluded = sum(cost(r) for r in rows if repo_of(r) in EXCLUDE_REPOS)
     return [r for r in rows if repo_of(r) not in EXCLUDE_REPOS], excluded
 
 
-def measures(rows):
-    """What the sessions cost and how efficiently, from the ledger alone: tokens per model, cache hit rate
-    (cache reads over all input), and the shares of cost in sessions past BIG_CONTEXT, in subagents and in
-    sessions that changed nothing. Rows recorded before tokens were kept count for cost only."""
-    total = sum(cost(r) for r in rows) or 0.0
-    tokens = defaultdict(lambda: dict.fromkeys(TOKENS, 0))
-    for r in rows:
-        for model, t in r.get("tokens_by_model", {}).items():
-            for name in TOKENS:
-                tokens[model][name] += t[name]
-    sent = sum(t[k] for t in tokens.values() for k in SENT)
-
-    def share(field, part):
-        """A share of cost over the rows that recorded field; None when none did."""
-        known = [r for r in rows if field in r]
-        whole = sum(cost(r) for r in known)
-        return sum(part(r) for r in known) / whole if whole else None
-    return {"cost": total, "sessions": len(rows), "tokens": {m: t for m, t in tokens.items() if any(t.values())},
-            "cache_hit": sum(t["read"] for t in tokens.values()) / sent if sent else None,
-            "big": share("context", lambda r: cost(r) if r["context"]["peak"] > BIG_CONTEXT else 0),
-            "subagents": share("subagent_cost", lambda r: r["subagent_cost"]),
-            "idle": share("edits", lambda r: 0 if r["edits"] or r["review"] else cost(r))}
-
-
 def collect(since, until):
-    """Everything the report shows, as plain data. Every session lands in exactly one place."""
-    append(sorted((Path.home() / ".claude" / "projects").glob("*/*.jsonl")))
-    rows, excluded = load(since, until)
+    """Everything the report shows, as plain data. Every session lands in exactly one place: a ticket, code
+    reviews, or other work."""
+    rows, excluded = in_period(ledger.refresh(), since, until)
     if not rows:
-        sys.exit(f"no sessions from {day(since)} to {day(until)}")
+        sys.exit(f"no sessions from {since} to {until}")
     prs = {kind: [pr for pr in found if pr["repo"] not in EXCLUDE_REPOS]
            for kind, found in pull_requests(since, until).items()}
     issues, tickets, reviews = Jira(), {}, {"cost": 0.0, "minutes": 0.0}
@@ -441,473 +247,130 @@ def collect(since, until):
         t = on(key)
         t.part(key).resolved = True
         t.resolved |= key == t.key
-    if issues.cache:
-        (DATA / "jira.json").write_text(json.dumps(issues.cache, indent=1))
+    issues.save()
+    measured = measures(rows)
     return {"since": since, "until": until, "other": other, "unmapped": unmapped, "prs": prs,
             "reviews": reviews, "sessions": len(rows), "total": sum(cost(r) for r in rows), "excluded": excluded,
-            "minutes": sum(r.get("active", 0) for r in rows), "notes": saved(NOTES), "jira": issues,
-            "usage": usage_of(rows),
-            "measures": measures(rows),
+            "minutes": sum(r.get("active", 0) for r in rows), "timed": sum("active" in r for r in rows),
+            "notes": saved(NOTES), "jira": issues,
+            "usage": usage_of(rows), "measures": measured, "tips": tips(measured),
             "tickets": [t for t in tickets.values() if not is_support(t.key)],
             "support": [t for t in tickets.values() if is_support(t.key)]}
 
 
-def most_used(counts):
-    """{name: [uses, sessions]} as (name, [uses, sessions]) pairs, most used first, then by name."""
-    return sorted(counts.items(), key=lambda item: (-item[1][0], item[0]))
+# ---- measuring how you use Claude
+
+def measures(rows):
+    """How the sessions used tokens and how smoothly they went, from the ledger alone. A share is of cost over
+    the sessions that recorded the field; None when none did, or when too few did for a tip."""
+    total = sum(cost(r) for r in rows) or 0.0
+    tokens = defaultdict(lambda: dict.fromkeys(TOKENS, 0))
+    for r in rows:
+        for model, t in r.get("tokens_by_model", {}).items():
+            for name in TOKENS:
+                tokens[model][name] += t[name]
+    sent = sum(t[k] for t in tokens.values() for k in SENT)
+
+    def share(field, part):
+        known = [r for r in rows if field in r]
+        whole = sum(cost(r) for r in known)
+        return sum(part(r) for r in known) / whole if whole else None
+
+    def question(r):
+        return not (r["edits"] or r["review"])
+    rated = [r for r in rows if "prompts" in r]  # rows recorded before these were kept have none
+    contexts = [r for r in rows if "context" in r]
+    peaks = [r["context"]["peak"] for r in contexts]
+    return {
+        "cost": total, "sessions": len(rows), "tokens": {m: t for m, t in tokens.items() if any(t.values())},
+        "cache_hit": sum(t["read"] for t in tokens.values()) / sent if sent else None,
+        "big": share("context", lambda r: cost(r) if r["context"]["peak"] > BIG_CONTEXT else 0),
+        "subagents": share("subagent_cost", lambda r: r["subagent_cost"]),
+        "idle": share("edits", lambda r: cost(r) if question(r) else 0),
+        "opus_questions": share("edits", lambda r: models_of(r).get("Opus", 0) if question(r) else 0),
+        "rated": len(rated),
+        "prompts": sum(r["prompts"] for r in rated) / len(rated) if rated else None,
+        "interrupted": sum(r["interrupts"] > 0 for r in rated) / len(rated) if rated else None,
+        "errors": sum(r["errors"] for r in rated) / len(rated) if rated else None,
+        "context": {"sessions": len(contexts), "avg": sum(r["context"]["avg"] for r in contexts) // max(len(contexts), 1),
+                    "peak_avg": sum(peaks) // max(len(peaks), 1), "peak": max(peaks, default=0),
+                    "big": sum(p > BIG_CONTEXT for p in peaks)},
+        "compacted": sum(r["context"]["compactions"] > 0 for r in contexts),
+        "top": sorted(rows, key=lambda r: -cost(r))[:TOP]}
+
+
+def tips(m):
+    """What to try, from the measures that crossed their LINES: (measure, advice) pairs, the costliest habit
+    first. None with fewer than MIN_SESSIONS sessions."""
+    if m["sessions"] < MIN_SESSIONS:
+        return []
+    found = []
+
+    def over(name):
+        return m[name] is not None and m[name] > LINES[name]
+    if over("big"):
+        found.append((f"{m['big']:.0%} of the cost came from sessions whose context grew past "
+                      f"{BIG_CONTEXT // 1000}k tokens.",
+                      "Every reply re-reads the whole context, so a long session gets dearer with each turn. Start a "
+                      "fresh session for each task (/clear), and point Claude at files and line ranges instead of "
+                      "whole folders."))
+    if m["cache_hit"] is not None and m["cache_hit"] < LINES["cache_hit"]:
+        found.append((f"Only {m['cache_hit']:.0%} of the input came from the prompt cache.",
+                      "The cache expires after a pause (5 minutes by default), and the next reply pays full price for "
+                      "the whole context. Finish a task in one sitting, or start fresh after a long break instead of "
+                      "resuming."))
+    if over("opus_questions"):
+        found.append((f"Sessions that only asked questions spent {m['opus_questions']:.0%} of the cost on Opus.",
+                      "Sonnet answers most questions well for less; switch with /model."))
+    if over("idle"):
+        found.append((f"{m['idle']:.0%} of the cost went to sessions that changed no files and reviewed nothing.",
+                      "Questions are fine. For exploration, a narrower first prompt (the file, the symptom, what you "
+                      "expect) usually gets there in fewer turns."))
+    if over("subagents"):
+        found.append((f"Subagents used {m['subagents']:.0%} of the cost.",
+                      "Each one starts with an empty context and reads everything again; keep them for wide searches "
+                      "and independent work, not small steps."))
+    if m["rated"] >= MIN_SESSIONS and over("interrupted"):
+        found.append((f"You stopped Claude in {m['interrupted']:.0%} of sessions.",
+                      "That often means it set off in the wrong direction. Plan mode (shift+tab) or a first prompt that "
+                      "states the goal and the limits helps it start right."))
+    if m["compacted"] >= LINES["compacted"]:
+        found.append((f"{m['compacted']} sessions ran out of context and were compacted.",
+                      "Compaction loses detail. Split long tasks into sessions, with a short hand-over note."))
+    if m["rated"] >= MIN_SESSIONS and over("errors"):
+        found.append((f"Tool calls failed {m['errors']:.1f} times per session.",
+                      "Repeated failures often mean a missing permission, a wrong working folder or a missing tool; "
+                      "the most expensive sessions show where."))
+    return found
 
 
 def usage_of(rows):
-    """{kind: {name: [uses, sessions]}} for skills, plugins, MCP servers, hooks and subagents, plus the context
-    sizes. A slash command is a skill when a skill of that name is installed or it names a plugin skill. A plugin
-    is the part before ':' in a skill name, or <plugin> in an MCP server named plugin_<plugin>_<server>."""
+    """What the sessions used, as {kind: {name: [uses, sessions]}} for skills, MCP servers and subagents (a slash
+    command counts as a skill when a skill of that name is installed or it names a plugin skill), cost per day
+    per model, and the peak context of each session."""
     folder = Path.home() / ".claude" / "skills"
     installed = {p.name for p in folder.iterdir()} if folder.is_dir() else set()
     found = defaultdict(lambda: defaultdict(lambda: [0, 0]))
-    measured = [r for r in rows if "used" in r]  # rows recorded before these were kept have none
-    for r in measured:
-        used = r["used"]
+    for r in rows:
+        used = r.get("used", {})
         skills = dict(used.get("skill", {}))
         for name, n in used.get("command", {}).items():
             if name in installed or ":" in name:
                 skills[name] = skills.get(name, 0) + n
-        plugins = defaultdict(int)
-        for name, n in skills.items():
-            if ":" in name:
-                plugins[name.split(":")[0]] += n
-        for name, n in used.get("mcp", {}).items():
-            if name.startswith("plugin_"):
-                plugins[name.split("_")[1]] += n
-        for kind, counts in (("skill", skills), ("plugin", plugins), ("mcp", used.get("mcp", {})),
-                             ("hook", used.get("hook", {})), ("agent", used.get("agent", {}))):
+        for kind, counts in (("skill", skills), ("mcp", used.get("mcp", {})), ("agent", used.get("agent", {}))):
             for name, n in counts.items():
                 found[kind][name][0] += n
                 found[kind][name][1] += 1
-    peaks = [r["context"]["peak"] for r in measured]
-    n = max(len(measured), 1)
-    found["context"] = {"sessions": len(measured), "of": len(rows),
-                        "avg": sum(r["context"]["avg"] for r in measured) // n, "peak_avg": sum(peaks) // n,
-                        "peak": max(peaks, default=0), "big": sum(p > BIG_CONTEXT for p in peaks),
-                        "compactions": sum(r["context"]["compactions"] for r in measured)}
     found["daily"] = defaultdict(lambda: defaultdict(float))  # day: {model family: cost}
-    found["repos"] = defaultdict(float)  # repo: cost
-    found["hours"] = defaultdict(int)  # (weekday, local hour): sessions
     for r in rows:
-        start = datetime.fromisoformat(r["start"].replace("Z", "+00:00")).astimezone()
         for model, usd in models_of(r).items():
             found["daily"][r["start"][:10]][model] += usd
-        found["repos"][repo_of(r)] += cost(r)
-        found["hours"][start.weekday(), start.hour] += 1
-    found["peaks"] = [(r["start"][:10], r["context"]["peak"], r["title"] or r["prompt"][:60]) for r in measured]
+    found["peaks"] = [(r["start"][:10], r["context"]["peak"], r["title"] or r["prompt"][:60])
+                      for r in rows if "context" in r]
     return found
 
 
-# ---- page
-
-def plural(n, word):
-    return f"{n} {word}{'' if n == 1 else 's'}"
-
-
-def day(stamp):
-    """2026-10-09 as 9 Oct 2026."""
-    d = date.fromisoformat(str(stamp)[:10])
-    return f"{d.day} {d:%b %Y}"
-
-
-def hours(minutes):
-    """Active minutes as hours, '-' for none."""
-    return "-" if not minutes else "<0.1h" if minutes < 6 else f"{minutes / 60:.1f}h"
-
-
-def worked_on(days):
-    """'10 Nov to 14 Nov, 2 days'; the year is in the page's period."""
-    if not days:
-        return "-"
-    days = sorted(days)
-    span = " to ".join(dict.fromkeys(day(d).rsplit(" ", 1)[0] for d in (days[0], days[-1])))
-    return f"{span}, {plural(len(days), 'day')}"
-
-
-def paid(usd):
-    """Whether a cost is worth showing: under half a cent rounds to nothing."""
-    return usd >= 0.005
-
-
-def money(usd):
-    """Dollars, or '-' for nothing, so a ticket without sessions does not read as no effort."""
-    return f"${usd:,.2f}" if paid(usd) else "-"
-
-
-def tag(name, text, **attrs):
-    """One HTML element. Text is escaped; pass a list for content that is already HTML."""
-    inner = "".join(text) if isinstance(text, list) else html.escape(str(text))
-    shown = "".join(' %s="%s"' % (k.strip("_"), html.escape(str(v))) for k, v in attrs.items())
-    return f"<{name}{shown}>{inner}</{name}>"
-
-
-def grid(head, rows, classes=None):
-    """An HTML table. A cell that is a (text, url, small print) tuple becomes a link (when there is a url)
-    with a line under it. The Cost column is left out under --no-cost."""
-    if not SHOW_COST and "Cost" in head:
-        i = head.index("Cost")
-        head, rows = head[:i] + head[i + 1:], [r[:i] + r[i + 1:] for r in rows]
-
-    def cell(c):
-        if not isinstance(c, tuple):
-            return tag("td", c)
-        text, url, small = c
-        return tag("td", [tag("a", text, href=url) if url else html.escape(text)] + ([tag("small", small)] if small else []))
-    return tag("div", [tag("table", [tag("tr", [tag("th", h) for h in head])] + [
-        tag("tr", [cell(c) for c in row], **({"class_": cls} if cls else {}))
-        for row, cls in zip(rows, classes or [""] * len(rows))])], class_="scroll")
-
-
-def dot(slot):
-    """The colour mark of an overview group; slot 1-8 is a palette colour, 0 is grey."""
-    return tag("span", "", class_=f"dot c{slot}")
-
-
-def section(title, intro, *parts, total=None, slot=None):
-    """A boxed section; total is the cost shown at the right of its title, slot the colour of its group."""
-    with_total = SHOW_COST and paid(total or 0)
-    name = [(dot(slot) if slot is not None else "") + (title[0] if isinstance(title, list) else html.escape(title))]
-    head = tag("div", [tag("h2", name)] + ([tag("span", money(total), class_="total")] if with_total else []),
-               class_="head")
-    return tag("section", [head] + ([tag("p", intro, class_="intro")] if intro else []) + list(parts), class_="box")
-
-
-def status_cell(name):
-    return [tag("span", STATUS[name], class_=f"status {name}")]
-
-
-def jira_link(key):
-    return f"{JIRA_URL.rstrip('/')}/browse/{key}" if JIRA_URL and key else ""
-
-
-def pr_links(prs):
-    """Each pull request as 'repo#123 status', one per line."""
-    links = [tag("a", f"{pr['repo']}#{pr['url'].rsplit('/', 1)[-1]}", href=pr["url"], title=pr["title"])
-             + " " + tag("span", STATUS[pr["status"]].split()[0], class_=f"status {pr['status']}",
-                         title=STATUS[pr["status"]].split(" ", 1)[1]) for pr in prs]
-    return ["<br>".join(links)] if links else "-"
-
-
-def model_split(models):
-    """'Opus $4.10 (80%), Sonnet $1.02 (20%)', the most used first; percentages only under --no-cost."""
-    total = sum(models.values())
-    if not paid(total):
-        return "-"
-    parts = sorted(((m, usd) for m, usd in models.items() if paid(usd)), key=lambda item: -item[1])
-    return ", ".join(f"{m} {money(usd) + ' ' if SHOW_COST else ''}({usd / total:.0%})" for m, usd in parts)
-
-
-def repos(tickets):
-    """The repos the tickets touched, those of the most expensive ticket first, as one line."""
-    found = {r: None for t in sorted(tickets, key=lambda t: -t.cost) for r in t.repos}
-    return ", ".join(found) or "-"
-
-
-def ticket_cell(key, summary, mapped):
-    """A ticket's link, with its summary and how many of its sessions came from map in the small print."""
-    marked = f" · {plural(mapped, 'session')} mapped by /worklog" if mapped else ""
-    return key, jira_link(key), summary + marked
-
-
-def ticket_boxes(tickets, slot, name, notes):
-    """One box per ticket, the most expensive first: its total cost in the title, its note from notes.json first in
-    the intro, then a table with the ticket's own work and each sub-task, indented, with its own time and cost.
-    The tickets that cost less than SMALL share one last box, a row each with its sub-tasks included and its note
-    in the small print, and their sum in its title."""
-    typed = any(w.type for t in tickets for w in t.works)
-    head = ["Ticket"] + (["Type"] if typed else []) + ["Worked on", "Pull requests", "Models", "Time", "Cost"]
-    ranked = sorted(tickets, key=lambda t: -t.cost)
-    small = [t for t in ranked if t.cost < SMALL]
-    boxes = []
-    for t in ranked[:len(ranked) - len(small)]:
-        rows = [[ticket_cell(w.key, w.summary, w.mapped)] + ([w.type or "-"] if typed else [])
-                + [worked_on(w.days), pr_links(w.prs), model_split(w.models), hours(w.minutes), money(w.cost)]
-                for w in t.works]
-        label = f"{t.key} {t.own.summary}".strip()
-        title = [tag("a", label, href=jira_link(t.key))] if JIRA_URL else label
-        titles = list(dict.fromkeys(pr["title"] for w in t.works for pr in w.prs))
-        intro = notes[t.key] + " " if t.key in notes else ""
-        intro += f"Repos: {', '.join(t.repos)}." if t.repos else ""
-        intro += f" Pull requests: {'; '.join(titles)}." if titles else ""
-        intro += " The total includes the sub-tasks." if t.subs and SHOW_COST else ""
-        boxes.append(section(title, intro.strip(), grid(head, rows, [""] + ["sub"] * len(t.subs)),
-                             total=t.cost, slot=slot))
-    if small:
-        rows = []
-        for t in small:
-            models = defaultdict(float)
-            for w in t.works:
-                for model, usd in w.models.items():
-                    models[model] += usd
-            summary = f"{t.own.summary}. {notes[t.key]}" if t.key in notes else t.own.summary
-            rows.append([ticket_cell(t.key, summary, sum(w.mapped for w in t.works))]
-                        + ([t.own.type or "-"] if typed else [])
-                        + [worked_on(set().union(*(w.days for w in t.works))),
-                           pr_links([pr for w in t.works for pr in w.prs]), model_split(models), hours(t.minutes),
-                           money(t.cost)])
-        intro = (f"{plural(len(small), name[:-1])} that cost less than {money(SMALL)} each, sub-tasks included."
-                 if SHOW_COST else f"{plural(len(small), name[:-1])} with little session time.")
-        boxes.append(section(f"Smaller {name}", intro, grid(head, rows), total=sum(t.cost for t in small), slot=slot))
-    return boxes
-
-
-def groups(data):
-    """The overview's rows, keyed by id: tickets, support, reviews and other work. Their costs add up
-    to the total; each has a colour slot."""
-    tickets, support, other = data["tickets"], data["support"], data["other"]
-    reviews = data["reviews"]
-    rows = [("tickets", "Tickets", len(tickets), repos(tickets), sum(t.cost for t in tickets),
-             sum(t.minutes for t in tickets), tickets),
-            ("support", "Support tickets", len(support), repos(support), sum(t.cost for t in support),
-             sum(t.minutes for t in support), support),
-            ("reviews", "Code reviews", "-", "-", reviews["cost"], reviews["minutes"],
-             data["prs"]["reviewed"] or paid(reviews["cost"])),
-            ("other", "Other work", "-", ", ".join(sorted(other, key=lambda r: -other[r]["cost"])),
-             sum(o["cost"] for o in other.values()), sum(o["minutes"] for o in other.values()), other)]
-    found = {gid: {"name": name, "tickets": n, "repos": r, "cost": usd, "minutes": m}
-             for gid, name, n, r, usd, m, shown in rows if shown}
-    for i, g in enumerate(found.values()):
-        g["slot"] = i + 1 if i < 8 else 0  # eight palette colours in a fixed order; past them, grey
-    return found
-
-
-def overview(rows):
-    """The groups as a table, after a bar and legend that split the whole spend between them."""
-    top, total = max([g["cost"] for g in rows] + [0.01]), sum(g["cost"] for g in rows) or 0.01
-
-    def share(g):
-        part = g["cost"] / total
-        return "-" if not paid(g["cost"]) else "<1%" if part < 0.005 else f"{part:.0%}"
-
-    def spend(g):
-        bar = tag("div", [tag("span", "", class_=f"c{g['slot']}", style=f"width:{g['cost'] / top * 100:.1f}%")], class_="bar")
-        return [html.escape(money(g["cost"])) + bar]
-    charged = [g for g in rows if paid(g["cost"])]
-    split = tag("div", [tag("span", "", class_=f"c{g['slot']}", style=f"flex-grow:{g['cost'] / total:.4f}",
-                            title=f"{g['name']}: {share(g)}") for g in charged], class_="split")
-    legend = tag("ul", [tag("li", [dot(g["slot"]) + html.escape(g["name"]) + " " + tag("strong", share(g))])
-                        for g in charged], class_="legend")
-    return split + legend + grid(["Group", "Tickets", "Repos", "Time", "Share", "Cost"],
-                                 [[[dot(g["slot"]) + html.escape(g["name"])], g["tickets"], g["repos"],
-                                   hours(g["minutes"]), share(g), spend(g)] for g in rows])
-
-
-def headline(data, group):
-    """The headline numbers as (number, label), outcomes first; a box with nothing behind it is left out."""
-    prs, tickets, support = data["prs"], data["tickets"], data["support"]
-
-    def s(n):
-        return "" if n == 1 else "s"
-    resolved = sum(t.resolved for t in tickets)
-    support_resolved = sum(t.resolved for t in support)
-    merged = sum(pr["status"] == "merged" for pr in prs["opened"])
-    reviewed = len(prs["reviewed"])
-    # The tickets you worked on: sessions, pull requests and resolved tickets; reviews for others do not count.
-    touched = {t.key for t in tickets + support}
-    boxes = [(len(touched), f"ticket{s(len(touched))} worked on", touched),
-             (resolved, f"ticket{s(resolved)} resolved, of {len(tickets)}", tickets),
-             (support_resolved, f"support ticket{s(support_resolved)} resolved, of {len(support)}", support),
-             (merged, f"pull request{s(merged)} merged, of {len(prs['opened'])} opened", prs["opened"]),
-             (reviewed, f"pull request{s(reviewed)} reviewed", reviewed)]
-    boxes = [(number, label) for number, label, behind in boxes if behind]
-    if data["minutes"]:
-        boxes.append((hours(data["minutes"]), "of active time in Claude Code"))
-    if SHOW_COST:
-        boxes.append((money(sum(g["cost"] for g in group.values())), "spent at API list prices"))
-    return boxes
-
-
-def svg(width, height, marks, label):
-    return tag("div", [f'<svg viewBox="0 0 {width} {height}" role="img" aria-label="{html.escape(label)}">'
-                       + "".join(marks) + "</svg>"], class_="chart")
-
-
-def mark(kind, title, slot, **attrs):
-    """One SVG shape in a palette colour, with a tooltip."""
-    shown = "".join(f' {k.replace("_", "-")}="{v}"' for k, v in attrs.items())
-    return f'<{kind} class="c{slot}"{shown}><title>{html.escape(title)}</title></{kind}>'
-
-
-def text(x, y, words, anchor="start"):
-    return f'<text x="{x}" y="{y}" text-anchor="{anchor}">{html.escape(str(words))}</text>'
-
-
-def daily_chart(daily, since, until):
-    """Cost per day as columns, one segment per model, 2px apart."""
-    first, last = date.fromisoformat(since), date.fromisoformat(until)
-    days = [str(first + timedelta(n)) for n in range((last - first).days + 1)]
-    models = sorted({m for d in daily.values() for m, usd in d.items() if paid(usd)},
-                    key=lambda m: (MODEL_SLOTS.get(m, 99), m))
-    top = max([sum(d.values()) for d in daily.values()] + [0.01])
-    w, h, left, base = 720, 180, 44, 156
-    step = (w - left) / len(days)
-    marks = [f'<line class="grid" x1="{left}" x2="{w}" y1="{base - 140}" y2="{base - 140}"/>',
-             f'<line class="axis" x1="{left}" x2="{w}" y1="{base}" y2="{base}"/>',
-             text(left - 6, base - 136, money(top), "end"), text(left - 6, base, "$0", "end")]
-    for i, d in enumerate(days):
-        y = base
-        for m in models:
-            usd = daily.get(d, {}).get(m, 0)
-            if paid(usd):
-                height = max(usd / top * 140 - 2, 1)
-                y -= height + 2
-                marks.append(mark("rect", f"{day(d)}, {m}: {money(usd)}", MODEL_SLOTS.get(m, 0), x=f"{left + i * step + 1:.1f}",
-                                  y=f"{y + 2:.1f}", width=f"{max(step - 2, 1):.1f}", height=f"{height:.1f}", rx=2))
-        if i in (0, len(days) // 2, len(days) - 1):
-            marks.append(text(f"{left + i * step + step / 2:.1f}", base + 18, day(d).rsplit(" ", 1)[0], "middle"))
-    legend = tag("ul", [tag("li", [dot(MODEL_SLOTS.get(m, 0)) + html.escape(m)]) for m in models], class_="legend")
-    return legend + svg(w, h + 4, marks, "Cost per day by model")
-
-
-def peaks_chart(peaks):
-    """The peak context of each session, in order, with the 100k line."""
-    top = max([p for _, p, _ in peaks] + [BIG_CONTEXT * 1.2])
-    w, h, left, base = 720, 150, 44, 130
-    step = (w - left - 12) / max(len(peaks) - 1, 1)
-    y = base - BIG_CONTEXT / top * 120
-    marks = [f'<line class="axis" x1="{left}" x2="{w}" y1="{base}" y2="{base}"/>',
-             f'<line class="limit" x1="{left}" x2="{w}" y1="{y:.1f}" y2="{y:.1f}"/>',
-             text(left - 6, y + 4, f"{BIG_CONTEXT // 1000}k", "end"), text(left - 6, base, "0", "end"),
-             text(left - 6, base - 116, f"{top / 1000:.0f}k", "end")]
-    marks += [mark("circle", f"{day(d)}: {p / 1000:.0f}k, {t}", 1, cx=f"{left + 6 + i * step:.1f}",
-                   cy=f"{base - p / top * 120:.1f}", r=4) for i, (d, p, t) in enumerate(peaks)]
-    return svg(w, h, marks, "Peak context per session")
-
-
-def hours_chart(hours):
-    """Sessions by weekday and local hour: darker is more."""
-    top = max(list(hours.values()) + [1])
-    w, cell, left = 720, (720 - 40) / 24, 40
-    marks = [text(left - 6, 14 + row * 18 + 9, name, "end") for row, name in enumerate(["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"])]
-    for row in range(7):
-        for hour in range(24):
-            n = hours.get((row, hour), 0)
-            attrs = {"x": f"{left + hour * cell + 1:.1f}", "y": 4 + row * 18, "width": f"{cell - 2:.1f}", "height": 16, "rx": 2}
-            if n:
-                marks.append(mark("rect", f"{plural(n, 'session')}", 1, fill_opacity=f"{0.2 + 0.8 * n / top:.2f}", **attrs))
-            else:
-                marks.append('<rect class="empty"' + "".join(f' {k}="{v}"' for k, v in attrs.items()) + "/>")
-    marks += [text(f"{left + hour * cell + cell / 2:.1f}", 146, f"{hour:02d}", "middle") for hour in (0, 6, 12, 18, 23)]
-    return svg(w, 150, marks, "Sessions by weekday and hour")
-
-
-def bar_cell(shown, value, top):
-    """A table cell: what is shown, over a bar as long as value is against top."""
-    bar = tag("span", "", class_="c1", style=f"width:{value / max(top, 0.01) * 100:.1f}%")
-    return [html.escape(str(shown)) + tag("div", [bar], class_="bar")]
-
-
-def usage_sections(data):
-    """The Context box and the Claude Code usage box: what the sessions used, most used first."""
-    usage = data["usage"]
-    c = usage["context"]
-    intro = f"From the {c['sessions']} of {c['of']} sessions recorded with these details."
-
-    def k(n):
-        return f"{n / 1000:.0f}k"
-    context = section("Context", intro, grid(
-        ["Average per reply", "Average peak per session", "Largest peak", f"Sessions past {k(BIG_CONTEXT)}",
-         "Compactions"], [[k(c["avg"]), k(c["peak_avg"]), k(c["peak"]), c["big"], c["compactions"]]]),
-        *([tag("h3", "Peak context per session"), peaks_chart(usage["peaks"])] if usage["peaks"] else []))
-    heads = {"skill": "Skill", "plugin": "Plugin", "mcp": "MCP server", "hook": "Hook (event:matcher)",
-             "agent": "Subagent"}
-    tables = []
-    for kind, head in heads.items():
-        if usage.get(kind):
-            rows = most_used(usage[kind])
-            top = rows[0][1][0]
-            tables.append(grid([head, "Uses", "Sessions"], [[name, bar_cell(n, n, top), sessions]
-                                                            for name, (n, sessions) in rows]))
-    charts = []
-    if SHOW_COST:
-        repos = sorted(usage["repos"].items(), key=lambda item: -item[1])
-        charts += [tag("h3", "Cost per day by model"), daily_chart(usage["daily"], data["since"], data["until"]),
-                   tag("h3", "Cost by repo"),
-                   grid(["Repo", "Cost"], [[repo, bar_cell(money(usd), usd, repos[0][1])] for repo, usd in repos])]
-    charts += [tag("h3", "When you work: sessions by weekday and hour"), hours_chart(usage["hours"])]
-    return context, section("Claude Code usage", intro, *charts, *tables)
-
-
-def amount(n):
-    """1234567 as 1.2M, 45678 as 46k."""
-    return f"{n / 1e6:.1f}M" if n >= 1e6 else f"{n / 1e3:.0f}k" if n >= 1e3 else str(n)
-
-
-def efficiency_section(data):
-    """How efficiently the sessions ran, then tokens per model."""
-    now = data["measures"]
-    merged = sum(pr["status"] == "merged" for pr in data["prs"]["opened"])
-    done = [t for t in data["tickets"] + data["support"] if t.resolved]
-
-    def pct(v):
-        return "-" if v is None else f"{v:.0%}"
-    rows = [["Sessions", now["sessions"]], ["Cache hit rate (cache reads / all input)", pct(now["cache_hit"])]]
-    if SHOW_COST:
-        rows += [
-            ["Cost per merged pull request", money(now["cost"] / merged) if merged else "-"],
-            ["Cost per resolved ticket", money(sum(t.cost for t in done) / len(done)) if done else "-"]]
-    rows += [[label, pct(now[k])]
-             for label, k in (("Share of cost in sessions past 100k context", "big"),
-                              ("Share of cost in subagents", "subagents"),
-                              ("Share of cost in sessions that changed nothing", "idle"))]
-    models = sorted(now["tokens"].items(), key=lambda item: (MODEL_SLOTS.get(item[0], 99), item[0]))
-    tokens = grid(["Model", "Input", "Output", "Cache read", "Cache write", "Cache hit rate"],
-                  [[[dot(MODEL_SLOTS.get(m, 0)) + html.escape(m)], amount(t["in"]), amount(t["out"]), amount(t["read"]),
-                    amount(t["write"]), pct(t["read"] / max(sum(t[k] for k in SENT), 1))] for m, t in models])
-    return section("Efficiency", "Rows recorded before tokens were kept count for cost only.",
-                   grid(["Measure", "This period"], rows),
-                   tag("h3", "Tokens per model"), tokens)
-
-
-def page(data, group, name="report.html"):
-    prs = data["prs"]
-
-    def boxed(gid, title, intro, *parts):
-        return section(title, intro, *parts, total=group[gid]["cost"], slot=group[gid]["slot"])
-    context, usage = usage_sections(data) if SHOW_USAGE else ("", "")
-    body = [tag("header", [tag("h1", "Work summary"),
-                           tag("p", f"{day(data['since'])} to {day(data['until'])}", class_="period")]),
-            tag("div", [tag("div", [tag("strong", number), tag("span", label)], class_="tile")
-                        for number, label in headline(data, group)], class_="tiles"),
-            context, efficiency_section(data) if SHOW_USAGE else "",
-            section("Overview", "Where the work went, by kind. A share is the group's part of the session cost, "
-                                "the closest measure of effort the records hold.", overview(list(group.values())))]
-    for gid in ("tickets", "support"):
-        if data[gid]:
-            body += ticket_boxes(data[gid], group[gid]["slot"], group[gid]["name"].lower(), data["notes"])
-    without_ticket = [pr for pr in prs["opened"] if not pr["ticket"]]
-    if without_ticket:
-        body.append(section("Pull requests without a ticket", "", grid(
-            ["Opened", "Pull request", "Status"],
-            [[day(pr["date"]), (pr["title"], pr["url"], pr["repo"]), status_cell(pr["status"])]
-             for pr in without_ticket])))
-    if data["other"]:
-        body.append(boxed("other", "Other work", "Sessions with no Jira ticket or review behind them, by repo.",
-                          grid(["Repo", "Worked on", "Time", "Cost"],
-                               [[repo, worked_on(o["days"]), hours(o["minutes"]), money(o["cost"])]
-                                for repo, o in sorted(data["other"].items(), key=lambda item: -item[1]["cost"])])))
-    if "reviews" in group:
-        intro = ("Pull requests by teammates that you reviewed." if prs["reviewed"]
-                 else "GitHub listed no reviews in the period.")
-        if SHOW_COST and paid(data["reviews"]["cost"]):
-            intro += " The total is the cost of all review sessions."
-        body.append(boxed("reviews", "Code reviews", intro, *([grid(
-            ["Reviewed", "Pull request", "Status"],
-            [[day(pr["date"]), (pr["title"], pr["url"], f"{pr['repo']} · {pr['author']}"), status_cell(pr["status"])]
-             for pr in prs["reviewed"]])] if prs["reviewed"] else [])))
-    body += [usage, tag("footer", "Sources: Jira, GitHub and the records Claude Code keeps on this computer. "
-                        + f"Time is active time in sessions; a gap over {IDLE} minutes counts as a break. "
-                        + ("Costs are what the sessions would cost at Claude API list prices. " if SHOW_COST else "")
-                        + f"Generated on {day(date.today())}.")]
-    file = DATA / name
-    file.write_text(Template((HERE / "report.html").read_text()).substitute(
-        title=f"Work summary, {day(data['since'])} to {day(data['until'])}", body="\n".join(b for b in body if b)))
-    return file
-
+# ---- commands
 
 def period(arg):
     """(first day, last day) as YYYY-MM-DD: this month by default, the month before for 'last-month', or from
@@ -916,28 +379,24 @@ def period(arg):
     if arg == "last-month":
         last = today.replace(day=1) - timedelta(days=1)
         return str(last.replace(day=1)), str(last)
+    if arg and not re.fullmatch(r"\d{4}-\d{2}-\d{2}", arg):
+        sys.exit(f"period must be empty, last-month or YYYY-MM-DD, not {arg}")
     return (arg or str(today.replace(day=1))), str(today)
 
 
 def report(args):
-    global SHOW_COST, SHOW_USAGE
-    SHOW_COST, SHOW_USAGE = "--no-cost" not in args, "--no-usage" not in args
+    share = "--share" in args
     data = collect(*period(next((a for a in args if not a.startswith("--")), "")))
-    group = groups(data)
-    shown = sum(g["cost"] for g in group.values())
+    view = page.Page(data, share)
+    shown = sum(g["cost"] for g in view.groups.values())
     if abs(shown - data["total"]) > 0.01:  # a session left off the page is a bug
         sys.exit(f"the page shows ${shown:.2f} but the sessions cost ${data['total']:.2f}")
-    file = page(data, group)
-    print(f"{day(data['since'])} to {day(data['until'])}: "
-          + ", ".join(f"{number} {label}" for number, label in headline(data, group)))
-    print(f"All {data['sessions']} sessions are on the page, ${data['total']:.2f}"
-          + (f"; exclude_repos left out ${data['excluded']:.2f}" if data["excluded"] else ""))
-    m = data["measures"]
-    if m["cache_hit"] is not None:
-        print(f"Cache hit rate {m['cache_hit']:.0%}; past 100k context {m['big'] or 0:.0%} of cost")
-    top = most_used(data["usage"].get("skill", {}))[:3]
-    if top:
-        print("Top skills: " + ", ".join(f"{name} {n}" for name, (n, _) in top))
+    file = view.write(DATA / ("share.html" if share else "report.html"))
+    print(f"{data['since']} to {data['until']}: " + ", ".join(f"{n} {label}" for n, label in view.headline()))
+    print(f"All {data['sessions']} sessions are on the page"
+          + (f"; exclude_repos left out ${data['excluded']:.2f}" if data["excluded"] and not share else ""))
+    if data["tips"] and not share:
+        print(f"Top tip: {data['tips'][0][0]} {data['tips'][0][1]}")
     print(f"Page: {file}")
     webbrowser.open(file.as_uri())
 
@@ -951,8 +410,7 @@ def prepare(args):
     tickets = data["tickets"] + data["support"]
     shown = {w.key for t in tickets for w in t.works}
     assigned = data["jira"].ask(jira.updated, since, until) or {}
-    days = {r["start"][:10] for r in data["unmapped"]}
-    busy = {d: data["jira"].ask(jira.in_progress, d) or {} for d in sorted(days)}
+    busy = {d: data["jira"].ask(jira.in_progress, d) or {} for d in sorted({r["start"][:10] for r in data["unmapped"]})}
     print(json.dumps({
         "sessions": [{"id": r["id"], "date": r["start"][:10], "repo": repo_of(r), "branches": r["branches"],
                       "title": r["title"], "prompt": r["prompt"], "cost": round(cost(r), 2),
@@ -968,18 +426,18 @@ def prepare(args):
         indent=1, ensure_ascii=False))
 
 
-def save(file, pairs):
+def save(file, found):
     """Merges {name: value} into file and says how many it holds."""
-    found = {**saved(file), **pairs}
+    merged = {**saved(file), **found}
     DATA.mkdir(parents=True, exist_ok=True)
-    file.write_text(json.dumps(found, indent=1, ensure_ascii=False))
-    print(f"{len(pairs)} saved; {len(found)} in {file}")
+    file.write_text(json.dumps(merged, indent=1, ensure_ascii=False))
+    print(f"{len(found)} saved; {len(merged)} in {file}")
 
 
 def checked(key):
-    """A ticket key in upper case; one outside JIRA_PREFIXES stops the script."""
+    """A ticket key in upper case; one outside jira_prefixes stops the script."""
     if not KEY.fullmatch(key.upper()):
-        sys.exit(f"{key} does not match JIRA_PREFIXES")
+        sys.exit(f"{key} does not match jira_prefixes in {FILE}")
     return key.upper()
 
 
@@ -989,25 +447,72 @@ def pairs(args, usage):
     return list(zip(args[::2], args[1::2]))
 
 
+def check():
+    """One line per part of the setup: ok, warn (the report runs but misses something) or FAIL; exits 1 on a FAIL."""
+    found = []
+
+    def line(ok, what, fix=""):
+        found.append(ok)
+        print(f"{'ok  ' if ok is True else 'warn' if ok is None else 'FAIL'}  {what}" + (f": {fix}" if fix and ok is not True else ""))
+
+    def runs(cmd):
+        try:
+            return subprocess.run(cmd, capture_output=True, text=True, timeout=30).returncode == 0
+        except (OSError, subprocess.TimeoutExpired):
+            return False
+    line(FILE.exists() or None, f"settings {FILE}", "not found; config.py lists the keys")
+    line(bool(PREFIXES) or None, f"jira_prefixes {', '.join(JIRA_PREFIXES)}".strip(), "empty, so no session finds a ticket")
+    line(DEV.is_dir() or None, f"dev_dir {DEV}", "not a folder; sessions are named by their own folder")
+    live = Path.home() / ".claude" / "settings.json"
+    try:
+        claude = json.loads(live.read_text()) if live.exists() else {}
+    except ValueError:
+        claude = {}
+        line(False, str(live), "not valid JSON")
+    hooked = "worklog.py record" in json.dumps(claude.get("hooks", {}).get("SessionEnd", []))
+    line(hooked or None, "SessionEnd hook", "missing; README.md shows the lines to add")
+    keep = claude.get("cleanupPeriodDays", 30)
+    line(keep >= 60 or None, f"transcripts kept {keep} days", 'set "cleanupPeriodDays": 90 so report catches '
+                                                              "sessions the hook missed")
+    if ledger.LEDGER.exists():
+        with ledger.LEDGER.open() as rows:
+            line(True, f"ledger {ledger.LEDGER}, {sum(1 for _ in rows)} sessions")
+    else:
+        line(None, f"ledger {ledger.LEDGER}", "none yet; the first report builds it from the transcripts")
+    line(runs(["git", "config", "user.email"]) or None, "git user.email", "not set; commits cannot find their pull requests")
+    line(bool(shutil.which("gh")) and runs(["gh", "auth", "status"]) or None, "gh",
+         "not installed or not logged in (gh auth login); no pull requests or reviews")
+    if PREFIXES:
+        try:
+            jira.search("updated >= -1d")
+            line(True, "Jira search")
+        except Exception as err:  # CLI missing, not logged in, output that is not JSON
+            line(None, "Jira search", f"failed ({err}); tickets show by key only")
+    if False in found:
+        sys.exit(1)
+
+
 def main():
-    command = sys.argv[1] if len(sys.argv) > 1 else ""
+    command, args = (sys.argv[1] if len(sys.argv) > 1 else ""), sys.argv[2:]
     if command == "record":
         path = json.load(sys.stdin).get("transcript_path")
-        # Claude Code gives a SessionEnd hook very little time, so the parsing runs detached.
+        # Claude Code gives a SessionEnd hook very little time, so the parsing runs detached (macOS, Linux).
         if path and Path(path).exists() and os.fork() == 0:
             os.setsid()
-            append([Path(path)])
+            ledger.record(Path(path))
     elif command == "report":
-        report(sys.argv[2:])
-        if (HERE / "demo.py").exists():  # a local add-on, kept out of the repo
+        report(args)
+        if (Path(__file__).resolve().parent / "demo.py").exists():  # a local add-on, kept out of the repo
             import demo
-            demo.main(sys.argv[2:])
+            demo.main(args)
     elif command == "prepare":
-        prepare(sys.argv[2:])
+        prepare(args)
     elif command == "map":
-        save(MAPPED, {s: checked(k) for s, k in pairs(sys.argv[2:], "map SESSION KEY [SESSION KEY...]")})
+        save(MAPPED, {s: checked(k) for s, k in pairs(args, "map SESSION KEY [SESSION KEY...]")})
     elif command == "note":
-        save(NOTES, {checked(k): text for k, text in pairs(sys.argv[2:], "note KEY TEXT [KEY TEXT...]")})
+        save(NOTES, {checked(k): text for k, text in pairs(args, "note KEY TEXT [KEY TEXT...]")})
+    elif command == "check":
+        check()
     else:
         sys.exit(__doc__)
 
