@@ -6,13 +6,15 @@
       Records every transcript still in ~/.claude/projects, writes <DEV_DIR>/worklog/report.html, opens it
       and prints the counts.
       period: empty for this month, last-month, or a first day YYYY-MM-DD.
-  worklog.py unmapped [period]                 prints, as JSON, the sessions the rules gave no ticket and the
-                                               period's tickets, for /worklog to choose from
+  worklog.py prepare [period]                  prints, as JSON, what /worklog needs: the sessions the rules gave
+                                               no ticket, the period's tickets with their pull request and session
+                                               titles, and the other Jira issues assigned to you and updated
   worklog.py map SESSION KEY [SESSION KEY...]  saves a ticket for a session the rules gave none
+  worklog.py note KEY TEXT [KEY TEXT...]       saves a one-line outcome for a ticket, shown under its name
 
 Settings: ~/.config/worklog.json, described in config.py.
-Data: <DEV_DIR>/worklog, with sessions.jsonl (the ledger), jira.json (the issue cache) and mapped.json
-(the tickets chosen with map).
+Data: <DEV_DIR>/worklog, with sessions.jsonl (the ledger), jira.json (the issue cache), mapped.json (the
+tickets chosen with map) and notes.json (the outcomes saved with note).
 github.py and jira.py fetch pull requests and issues; each runs on its own too.
 """
 import html
@@ -38,6 +40,7 @@ DEV = Path(DEV_DIR).expanduser()
 DATA = DEV / "worklog"
 LEDGER = DATA / "sessions.jsonl"
 MAPPED = DATA / "mapped.json"
+NOTES = DATA / "notes.json"
 PREFIXES = "|".join(re.escape(p) for p in JIRA_PREFIXES)
 KEY = re.compile(rf"\b(?:{PREFIXES})-\d+\b", re.I) if PREFIXES else re.compile(r"[^\s\S]")  # never matches
 KEY_SHAPE = re.compile(r"\b[A-Za-z][A-Za-z0-9]{1,9}-\d+\b")  # the ledger keeps these; the report filters by KEY
@@ -49,6 +52,7 @@ TOKENS = {"in": "input_tokens", "out": "output_tokens", "write": "cache_creation
 SENT = ("in", "write", "read")  # the input a reply is sent: its context
 BIG_CONTEXT = 100_000  # tokens
 SMALL = 1.0  # USD; tickets that cost less share one box
+IDLE = 15  # minutes; a longer gap between two messages of a session is a break, not work
 # API list prices in USD per million tokens: input, output, cache read. A cache write costs 1.25x input
 # for 5 minutes, 2x for 1 hour; fast mode costs 2x. An id not listed is priced as claude-opus-5-5.
 PRICES = {"claude-opus-5-5": (4, 20, 0.20), "claude-opus-5": (5, 25, 0.50), "claude-opus-4": (5, 25, 0.50),
@@ -96,7 +100,7 @@ class Session:
         self.row = {"id": path.stem, "title": "", "prompt": "", "cwd": "", "start": "",
                     "review": False, "edits": False, "used": {}}
         self.usage, self.contexts, self.text, self.branches, self.commands = {}, {}, [], [], []
-        self.compactions = 0
+        self.compactions, self.times = 0, []
         for d in records(path):
             self.read(d)
 
@@ -116,6 +120,8 @@ class Session:
         if not isinstance(msg, dict):
             return
         row["start"] = row["start"] or d.get("timestamp") or ""
+        if d.get("timestamp") and not d.get("isSidechain"):
+            self.times.append(d["timestamp"])
         row["cwd"] = row["cwd"] or d.get("cwd") or ""
         if d.get("gitBranch") and d["gitBranch"] not in self.branches:
             self.branches.append(d["gitBranch"])
@@ -173,7 +179,15 @@ class Session:
         row["subagent_cost"] = round(sum(price(u) for u in self.usage.values() if u["side"]), 4)
         sizes = list(self.contexts.values()) or [0]
         row["context"] = {"peak": max(sizes), "avg": sum(sizes) // len(sizes), "compactions": self.compactions}
+        row["active"] = active_minutes(self.times)
         return row
+
+
+def active_minutes(stamps):
+    """Minutes of work in a session: the gaps between its messages, leaving out each gap longer than IDLE."""
+    times = sorted(datetime.fromisoformat(s.replace("Z", "+00:00")) for s in stamps)
+    gaps = [(b - a).total_seconds() / 60 for a, b in zip(times, times[1:])]
+    return round(sum(g for g in gaps if g <= IDLE), 1)
 
 
 def append(paths):
@@ -265,15 +279,15 @@ def keys_of(row):
     return [k for k in dict.fromkeys(found) if KEY.fullmatch(k)]
 
 
-def mapped():
-    """{session id: ticket key} saved with map."""
-    return json.loads(MAPPED.read_text()) if MAPPED.exists() else {}
+def saved(file):
+    """The JSON saved by map or note, {} when there is none."""
+    return json.loads(file.read_text()) if file.exists() else {}
 
 
-def ticket(row, by_branch, issues, chosen):
-    """The key a session counts for: a support key it names, else Jira.pick of its keys, else the ticket of a
-    pull request opened from one of its branches, else the key saved for it with map. A branch name alone
-    settles it when it names one ticket; otherwise the repo must match too."""
+def ticket(row, by_branch, issues):
+    """The key the rules give a session: a support key it names, else Jira.pick of its keys, else the ticket of a
+    pull request opened from one of its branches. A branch name alone settles it when it names one ticket;
+    otherwise the repo must match too. collect falls back to the key saved with map."""
     keys = keys_of(row)
     support = [k for k in keys if is_support(k)]
     if support:
@@ -285,20 +299,25 @@ def ticket(row, by_branch, issues, chosen):
             return by_branch[repo_of(row), b]
         if len(by_branch.get(b, ())) == 1:
             return next(iter(by_branch[b]))
-    return chosen.get(row["id"], "")
+    return ""
 
 
 class Work:
-    """The days, cost, cost per model and pull requests of one ticket or sub-task."""
+    """The days, cost, cost per model, active minutes, session titles and pull requests of one ticket or sub-task,
+    and how many of its sessions came from map."""
 
     def __init__(self, key, issues):
         issue = issues.issue(key)
         self.key, self.summary, self.type = key, issue.get("summary", ""), issue.get("type", "")
         self.days, self.cost, self.models, self.prs = set(), 0.0, defaultdict(float), []
+        self.minutes, self.titles, self.mapped = 0.0, [], 0
 
-    def add(self, row):
+    def add(self, row, mapped=False):
         self.days.add(row["start"][:10])
         self.cost += cost(row)
+        self.minutes += row.get("active", 0)
+        self.titles.append(row["title"] or row["prompt"])
+        self.mapped += mapped
         for model, usd in models_of(row).items():
             self.models[model] += usd
 
@@ -322,6 +341,10 @@ class Ticket:
         return self.own.cost + sum(s.cost for s in self.subs.values())
 
     @property
+    def minutes(self):
+        return sum(w.minutes for w in self.works)
+
+    @property
     def works(self):
         """Its own work, then its sub-tasks, the most expensive first."""
         return [self.own] + sorted(self.subs.values(), key=lambda w: -w.cost)
@@ -330,9 +353,10 @@ class Ticket:
 def load(since, until):
     """The sessions that started in the period, the last row of each, and the cost of those in exclude_repos."""
     rows = {}
-    for line in LEDGER.open():
-        row = json.loads(line)
-        rows[row["id"]] = row  # a session is recorded more than once; the last row wins
+    with LEDGER.open() as ledger:
+        for line in ledger:
+            row = json.loads(line)
+            rows[row["id"]] = row  # a session is recorded more than once; the last row wins
     rows = sorted((r for r in rows.values() if since <= r["start"][:10] <= until), key=lambda r: r["start"])
     excluded = sum(cost(r) for r in rows if repo_of(r) in EXCLUDE_REPOS)
     return [r for r in rows if repo_of(r) not in EXCLUDE_REPOS], excluded
@@ -370,8 +394,8 @@ def collect(since, until):
         sys.exit(f"no sessions from {day(since)} to {day(until)}")
     prs = {kind: [pr for pr in found if pr["repo"] not in EXCLUDE_REPOS]
            for kind, found in pull_requests(since, until).items()}
-    issues, tickets, reviews = Jira(), {}, 0.0
-    other, unmapped = defaultdict(lambda: {"days": set(), "cost": 0.0}), []
+    issues, tickets, reviews = Jira(), {}, {"cost": 0.0, "minutes": 0.0}
+    other, unmapped = defaultdict(lambda: {"days": set(), "cost": 0.0, "minutes": 0.0}), []
 
     def on(key):
         top = issues.top(key)
@@ -379,7 +403,7 @@ def collect(since, until):
             tickets[top] = Ticket(top, issues)
         return tickets[top]
 
-    chosen = mapped()
+    chosen = saved(MAPPED)
     by_branch = {}  # (repo, branch): ticket, and branch: {tickets of the pull requests from a branch of that name}
     for pr in prs["opened"]:
         pr["sub"] = issues.pick(list(dict.fromkeys(k.upper() for k in KEY.findall(pr["text"]))))
@@ -388,16 +412,19 @@ def collect(since, until):
             by_branch[pr["repo"], pr["branch"]] = pr["ticket"]
             by_branch.setdefault(pr["branch"], set()).add(pr["ticket"])
     for row in rows:
-        named = ticket(row, by_branch, issues, chosen)
+        rule = ticket(row, by_branch, issues)
+        named = rule or chosen.get(row["id"], "")
         if named:
             t = on(named)
-            t.part(named).add(row)
+            t.part(named).add(row, mapped=not rule)
             t.repos[repo_of(row)] = None
         elif row["review"] and not row["edits"]:
-            reviews += cost(row)
+            reviews["cost"] += cost(row)
+            reviews["minutes"] += row.get("active", 0)
         else:
             other[repo_of(row)]["days"].add(row["start"][:10])
             other[repo_of(row)]["cost"] += cost(row)
+            other[repo_of(row)]["minutes"] += row.get("active", 0)
             unmapped.append(row)
     for pr in prs["opened"]:
         if pr["ticket"]:
@@ -412,6 +439,7 @@ def collect(since, until):
         (DATA / "jira.json").write_text(json.dumps(issues.cache, indent=1))
     return {"since": since, "until": until, "other": other, "unmapped": unmapped, "prs": prs,
             "reviews": reviews, "sessions": len(rows), "total": sum(cost(r) for r in rows), "excluded": excluded,
+            "minutes": sum(r.get("active", 0) for r in rows), "notes": saved(NOTES), "jira": issues,
             "usage": usage_of(rows),
             "measures": measures(rows),
             "tickets": [t for t in tickets.values() if not is_support(t.key)],
@@ -478,6 +506,11 @@ def day(stamp):
     """2026-10-09 as 9 Oct 2026."""
     d = date.fromisoformat(str(stamp)[:10])
     return f"{d.day} {d:%b %Y}"
+
+
+def hours(minutes):
+    """Active minutes as hours, '-' for none."""
+    return "-" if not minutes else "<0.1h" if minutes < 6 else f"{minutes / 60:.1f}h"
 
 
 def worked_on(days):
@@ -568,22 +601,31 @@ def repos(tickets):
     return ", ".join(found) or "-"
 
 
-def ticket_boxes(tickets, slot, name):
-    """One box per ticket, the most expensive first: its total cost in the title, then a table with the
-    ticket's own work and each sub-task, indented, with its own cost. The tickets that cost less than SMALL share
-    one last box, a row each with its sub-tasks included, and their sum in its title."""
+def ticket_cell(key, summary, mapped):
+    """A ticket's link, with its summary and how many of its sessions came from map in the small print."""
+    marked = f" · {plural(mapped, 'session')} mapped by /worklog" if mapped else ""
+    return key, jira_link(key), summary + marked
+
+
+def ticket_boxes(tickets, slot, name, notes):
+    """One box per ticket, the most expensive first: its total cost in the title, its note from notes.json first in
+    the intro, then a table with the ticket's own work and each sub-task, indented, with its own time and cost.
+    The tickets that cost less than SMALL share one last box, a row each with its sub-tasks included and its note
+    in the small print, and their sum in its title."""
     typed = any(w.type for t in tickets for w in t.works)
-    head = ["Ticket"] + (["Type"] if typed else []) + ["Worked on", "Pull requests", "Models", "Cost"]
+    head = ["Ticket"] + (["Type"] if typed else []) + ["Worked on", "Pull requests", "Models", "Time", "Cost"]
     ranked = sorted(tickets, key=lambda t: -t.cost)
     small = [t for t in ranked if t.cost < SMALL]
     boxes = []
     for t in ranked[:len(ranked) - len(small)]:
-        rows = [[(w.key, jira_link(w.key), w.summary)] + ([w.type or "-"] if typed else [])
-                + [worked_on(w.days), pr_links(w.prs), model_split(w.models), money(w.cost)] for w in t.works]
+        rows = [[ticket_cell(w.key, w.summary, w.mapped)] + ([w.type or "-"] if typed else [])
+                + [worked_on(w.days), pr_links(w.prs), model_split(w.models), hours(w.minutes), money(w.cost)]
+                for w in t.works]
         label = f"{t.key} {t.own.summary}".strip()
         title = [tag("a", label, href=jira_link(t.key))] if JIRA_URL else label
         titles = list(dict.fromkeys(pr["title"] for w in t.works for pr in w.prs))
-        intro = f"Repos: {', '.join(t.repos)}." if t.repos else ""
+        intro = notes[t.key] + " " if t.key in notes else ""
+        intro += f"Repos: {', '.join(t.repos)}." if t.repos else ""
         intro += f" Pull requests: {'; '.join(titles)}." if titles else ""
         intro += " The total includes the sub-tasks." if t.subs and SHOW_COST else ""
         boxes.append(section(title, intro.strip(), grid(head, rows, [""] + ["sub"] * len(t.subs)),
@@ -595,9 +637,12 @@ def ticket_boxes(tickets, slot, name):
             for w in t.works:
                 for model, usd in w.models.items():
                     models[model] += usd
-            rows.append([(t.key, jira_link(t.key), t.own.summary)] + ([t.own.type or "-"] if typed else [])
+            summary = f"{t.own.summary}. {notes[t.key]}" if t.key in notes else t.own.summary
+            rows.append([ticket_cell(t.key, summary, sum(w.mapped for w in t.works))]
+                        + ([t.own.type or "-"] if typed else [])
                         + [worked_on(set().union(*(w.days for w in t.works))),
-                           pr_links([pr for w in t.works for pr in w.prs]), model_split(models), money(t.cost)])
+                           pr_links([pr for w in t.works for pr in w.prs]), model_split(models), hours(t.minutes),
+                           money(t.cost)])
         intro = (f"{plural(len(small), name[:-1])} that cost less than {money(SMALL)} each, sub-tasks included."
                  if SHOW_COST else f"{plural(len(small), name[:-1])} with little session time.")
         boxes.append(section(f"Smaller {name}", intro, grid(head, rows), total=sum(t.cost for t in small), slot=slot))
@@ -608,13 +653,17 @@ def groups(data):
     """The overview's rows, keyed by id: tickets, support, reviews and other work. Their costs add up
     to the total; each has a colour slot."""
     tickets, support, other = data["tickets"], data["support"], data["other"]
-    rows = [("tickets", "Tickets", len(tickets), repos(tickets), sum(t.cost for t in tickets), tickets),
-            ("support", "Support tickets", len(support), repos(support), sum(t.cost for t in support), support),
-            ("reviews", "Code reviews", "-", "-", data["reviews"], data["prs"]["reviewed"] or paid(data["reviews"])),
+    reviews = data["reviews"]
+    rows = [("tickets", "Tickets", len(tickets), repos(tickets), sum(t.cost for t in tickets),
+             sum(t.minutes for t in tickets), tickets),
+            ("support", "Support tickets", len(support), repos(support), sum(t.cost for t in support),
+             sum(t.minutes for t in support), support),
+            ("reviews", "Code reviews", "-", "-", reviews["cost"], reviews["minutes"],
+             data["prs"]["reviewed"] or paid(reviews["cost"])),
             ("other", "Other work", "-", ", ".join(sorted(other, key=lambda r: -other[r]["cost"])),
-             sum(o["cost"] for o in other.values()), other)]
-    found = {gid: {"name": name, "tickets": n, "repos": r, "cost": usd}
-             for gid, name, n, r, usd, shown in rows if shown}
+             sum(o["cost"] for o in other.values()), sum(o["minutes"] for o in other.values()), other)]
+    found = {gid: {"name": name, "tickets": n, "repos": r, "cost": usd, "minutes": m}
+             for gid, name, n, r, usd, m, shown in rows if shown}
     for i, g in enumerate(found.values()):
         g["slot"] = i + 1 if i < 8 else 0  # eight palette colours in a fixed order; past them, grey
     return found
@@ -636,9 +685,9 @@ def overview(rows):
                             title=f"{g['name']}: {share(g)}") for g in charged], class_="split")
     legend = tag("ul", [tag("li", [dot(g["slot"]) + html.escape(g["name"]) + " " + tag("strong", share(g))])
                         for g in charged], class_="legend")
-    return split + legend + grid(["Group", "Tickets", "Repos", "Share", "Cost"],
-                                 [[[dot(g["slot"]) + html.escape(g["name"])], g["tickets"], g["repos"], share(g),
-                                   spend(g)] for g in rows])
+    return split + legend + grid(["Group", "Tickets", "Repos", "Time", "Share", "Cost"],
+                                 [[[dot(g["slot"]) + html.escape(g["name"])], g["tickets"], g["repos"],
+                                   hours(g["minutes"]), share(g), spend(g)] for g in rows])
 
 
 def headline(data, group):
@@ -659,6 +708,8 @@ def headline(data, group):
              (merged, f"pull request{s(merged)} merged, of {len(prs['opened'])} opened", prs["opened"]),
              (reviewed, f"pull request{s(reviewed)} reviewed", reviewed)]
     boxes = [(number, label) for number, label, behind in boxes if behind]
+    if data["minutes"]:
+        boxes.append((hours(data["minutes"]), "of active time in Claude Code"))
     if SHOW_COST:
         boxes.append((money(sum(g["cost"] for g in group.values())), "spent at API list prices"))
     return boxes
@@ -821,7 +872,7 @@ def page(data, group, name="report.html"):
                                 "the closest measure of effort the records hold.", overview(list(group.values())))]
     for gid in ("tickets", "support"):
         if data[gid]:
-            body += ticket_boxes(data[gid], group[gid]["slot"], group[gid]["name"].lower())
+            body += ticket_boxes(data[gid], group[gid]["slot"], group[gid]["name"].lower(), data["notes"])
     without_ticket = [pr for pr in prs["opened"] if not pr["ticket"]]
     if without_ticket:
         body.append(section("Pull requests without a ticket", "", grid(
@@ -830,19 +881,20 @@ def page(data, group, name="report.html"):
              for pr in without_ticket])))
     if data["other"]:
         body.append(boxed("other", "Other work", "Sessions with no Jira ticket or review behind them, by repo.",
-                          grid(["Repo", "Worked on", "Cost"],
-                               [[repo, worked_on(o["days"]), money(o["cost"])]
+                          grid(["Repo", "Worked on", "Time", "Cost"],
+                               [[repo, worked_on(o["days"]), hours(o["minutes"]), money(o["cost"])]
                                 for repo, o in sorted(data["other"].items(), key=lambda item: -item[1]["cost"])])))
     if "reviews" in group:
         intro = ("Pull requests by teammates that you reviewed." if prs["reviewed"]
                  else "GitHub listed no reviews in the period.")
-        if SHOW_COST and paid(data["reviews"]):
+        if SHOW_COST and paid(data["reviews"]["cost"]):
             intro += " The total is the cost of all review sessions."
         body.append(boxed("reviews", "Code reviews", intro, *([grid(
             ["Reviewed", "Pull request", "Status"],
             [[day(pr["date"]), (pr["title"], pr["url"], f"{pr['repo']} · {pr['author']}"), status_cell(pr["status"])]
              for pr in prs["reviewed"]])] if prs["reviewed"] else [])))
     body += [usage, tag("footer", "Sources: Jira, GitHub and the records Claude Code keeps on this computer. "
+                        + f"Time is active time in sessions; a gap over {IDLE} minutes counts as a break. "
                         + ("Costs are what the sessions would cost at Claude API list prices. " if SHOW_COST else "")
                         + f"Generated on {day(date.today())}.")]
     file = DATA / name
@@ -884,29 +936,48 @@ def report(args):
     webbrowser.open(file.as_uri())
 
 
-def unmapped(args):
-    """The sessions in Other work and the period's tickets, as JSON: what /worklog needs to choose a ticket."""
-    data = collect(*period(args[0] if args else ""))
+def prepare(args):
+    """What /worklog needs, as JSON: the sessions in Other work to map, the period's tickets with their pull
+    request and session titles to write notes from, and the other Jira issues assigned to you and updated in the
+    period, which a session may also be mapped to."""
+    since, until = period(args[0] if args else "")
+    data = collect(since, until)
+    tickets = data["tickets"] + data["support"]
+    shown = {w.key for t in tickets for w in t.works}
+    assigned = data["jira"].ask(jira.updated, since, until) or {}
     print(json.dumps({
         "sessions": [{"id": r["id"], "date": r["start"][:10], "repo": repo_of(r), "branches": r["branches"],
                       "title": r["title"], "prompt": r["prompt"], "cost": round(cost(r), 2)}
                      for r in data["unmapped"]],
-        "tickets": [{"key": w.key, "summary": w.summary, "type": w.type, "repos": list(t.repos)}
-                    for t in data["tickets"] + data["support"] for w in t.works]}, indent=1, ensure_ascii=False))
+        "tickets": [{"key": t.key, "summary": t.own.summary, "type": t.own.type, "repos": list(t.repos),
+                     "cost": round(t.cost, 2), "hours": round(t.minutes / 60, 1), "note": data["notes"].get(t.key, ""),
+                     "subtasks": [{"key": w.key, "summary": w.summary} for w in t.subs.values()],
+                     "pull_requests": [pr["title"] for w in t.works for pr in w.prs],
+                     "sessions": list(dict.fromkeys(title for w in t.works for title in w.titles if title))}
+                    for t in tickets],
+        "assigned": {key: issue for key, issue in assigned.items() if key not in shown}},
+        indent=1, ensure_ascii=False))
 
 
-def map_sessions(args):
-    """Saves a ticket for each SESSION KEY pair; a key outside JIRA_PREFIXES is refused."""
-    if not args or len(args) % 2:
-        sys.exit("usage: worklog.py map SESSION KEY [SESSION KEY...]")
-    chosen = mapped()
-    for session, key in zip(args[::2], args[1::2]):
-        if not KEY.fullmatch(key.upper()):
-            sys.exit(f"{key} does not match JIRA_PREFIXES")
-        chosen[session] = key.upper()
+def save(file, pairs):
+    """Merges {name: value} into file and says how many it holds."""
+    found = {**saved(file), **pairs}
     DATA.mkdir(parents=True, exist_ok=True)
-    MAPPED.write_text(json.dumps(chosen, indent=1))
-    print(f"{len(args) // 2} mapped; {len(chosen)} in {MAPPED}")
+    file.write_text(json.dumps(found, indent=1, ensure_ascii=False))
+    print(f"{len(pairs)} saved; {len(found)} in {file}")
+
+
+def checked(key):
+    """A ticket key in upper case; one outside JIRA_PREFIXES stops the script."""
+    if not KEY.fullmatch(key.upper()):
+        sys.exit(f"{key} does not match JIRA_PREFIXES")
+    return key.upper()
+
+
+def pairs(args, usage):
+    if not args or len(args) % 2:
+        sys.exit(f"usage: worklog.py {usage}")
+    return list(zip(args[::2], args[1::2]))
 
 
 def main():
@@ -922,10 +993,12 @@ def main():
         if (HERE / "demo.py").exists():  # a local add-on, kept out of the repo
             import demo
             demo.main(sys.argv[2:])
-    elif command == "unmapped":
-        unmapped(sys.argv[2:])
+    elif command == "prepare":
+        prepare(sys.argv[2:])
     elif command == "map":
-        map_sessions(sys.argv[2:])
+        save(MAPPED, {s: checked(k) for s, k in pairs(sys.argv[2:], "map SESSION KEY [SESSION KEY...]")})
+    elif command == "note":
+        save(NOTES, {checked(k): text for k, text in pairs(sys.argv[2:], "note KEY TEXT [KEY TEXT...]")})
     else:
         sys.exit(__doc__)
 
