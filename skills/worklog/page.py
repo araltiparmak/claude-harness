@@ -232,20 +232,19 @@ class Page:
     # -- the work
 
     def grouped(self):
-        """The overview's rows, keyed by id: tickets, support, reviews and other work. Their costs add up to the
-        total; each has a colour slot."""
+        """The overview's rows, keyed by id: tickets, support, reviews and other work, each with the cost and time
+        of its parts (tickets, the reviews, a repo's other work), which add up to the total, and a colour slot. A
+        group with no parts is left out."""
         d = self.data
         tickets, support, other, reviews = d["tickets"], d["support"], d["other"], d["reviews"]
-        rows = [("tickets", "Tickets", len(tickets), repos(tickets), sum(t.cost for t in tickets),
-                 sum(t.minutes for t in tickets), tickets),
-                ("support", "Support tickets", len(support), repos(support), sum(t.cost for t in support),
-                 sum(t.minutes for t in support), support),
-                ("reviews", "Code reviews", "-", "-", reviews["cost"], reviews["minutes"],
-                 d["prs"]["reviewed"] or paid(reviews["cost"])),
-                ("other", "Other work", "-", ", ".join(sorted(other, key=lambda r: -other[r]["cost"])),
-                 sum(o["cost"] for o in other.values()), sum(o["minutes"] for o in other.values()), other)]
-        found = {gid: {"name": name, "tickets": n, "repos": r, "cost": usd, "minutes": m}
-                 for gid, name, n, r, usd, m, shown in rows if shown}
+        rows = [("tickets", "Tickets", len(tickets), repos(tickets), tickets),
+                ("support", "Support tickets", len(support), repos(support), support),
+                ("reviews", "Code reviews", "-", "-", [reviews] if d["prs"]["reviewed"] or paid(reviews.cost) else []),
+                ("other", "Other work", "-", ", ".join(sorted(other, key=lambda r: -other[r].cost)),
+                 list(other.values()))]
+        found = {gid: {"name": name, "tickets": n, "repos": r, "cost": sum(p.cost for p in parts),
+                       "minutes": sum(p.minutes for p in parts)}
+                 for gid, name, n, r, parts in rows if parts}
         for i, g in enumerate(found.values()):
             g["slot"] = i + 1 if i < 8 else 0  # eight palette colours in a fixed order; past them, grey
         return found
@@ -371,8 +370,8 @@ class Page:
         if d["other"]:
             body.append(boxed("other", "Other work", "Sessions with no Jira ticket or review behind them, by repo.",
                               self.grid(["Repo", "Worked on", "Time", "Cost"],
-                                        [[repo, worked_on(o["days"]), hours(o["minutes"]), money(o["cost"])]
-                                         for repo, o in sorted(d["other"].items(), key=lambda item: -item[1]["cost"])])))
+                                        [[repo, worked_on(o.days), hours(o.minutes), money(o.cost)]
+                                         for repo, o in sorted(d["other"].items(), key=lambda item: -item[1].cost)])))
         if "reviews" in g:
             intro = ("Pull requests by teammates that you reviewed." if prs["reviewed"]
                      else "GitHub listed no reviews in the period.")
@@ -408,7 +407,7 @@ class Page:
                 ["Failed tool calls per session", f"{m['errors']:.1f}" if m["errors"] is not None else "-"],
                 ["Sessions compacted", m["compacted"]]]
         top = self.grid(["Date", "Session", "Peak context", "Prompts", "Interrupts", "Failed tools", "Cost"],
-                        [[day(r["start"]), (r["title"] or r["prompt"][:80] or "(no title)", "", repo_of(r)),
+                        [[day(r["day"]), (r["title"] or r["prompt"][:80] or "(no title)", "", repo_of(r)),
                           f"{r['context']['peak'] // 1000}k" if "context" in r else "-",
                           r.get("prompts", "-"), r.get("interrupts", "-"), r.get("errors", "-"), money(cost(r))]
                          for r in m["top"]])

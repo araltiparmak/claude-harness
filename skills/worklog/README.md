@@ -100,7 +100,7 @@ A sub-task counts for its parent ticket. Naming the key in the branch, or in you
 | Failed tool calls per session | Tool results marked as errors | over 3 |
 | Sessions compacted | Sessions where the context was compacted | 3 or more |
 
-Tips need at least 5 sessions. The lines are in `LINES` at the top of `worklog.py`.
+Tips need at least 5 sessions. The lines and the advice are in `TIPS` in `worklog.py`.
 
 Active time adds up the gaps between a session's messages and leaves out every gap over 15 minutes. Sessions that
 run side by side add up, so the total can be more than the hours on the clock.

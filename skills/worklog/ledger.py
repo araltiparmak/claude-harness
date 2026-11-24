@@ -31,7 +31,8 @@ KEY_SHAPE = re.compile(r"\b[A-Za-z][A-Za-z0-9]{1,9}-\d+\b")  # the ledger keeps 
 REVIEW = re.compile(r"gh pr (diff|review|checkout)|<command-name>/code-review")
 COMMAND = re.compile(r"<command-name>/([\w:.-]+)</command-name>")
 INTERRUPT = "[Request interrupted by user"
-TOKENS = {"in": "input_tokens", "out": "output_tokens", "write": "cache_creation_input_tokens",
+SYNTHETIC = "<synthetic>"  # the model of the replies Claude Code writes itself: API errors, usage limits
+TOKENS ={"in": "input_tokens", "out": "output_tokens", "write": "cache_creation_input_tokens",
           "read": "cache_read_input_tokens"}
 SENT = ("in", "write", "read")  # the input a reply is sent: its context
 BIG_CONTEXT = 100_000  # tokens; a session past this re-reads a large context on every reply
@@ -117,9 +118,20 @@ def settle(row, figures):
     return row
 
 
+def moment(stamp):
+    """An ISO time as transcripts and GitHub write it (UTC, ending in Z) as a datetime."""
+    return datetime.fromisoformat(stamp.replace("Z", "+00:00"))
+
+
+def local_day(stamp):
+    """The day an ISO time falls on by this computer's clock, so a session just after midnight counts for that day
+    and not for the day before in UTC."""
+    return moment(stamp).astimezone().date().isoformat()
+
+
 def active_minutes(stamps):
     """Minutes of work in a session: the gaps between its messages, leaving out each gap longer than IDLE."""
-    times = sorted(datetime.fromisoformat(s.replace("Z", "+00:00")) for s in stamps)
+    times = sorted(moment(s) for s in stamps)
     gaps = [(b - a).total_seconds() / 60 for a, b in zip(times, times[1:])]
     return round(sum(g for g in gaps if g <= IDLE), 1)
 
@@ -141,7 +153,8 @@ class Session:
         used[name] = used.get(name, 0) + 1
 
     def read(self, d):
-        """One transcript line: the session's facts, then a reply or a prompt."""
+        """One transcript line: the session's facts, then a reply or a prompt. The summary Claude Code writes when
+        it compacts the context is neither."""
         self.note(d)
         msg = d.get("message")
         if not isinstance(msg, dict):
@@ -151,7 +164,7 @@ class Session:
         blocks = content if isinstance(content, list) else [{"type": "text", "text": content or ""}]
         if d.get("type") == "assistant":
             self.reply(msg, blocks, bool(d.get("isSidechain")))
-        elif d.get("type") == "user" and not d.get("isMeta"):
+        elif d.get("type") == "user" and not (d.get("isMeta") or d.get("isCompactSummary")):
             self.said(blocks, bool(d.get("isSidechain")))
 
     def note(self, d):
@@ -174,8 +187,9 @@ class Session:
             self.branches.append(d["gitBranch"])
 
     def reply(self, msg, blocks, side):
-        """A reply: its usage, once per reply although it is written once per content block, and its tool calls."""
-        if msg.get("usage"):
+        """A reply: its usage, once per reply although it is written once per content block, and its tool calls.
+        A SYNTHETIC reply ran no model, so it has no usage to count."""
+        if msg.get("usage") and msg.get("model") != SYNTHETIC:
             self.usage[msg.get("id")] = {**msg["usage"], "model": msg.get("model"), "side": side}
             if not side:
                 self.contexts[msg.get("id")] = sum(msg["usage"].get(TOKENS[k]) or 0 for k in SENT)

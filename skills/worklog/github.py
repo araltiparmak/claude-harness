@@ -15,7 +15,9 @@ import json
 import re
 import subprocess
 import sys
-from datetime import date, datetime
+from datetime import date, timedelta
+
+from ledger import local_day, moment
 
 QUERY = """query($q: String!, $after: String) {
   viewer { login }
@@ -64,20 +66,23 @@ def brief(node, when):
 
 def pull_requests(since, until):
     """Opened: created in the period. Earlier: yours, created before the period and updated since; their branches
-    still name a ticket. Reviewed: by others, with a review of yours in the period, dated by it. One search finds
-    both of yours, since a pull request created in the period was also updated in it."""
+    still name a ticket. Reviewed: by others, with a review of yours submitted in the period (a pending one has no
+    time yet), dated by it. One search finds both of yours, since a pull request created in the period was also
+    updated in it. Days are local (local_day); GitHub searches by UTC days, so the searches start a day early."""
     since, until = date.fromisoformat(since).isoformat(), date.fromisoformat(until).isoformat()
-    login, mine = search(f"is:pr author:@me updated:>={since}")
-    _, theirs = search(f"is:pr reviewed-by:@me -author:@me updated:>={since}")
+    early = date.fromisoformat(since) - timedelta(days=1)
+    login, mine = search(f"is:pr author:@me updated:>={early}")
+    _, theirs = search(f"is:pr reviewed-by:@me -author:@me updated:>={early}")
     reviewed = []
     for node in theirs:
-        days = [r["submittedAt"][:10] for r in node["reviews"]["nodes"]
-                if (r["author"] or {}).get("login") == login and since <= r["submittedAt"][:10] <= until]
+        days = [local_day(r["submittedAt"]) for r in node["reviews"]["nodes"]
+                if r["submittedAt"] and (r["author"] or {}).get("login") == login]
+        days = [d for d in days if since <= d <= until]
         if days:
             reviewed.append(brief(node, max(days)))
-    return {"opened": sorted((brief(n, n["createdAt"][:10]) for n in mine if since <= n["createdAt"][:10] <= until),
-                             key=lambda p: p["date"]),
-            "earlier": [brief(n, n["createdAt"][:10]) for n in mine if n["createdAt"][:10] < since],
+    created = [(local_day(n["createdAt"]), n) for n in mine]
+    return {"opened": sorted((brief(n, d) for d, n in created if since <= d <= until), key=lambda p: p["date"]),
+            "earlier": [brief(n, d) for d, n in created if d < since],
             "reviewed": sorted(reviewed, key=lambda p: p["date"])}
 
 
@@ -89,7 +94,7 @@ def commit_pulls(repo_dir, start, end):
     """The texts (title, branch, description) of the pull requests that hold the commits you made in the repo at
     repo_dir between start and end, read with git and gh. [] when that is not a GitHub repo or gh fails."""
     try:
-        start, end = (datetime.fromisoformat(t.replace("Z", "+00:00")).isoformat() for t in (start, end))
+        start, end = (moment(t).isoformat() for t in (start, end))
         found = re.search(r"github\.com[:/]([\w.-]+/[\w.-]+?)(?:\.git)?$",
                           output(["git", "remote", "get-url", "origin"], repo_dir))
         email = output(["git", "config", "user.email"], repo_dir)

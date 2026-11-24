@@ -29,6 +29,7 @@ import sys
 import webbrowser
 from collections import defaultdict
 from datetime import date, timedelta
+from operator import ge, gt, lt
 from pathlib import Path
 
 import github
@@ -47,9 +48,6 @@ KEY = re.compile(rf"\b(?:{PREFIXES})-\d+\b", re.I) if PREFIXES else re.compile(r
 SUPPORT = {p.upper() for p in SUPPORT_PREFIXES}
 TOP = 10  # the most expensive sessions listed
 MIN_SESSIONS = 5  # fewer sessions than this give no tips
-# A tip shows when its measure crosses its line. The lines are rules of thumb, not targets.
-LINES = {"big": 0.5, "cache_hit": 0.85, "idle": 0.25, "off_model_questions": 0.10, "interrupted": 0.2,
-         "compacted": 3, "subagents": 0.3, "errors": 3}
 
 pull_requests, commit_pulls = github.pull_requests, github.commit_pulls  # tests swap them
 
@@ -57,29 +55,40 @@ pull_requests, commit_pulls = github.pull_requests, github.commit_pulls  # tests
 # ---- Jira
 
 class Jira:
-    """Jira issues through jira.py, cached in jira.json. Stops asking after the first failure."""
+    """Jira issues through jira.py, cached in jira.json. Stops asking after the first failure, except for a key
+    Jira does not know (see fetch)."""
 
     def __init__(self):
         file = DATA / "jira.json"
         self.cache, self.down = json.loads(file.read_text()) if file.exists() else {}, not PREFIXES
+        self.unknown = set()  # keys Jira refused in this run
 
     def ask(self, call, *args):
         if self.down:
             return None
         try:
             return call(*args)
-        except Exception as err:  # CLI missing, not logged in, unknown key, output that is not JSON
+        except Exception as err:  # CLI missing, not logged in, output that is not JSON
             print(f"note: Jira is not answering ({err}); tickets are shown by key only\n", file=sys.stderr)
             self.down = True
 
     def issue(self, key):
-        """Summary, type, whether it is a sub-task, and parent of one issue."""
-        if "subtask" not in self.cache.get(key, {}):
-            found = self.ask(jira.issue, key)
-            if not found:
-                return {}
-            self.cache[key] = found
-        return self.cache[key]
+        """Summary, type, whether it is a sub-task, and parent of one issue; {} when Jira cannot say."""
+        if "subtask" not in self.cache.get(key, {}) and key not in self.unknown:
+            found = self.ask(self.fetch, key)
+            if found:
+                self.cache[key] = found
+        return self.cache.get(key, {})
+
+    def fetch(self, key):
+        """One issue. When the command fails for it but Jira still answers a search, Jira does not know the key (a
+        typo, an example in a prompt, a deleted issue): it is skipped, and Jira stays on for the other keys."""
+        try:
+            return jira.issue(key)
+        except subprocess.CalledProcessError:
+            jira.search("updated >= -1d")  # raises when Jira itself is not answering
+            self.unknown.add(key)
+            return None
 
     def top(self, key):
         """The ticket the report shows for a key: a sub-task's parent, else the key itself."""
@@ -144,17 +153,18 @@ def ticket(row, by_branch, issues):
 
 
 class Work:
-    """The days, cost, cost per model, active minutes, session titles and pull requests of one ticket or sub-task,
-    and how many of its sessions came from map."""
+    """The days, cost, cost per model, active minutes, session titles and pull requests of some sessions: one
+    ticket or sub-task (its key and Jira issue), the code reviews, or the other work in one repo. mapped counts the
+    sessions that came from map."""
 
-    def __init__(self, key, issues):
-        issue = issues.issue(key)
+    def __init__(self, key="", issue=None):
+        issue = issue or {}
         self.key, self.summary, self.type = key, issue.get("summary", ""), issue.get("type", "")
         self.days, self.cost, self.models, self.prs = set(), 0.0, defaultdict(float), []
         self.minutes, self.titles, self.mapped, self.resolved = 0.0, [], 0, False
 
     def add(self, row, mapped=False):
-        self.days.add(row["start"][:10])
+        self.days.add(row["day"])
         self.cost += cost(row)
         self.minutes += row.get("active", 0)
         self.titles.append(row["title"] or row["prompt"])
@@ -168,14 +178,14 @@ class Ticket:
     sub-tasks."""
 
     def __init__(self, key, issues):
-        self.key, self.issues, self.own, self.subs, self.repos = key, issues, Work(key, issues), {}, {}
+        self.key, self.issues, self.own, self.subs, self.repos = key, issues, Work(key, issues.issue(key)), {}, {}
         self.resolved = False
 
     def part(self, key):
         if key == self.key:
             return self.own
         if key not in self.subs:
-            self.subs[key] = Work(key, self.issues)
+            self.subs[key] = Work(key, self.issues.issue(key))
         return self.subs[key]
 
     @property
@@ -193,8 +203,11 @@ class Ticket:
 
 
 def in_period(rows, since, until):
-    """The sessions that started in the period, oldest first, and the cost of those in exclude_repos."""
-    rows = sorted((r for r in rows if since <= r["start"][:10] <= until), key=lambda r: r["start"])
+    """The sessions that started in the period, oldest first, each given its local day, and the cost of those in
+    exclude_repos."""
+    for r in rows:
+        r["day"] = ledger.local_day(r["start"])
+    rows = sorted((r for r in rows if since <= r["day"] <= until), key=lambda r: r["start"])
     excluded = sum(cost(r) for r in rows if repo_of(r) in EXCLUDE_REPOS)
     return [r for r in rows if repo_of(r) not in EXCLUDE_REPOS], excluded
 
@@ -207,8 +220,7 @@ def collect(since, until):
         sys.exit(f"no sessions from {since} to {until}")
     prs = {kind: [pr for pr in found if pr["repo"] not in EXCLUDE_REPOS]
            for kind, found in pull_requests(since, until).items()}
-    issues, tickets, reviews = Jira(), {}, {"cost": 0.0, "minutes": 0.0}
-    other, unmapped = defaultdict(lambda: {"days": set(), "cost": 0.0, "minutes": 0.0}), []
+    issues, tickets, reviews, other, unmapped = Jira(), {}, Work(), defaultdict(Work), []  # other: {repo: Work}
 
     def on(key):
         top = issues.top(key)
@@ -232,12 +244,9 @@ def collect(since, until):
             t.part(named).add(row, mapped=not rule)
             t.repos[repo_of(row)] = None
         elif row["review"] and not row["edits"]:
-            reviews["cost"] += cost(row)
-            reviews["minutes"] += row.get("active", 0)
+            reviews.add(row)
         else:
-            other[repo_of(row)]["days"].add(row["start"][:10])
-            other[repo_of(row)]["cost"] += cost(row)
-            other[repo_of(row)]["minutes"] += row.get("active", 0)
+            other[repo_of(row)].add(row)
             unmapped.append(row)
     for pr in prs["opened"]:  # the earlier ones only lent their branches
         if pr["ticket"]:
@@ -287,7 +296,7 @@ def question(r):
 
 def measures(rows):
     """How the sessions used tokens and how smoothly they went, from the ledger alone. A share is of cost over
-    the sessions that recorded the field; None when none did, or when too few did for a tip."""
+    the sessions that recorded the field, and an average is over the rated sessions; None when none did."""
     tokens = token_totals(rows)
     sent = sum(t[k] for t in tokens.values() for k in SENT)
 
@@ -316,49 +325,46 @@ def measures(rows):
         "top": sorted(rows, key=lambda r: -cost(r))[:TOP]}
 
 
+# A tip shows when its measure crosses its line: (measure, test, line, what was found, what to try), the costliest
+# habit first. The lines are rules of thumb, not targets.
+TIPS = [
+    ("big", gt, 0.5, f"{{:.0%}} of the cost came from sessions whose context grew past {BIG_CONTEXT // 1000}k tokens.",
+     "Every reply re-reads the whole context, so a long session gets dearer with each turn. Start a fresh session "
+     "for each task (/clear), and point Claude at files and line ranges instead of whole folders."),
+    ("cache_hit", lt, 0.85, "Only {:.0%} of the input came from the prompt cache.",
+     "The cache expires after a pause (5 minutes by default), and the next reply pays full price for the whole "
+     "context. Finish a task in one sitting, or start fresh after a long break instead of resuming."),
+    ("off_model_questions", gt, 0.10,
+     f"Sessions that only asked questions spent {{:.0%}} of the cost on models other than {QUESTION_MODEL}.",
+     f"{QUESTION_MODEL} answers most questions well for less; switch with /model."),
+    ("idle", gt, 0.25, "{:.0%} of the cost went to sessions that changed no files and reviewed nothing.",
+     "Questions are fine. For exploration, a narrower first prompt (the file, the symptom, what you expect) usually "
+     "gets there in fewer turns."),
+    ("subagents", gt, 0.3, "Subagents used {:.0%} of the cost.",
+     "Each one starts with an empty context and reads everything again; keep them for wide searches and independent "
+     "work, not small steps."),
+    ("interrupted", gt, 0.2, "You stopped Claude in {:.0%} of sessions.",
+     "That often means it set off in the wrong direction. Plan mode (shift+tab) or a first prompt that states the "
+     "goal and the limits helps it start right."),
+    ("compacted", ge, 3, "{} sessions ran out of context and were compacted.",
+     "Compaction loses detail. Split long tasks into sessions, with a short hand-over note."),
+    ("errors", gt, 3, "Tool calls failed {:.1f} times per session.",
+     "Repeated failures often mean a missing permission, a wrong working folder or a missing tool; the most "
+     "expensive sessions show where."),
+]
+PER_SESSION = ("interrupted", "errors")  # averages over the sessions that recorded prompts (rated)
+
+
 def tips(m):
-    """What to try, from the measures that crossed their LINES: (measure, advice) pairs, the costliest habit
-    first. None with fewer than MIN_SESSIONS sessions."""
+    """What to try: (what was found, what to try) for each measure in TIPS past its line. None with fewer than
+    MIN_SESSIONS sessions; a PER_SESSION measure also needs MIN_SESSIONS rated sessions."""
     if m["sessions"] < MIN_SESSIONS:
         return []
     found = []
-
-    def over(name):
-        return m[name] is not None and m[name] > LINES[name]
-    if over("big"):
-        found.append((f"{m['big']:.0%} of the cost came from sessions whose context grew past "
-                      f"{BIG_CONTEXT // 1000}k tokens.",
-                      "Every reply re-reads the whole context, so a long session gets dearer with each turn. Start a "
-                      "fresh session for each task (/clear), and point Claude at files and line ranges instead of "
-                      "whole folders."))
-    if m["cache_hit"] is not None and m["cache_hit"] < LINES["cache_hit"]:
-        found.append((f"Only {m['cache_hit']:.0%} of the input came from the prompt cache.",
-                      "The cache expires after a pause (5 minutes by default), and the next reply pays full price for "
-                      "the whole context. Finish a task in one sitting, or start fresh after a long break instead of "
-                      "resuming."))
-    if over("off_model_questions"):
-        found.append((f"Sessions that only asked questions spent {m['off_model_questions']:.0%} of the cost on "
-                      f"models other than {QUESTION_MODEL}.",
-                      f"{QUESTION_MODEL} answers most questions well for less; switch with /model."))
-    if over("idle"):
-        found.append((f"{m['idle']:.0%} of the cost went to sessions that changed no files and reviewed nothing.",
-                      "Questions are fine. For exploration, a narrower first prompt (the file, the symptom, what you "
-                      "expect) usually gets there in fewer turns."))
-    if over("subagents"):
-        found.append((f"Subagents used {m['subagents']:.0%} of the cost.",
-                      "Each one starts with an empty context and reads everything again; keep them for wide searches "
-                      "and independent work, not small steps."))
-    if m["rated"] >= MIN_SESSIONS and over("interrupted"):
-        found.append((f"You stopped Claude in {m['interrupted']:.0%} of sessions.",
-                      "That often means it set off in the wrong direction. Plan mode (shift+tab) or a first prompt that "
-                      "states the goal and the limits helps it start right."))
-    if m["compacted"] >= LINES["compacted"]:
-        found.append((f"{m['compacted']} sessions ran out of context and were compacted.",
-                      "Compaction loses detail. Split long tasks into sessions, with a short hand-over note."))
-    if m["rated"] >= MIN_SESSIONS and over("errors"):
-        found.append((f"Tool calls failed {m['errors']:.1f} times per session.",
-                      "Repeated failures often mean a missing permission, a wrong working folder or a missing tool; "
-                      "the most expensive sessions show where."))
+    for name, crossed, line, finding, advice in TIPS:
+        value = None if name in PER_SESSION and m["rated"] < MIN_SESSIONS else m[name]
+        if value is not None and crossed(value, line):
+            found.append((finding.format(value), advice))
     return found
 
 
@@ -387,8 +393,8 @@ def usage_of(rows):
                 found[kind][item][0] += n
                 found[kind][item][1] += 1
         for model, usd in models_of(r).items():
-            found["daily"][r["start"][:10]][model] += usd
-    found["peaks"] = [(r["start"][:10], r["context"]["peak"], r["title"] or r["prompt"][:60])
+            found["daily"][r["day"]][model] += usd
+    found["peaks"] = [(r["day"], r["context"]["peak"], r["title"] or r["prompt"][:60])
                       for r in rows if "context" in r]
     return found
 
@@ -402,9 +408,11 @@ def period(arg):
     if arg == "last-month":
         last = today.replace(day=1) - timedelta(days=1)
         return str(last.replace(day=1)), str(last)
-    if arg and not re.fullmatch(r"\d{4}-\d{2}-\d{2}", arg):
+    try:
+        first = date.fromisoformat(arg) if arg else today.replace(day=1)
+    except ValueError:  # not a day, such as november or 2026-02-30
         sys.exit(f"period must be empty, last-month or YYYY-MM-DD, not {arg}")
-    return (arg or str(today.replace(day=1))), str(today)
+    return str(first), str(today)
 
 
 def report(args):
@@ -432,12 +440,12 @@ def prepare(args):
     data = collect(since, until)
     tickets = data["tickets"] + data["support"]
     shown = {w.key for t in tickets for w in t.works}
-    assigned = data["jira"].ask(jira.updated, since, until) or {}
-    busy = {d: data["jira"].ask(jira.in_progress, d) or {} for d in sorted({r["start"][:10] for r in data["unmapped"]})}
+    assigned = mappable(data["jira"].ask(jira.updated, since, until))
+    busy = {d: mappable(data["jira"].ask(jira.in_progress, d)) for d in sorted({r["day"] for r in data["unmapped"]})}
     print(json.dumps({
-        "sessions": [{"id": r["id"], "date": r["start"][:10], "repo": repo_of(r), "branches": r["branches"],
+        "sessions": [{"id": r["id"], "date": r["day"], "repo": repo_of(r), "branches": r["branches"],
                       "title": r["title"], "prompt": r["prompt"], "cost": round(cost(r), 2),
-                      "in_progress": busy[r["start"][:10]]}
+                      "in_progress": busy[r["day"]]}
                      for r in data["unmapped"]],
         "tickets": [{"key": t.key, "summary": t.own.summary, "type": t.own.type, "repos": list(t.repos),
                      "cost": round(t.cost, 2), "hours": round(t.minutes / 60, 1), "note": data["notes"].get(t.key, ""),
@@ -447,6 +455,11 @@ def prepare(args):
                     for t in tickets],
         "assigned": {key: issue for key, issue in assigned.items() if key not in shown}},
         indent=1, ensure_ascii=False))
+
+
+def mappable(issues):
+    """The issues whose keys map accepts (under jira_prefixes); a Jira search can return other projects' too."""
+    return {key: issue for key, issue in (issues or {}).items() if KEY.fullmatch(key)}
 
 
 def save(file, found):

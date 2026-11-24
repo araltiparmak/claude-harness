@@ -3,10 +3,14 @@ Run: python3 -m unittest test_worklog"""
 import contextlib
 import io
 import json
+import os
 import re
+import subprocess
 import tempfile
+import time
 import unittest
 from pathlib import Path
+from unittest import mock
 
 import github
 import ledger
@@ -44,23 +48,40 @@ def quiet(call, *args):
 
 class Base(unittest.TestCase):
     def setUp(self):
-        """Every data file in a fresh folder; no real transcripts, GitHub or Jira."""
-        tmp = Path(tempfile.mkdtemp())
-        self.tmp = tmp
-        ledger.DATA, ledger.LEDGER, ledger.PROJECTS = tmp, tmp / "sessions.jsonl", tmp / "projects"
-        ledger.CLAUDE_STATE = tmp / "claude.json"
-        w.DATA, w.MAPPED, w.NOTES = tmp, tmp / "mapped.json", tmp / "notes.json"
-        w.KEY, w.PREFIXES, w.SUPPORT = re.compile(r"\b(?:ABC)-\d+\b", re.I), "ABC", set()
-        w.jira.issue = lambda key: ISSUES[key]
-        w.jira.updated = lambda since, until: {k: {"summary": v["summary"], "type": v["type"]} for k, v in ISSUES.items()}
-        w.jira.in_progress = lambda day: {"ABC-3": {"summary": "Typo", "type": "Bug"}} if day == "2026-11-02" else {}
+        """Every data file in a fresh folder; no real transcripts, GitHub or Jira. Tests change the modules only
+        through patch, so no change outlives its test."""
+        folder = tempfile.TemporaryDirectory()
+        self.addCleanup(folder.cleanup)
+        tmp = self.tmp = Path(folder.name)
+        self.patch(ledger, DATA=tmp, LEDGER=tmp / "sessions.jsonl", PROJECTS=tmp / "projects",
+                   CLAUDE_STATE=tmp / "claude.json")
+        self.patch(w, DATA=tmp, MAPPED=tmp / "mapped.json", NOTES=tmp / "notes.json",
+                   KEY=re.compile(r"\b(?:ABC)-\d+\b", re.I), PREFIXES="ABC", SUPPORT=set())
+        self.patch(w.jira, issue=lambda key: ISSUES[key], search=lambda condition: [],
+                   updated=lambda since, until: {k: {"summary": v["summary"], "type": v["type"]}
+                                                 for k, v in ISSUES.items()},
+                   in_progress=lambda day: {"ABC-3": {"summary": "Typo", "type": "Bug"}} if day == "2026-11-02" else {})
+
+    def patch(self, module, **values):
+        """Sets attributes of a module until the test ends."""
+        patcher = mock.patch.multiple(module, **values)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def clock(self, zone):
+        """Runs the rest of the test on this computer's clock set to a time zone."""
+        patch = mock.patch.dict(os.environ, TZ=zone)
+        patch.start()
+        self.addCleanup(time.tzset)
+        self.addCleanup(patch.stop)
+        time.tzset()
 
     def collect(self, rows, opened=(), reviewed=(), resolved=(), mapped=(), earlier=(), commits=()):
         ledger.LEDGER.write_text("".join(json.dumps(r) + "\n" for r in rows))
-        w.pull_requests = lambda since, until: {"opened": list(opened), "earlier": list(earlier),
-                                                "reviewed": list(reviewed)}
-        w.commit_pulls = lambda repo_dir, start, end: list(commits)
-        w.jira.resolved = lambda since, until: list(resolved)
+        self.patch(w, pull_requests=lambda since, until: {"opened": list(opened), "earlier": list(earlier),
+                                                          "reviewed": list(reviewed)},
+                   commit_pulls=lambda repo_dir, start, end: list(commits))
+        self.patch(w.jira, resolved=lambda since, until: list(resolved))
         if mapped:
             quiet(w.save, w.MAPPED, {s: w.checked(k) for s, k in w.pairs(list(mapped), "map")})
         return w.collect("2026-11-01", "2026-11-30")
@@ -87,14 +108,14 @@ class Sorting(Base):
         self.assertEqual((t.key, t.own.prs), ("ABC-4", []))
 
     def test_session_takes_the_ticket_of_the_pull_request_holding_its_commits(self):
-        row = {**session(1, repo="tools"), "cwd": tempfile.mkdtemp(), "end": "2026-11-01T10:00:00Z"}
+        row = {**session(1, repo="tools"), "cwd": str(self.tmp), "end": "2026-11-01T10:00:00Z"}
         data = self.collect([row], commits=["Fix label\nfix-label\nCloses ABC-3"])
         self.assertEqual([t.key for t in data["tickets"]], ["ABC-3"])
 
     def test_review_sessions_add_up_to_one_total(self):
         rows = [session(1, edits=False, review=True, cost=1.5), session(2, edits=False, review=True, cost=0.5)]
         data = self.collect(rows, reviewed=[pr(7, "", "b", author="teammate")])
-        self.assertEqual((data["reviews"]["cost"], page.Page(data).groups["reviews"]["cost"]), (2.0, 2.0))
+        self.assertEqual((data["reviews"].cost, page.Page(data).groups["reviews"]["cost"]), (2.0, 2.0))
 
     def test_a_mapped_session_counts_for_its_ticket_and_rules_still_win(self):
         rows = [session(1, repo="tools"), session(2, ["ABC-9"]), session(3, repo="tools")]
@@ -111,12 +132,35 @@ class Sorting(Base):
         self.assertAlmostEqual(sum(g["cost"] for g in page.Page(data).groups.values()), data["total"])
         self.assertEqual(data["measures"]["cache_hit"], 0.8)
 
+    def test_a_key_jira_does_not_know_leaves_jira_on_for_the_others(self):
+        def issue(key):
+            if key not in ISSUES:
+                raise subprocess.CalledProcessError(1, ["jira"])
+            return ISSUES[key]
+        self.patch(w.jira, issue=issue)
+        data = self.collect([session(1, ["ABC-404"]), session(2, ["ABC-1"])], resolved=["ABC-1"])
+        self.assertEqual({t.key: (t.own.summary, t.resolved) for t in data["tickets"]},
+                         {"ABC-404": ("", False), "ABC-1": ("Export", True)})
+
+        def down(condition):
+            raise OSError("jira: command not found")
+        self.patch(w.jira, search=down)
+        issues = w.Jira()
+        with contextlib.redirect_stderr(io.StringIO()):
+            self.assertEqual((issues.issue("ABC-404"), issues.down), ({}, True))
+
+    def test_a_session_counts_for_its_day_on_this_computers_clock(self):
+        self.clock("Europe/Berlin")  # UTC+1 in November
+        rows = [{**session(1), "start": "2026-10-31T23:30:00Z"}, {**session(2), "start": "2026-11-30T23:30:00Z"}]
+        data = self.collect(rows)
+        self.assertEqual([(r["id"], r["day"]) for r in data["unmapped"]], [("s1", "2026-11-01")])
+
     def test_map_refuses_a_key_outside_the_prefixes(self):
         with self.assertRaises(SystemExit):
             w.checked("XYZ-1")
 
     def test_check_runs_on_a_fresh_machine(self):
-        w.FILE, w.PREFIXES, w.JIRA_PREFIXES = self.tmp / "none.json", "", []
+        self.patch(w, FILE=self.tmp / "none.json", PREFIXES="", JIRA_PREFIXES=[])
         out = quiet(w.check)
         self.assertIn("warn  settings", out)
         self.assertIn("warn  jira_prefixes", out)
@@ -124,12 +168,17 @@ class Sorting(Base):
 
     def test_period_takes_empty_last_month_or_a_day(self):
         self.assertEqual(w.period("2026-11-01")[0], "2026-11-01")
-        with self.assertRaises(SystemExit):
-            w.period("november")
+        for wrong in ("november", "2026-02-30"):
+            with self.assertRaises(SystemExit):
+                w.period(wrong)
 
 
 class Prepare(Base):
     def test_prepare_offers_assigned_and_in_progress_issues_and_notes_show(self):
+        other = {"summary": "Another team's issue", "type": "Bug"}  # outside jira_prefixes, so map would refuse it
+        updated, in_progress = w.jira.updated, w.jira.in_progress
+        self.patch(w.jira, updated=lambda since, until: {**updated(since, until), "XYZ-7": other},
+                   in_progress=lambda day: {**in_progress(day), "XYZ-8": other})
         data = self.collect([session(1, ["ABC-1"], 2.0), session(2, repo="tools")])
         found = json.loads(quiet(w.prepare, ["2026-11-01"]))
         self.assertEqual(sorted(found["assigned"]), ["ABC-2", "ABC-3", "ABC-4", "ABC-9"])
@@ -196,15 +245,21 @@ class Ledger(Base):
         def reply(t, n):
             return {"type": "assistant", "timestamp": t, "message": {"id": f"m{n}", "model": "claude-opus-5-5",
                     "content": [{"type": "text", "text": "ok"}], "usage": {"input_tokens": 10, "output_tokens": 5}}}
+        api_error = {"type": "assistant", "timestamp": "2026-11-01T10:01:30Z", "message": {
+            "id": "m3", "model": "<synthetic>", "content": [{"type": "text", "text": "API Error: Connection lost"}],
+            "usage": {"input_tokens": 0, "output_tokens": 0}}}
         path = self.transcript([
             user("2026-11-01T09:00:00Z", "Fix ABC-1 please"), reply("2026-11-01T09:01:00Z", 1),
             user("2026-11-01T09:02:00Z", [{"type": "tool_result", "is_error": True, "content": "denied"}]),
             user("2026-11-01T09:03:00Z", [{"type": "text", "text": "[Request interrupted by user]"}]),
             user("2026-11-01T10:00:00Z", "<command-name>/clear</command-name>"),
-            user("2026-11-01T10:01:00Z", "try again"), reply("2026-11-01T10:02:00Z", 2)])
+            user("2026-11-01T10:00:30Z", "This session is being continued... [Request interrupted by user]",
+                 isCompactSummary=True),
+            user("2026-11-01T10:01:00Z", "try again"), api_error, reply("2026-11-01T10:02:00Z", 2)])
         row = ledger.Session(path).result()
         self.assertEqual((row["prompts"], row["interrupts"], row["errors"]), (2, 1, 1))
         self.assertEqual((row["active"], row["prompt"], row["keys"]), (5.0, "Fix ABC-1 please", ["ABC-1"]))
+        self.assertEqual((list(row["models"]), row["context"]["avg"]), (["Opus"], 10))
 
     def test_refresh_keeps_one_row_per_session(self):
         rows = [session(1, cost=1.0), session(1, cost=2.0), session(2)]
@@ -255,19 +310,19 @@ class Ledger(Base):
         self.assertEqual((row["cost"], row["tokens_by_model"]["Opus"]["in"]), (0.5, 125_000))
 
     def test_github_splits_your_pull_requests_into_opened_and_earlier(self):
-        def node(n, created):
+        def node(n, created, reviews=()):
             return {"title": f"PR {n}", "url": f"https://github.com/acme/api/pull/{n}", "state": "MERGED",
                     "isDraft": False, "createdAt": created, "headRefName": f"b{n}", "body": "", "author": {"login": "me"},
-                    "repository": {"name": "api"}, "reviews": {"nodes": []}, "commits": {"nodes": []}}
-        search = github.search
-        github.search = lambda q: ("me", [node(1, "2026-10-20T09:00:00Z"), node(2, "2026-11-03T09:00:00Z"),
-                                          node(3, "2026-12-01T09:00:00Z")] if "author:@me" in q else [])
-        try:
-            found = github.pull_requests("2026-11-01", "2026-11-30")
-        finally:
-            github.search = search
-        self.assertEqual(([p["title"] for p in found["opened"]], [p["title"] for p in found["earlier"]]),
-                         (["PR 2"], ["PR 1"]))
+                    "repository": {"name": "api"}, "commits": {"nodes": []},
+                    "reviews": {"nodes": [{"author": {"login": "me"}, "submittedAt": t} for t in reviews]}}
+        self.clock("Europe/Berlin")  # UTC+1 in November
+        mine = [node(1, "2026-10-20T09:00:00Z"), node(2, "2026-10-31T23:30:00Z"), node(3, "2026-11-30T23:30:00Z")]
+        theirs = [node(4, "2026-11-02T09:00:00Z", ["2026-11-03T09:00:00Z", None])]  # None: a review still pending
+        self.patch(github, search=lambda q: ("me", theirs if "reviewed-by" in q else mine))
+        found = github.pull_requests("2026-11-01", "2026-11-30")
+        self.assertEqual({kind: [(p["title"], p["date"]) for p in prs] for kind, prs in found.items()},
+                         {"opened": [("PR 2", "2026-11-01")], "earlier": [("PR 1", "2026-10-20")],
+                          "reviewed": [("PR 4", "2026-11-03")]})
 
 
 if __name__ == "__main__":
