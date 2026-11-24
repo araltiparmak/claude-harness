@@ -10,13 +10,13 @@ from datetime import date, timedelta
 from pathlib import Path
 from string import Template
 
-from ledger import BIG_CONTEXT, CONFIG, IDLE, MODELS, SENT, cost, repo_of, settings
+from ledger import BIG_CONTEXT, IDLE, MODELS, QUESTION_MODEL, SENT, cost, repo_of
+from settings import settings
 
 JIRA_URL = settings["jira_url"]
 TEMPLATE = Path(__file__).resolve().parent / "report.html"
 SMALL = 1.0  # USD; tickets that cost less share one box
-QUESTION_MODEL = MODELS[CONFIG["question_model"]]["name"]  # the model the tips suggest for questions
-MODEL_SLOTS = {m["name"]: m["colour"] for m in MODELS.values() if "colour" in m}  # from config.json; others grey
+MODEL_SLOTS = {m["name"]: m["colour"] for m in MODELS.values() if "colour" in m}  # from models.json; others grey
 STATUS = {"merged": "✓ Merged", "closed": "✕ Closed, not merged", "open": "○ Open", "draft": "○ Draft"}
 
 
@@ -400,7 +400,7 @@ class Page:
                 [f"Share of cost in sessions past {BIG_CONTEXT // 1000}k context", pct(m["big"])],
                 ["Share of cost in subagents", pct(m["subagents"])],
                 ["Share of cost in sessions that changed nothing", pct(m["idle"])],
-                [f"Share of cost not on {QUESTION_MODEL} in sessions that changed nothing", pct(m["dear_questions"])],
+                [f"Share of cost not on {QUESTION_MODEL} in sessions that changed nothing", pct(m["off_model_questions"])],
                 ["Prompts per session", f"{m['prompts']:.1f}" if m["prompts"] is not None else "-"],
                 ["Prompts per merged pull request",
                  f"{m['prompts'] * m['rated'] / merged:.0f}" if m["prompts"] is not None and merged else "-"],

@@ -40,7 +40,7 @@ has no pull requests or ticket names.
    ```
 
 3. Write your settings to `~/.config/worklog.json`. Every key is optional; a key you leave out keeps its default
-   from the `settings` part of `config.json`:
+   from `settings.json`:
 
    ```json
    {"jira_url": "https://yourcompany.atlassian.net", "jira_prefixes": ["ABC"], "support_prefixes": ["SUP"],
@@ -107,20 +107,23 @@ run side by side add up, so the total can be more than the hours on the clock.
 
 ## Cost
 
-A session's cost is Claude Code's own figure when `~/.claude.json` still holds it. Claude Code keeps there the
-cost of the last session in each folder, and it counts API calls the transcripts leave out (3 to 9% more in
-sessions run in auto mode). The SessionEnd hook waits up to a minute for it, and every report takes the ones still
-there. A session without it is priced from its transcript's tokens at the list prices in `config.json`:
+A session's cost and tokens are Claude Code's own figures when `~/.claude.json` still holds them. Claude Code
+keeps there the figures of the last session in each folder, written about a second after the session ends, and
+they count API calls the transcripts leave out: 3 to 9% more cost in the Opus and Fable sessions compared. The
+SessionEnd hook waits up to 30 seconds for them, and every report takes the ones still there. The subagent cost
+is scaled by the same ratio. A model that Claude Code's figures name but none of the session's replies used is
+Claude Code's own work and shows as Background.
+
+A session without those figures is priced from its transcript's tokens at the list prices in `models.json`:
 
 | Key | What it is |
 |---|---|
-| `models` | Per model id: the name on the page, its colour (`1` to `3`; a model without one is grey), and USD per million tokens for input, output and cache reads. An id that starts with a listed one, such as a dated id, takes its entry |
+| `models` | Per model id: the name on the page, its colour (`1` to `3`; a model without one is grey), `prices` in USD per million tokens (input, output, cache read, 5-minute and 1-hour cache write), and `fast` prices for a model that has fast mode. An id that starts with a listed one, such as a dated id, takes its entry |
 | `default_model` | How an unlisted model is priced |
 | `question_model` | The cheaper model the tips suggest for sessions that only ask questions |
-| `cache_write` | The price of a cache write, as a multiple of input, for 5-minute and 1-hour caches |
-| `fast` | The multiple fast mode costs |
 
-When a new model comes out, add its id to `models`.
+The list holds Opus 5.5 and Sonnet 5.5, plus Fable 5.2, which some sessions ran on; priced as Opus, a Fable
+session would show about half its cost. When a new model comes out, add its id and prices to `models`.
 
 ## Data
 
@@ -130,6 +133,7 @@ saved), and the pages. Nothing is sent anywhere unless you run `/worklog share` 
 
 ## Files
 
-`worklog.py` (commands, sorting, measures and tips), `ledger.py` (reads transcripts), `page.py` and
-`report.html` (the page), `github.py` and `jira.py` (fetching; each runs on its own), `config.json` (default settings, models and prices),
-`test_worklog.py` (`python3 -m unittest test_worklog`).
+`worklog.py` (commands, sorting, measures and tips), `ledger.py` (reads and prices sessions), `page.py` and
+`report.html` (the page), `github.py` and `jira.py` (fetching; each runs on its own), `settings.py` and
+`settings.json` (settings), `models.json` (models and prices), `test_worklog.py`
+(`python3 -m unittest test_worklog`).

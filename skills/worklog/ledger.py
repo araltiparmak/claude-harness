@@ -5,9 +5,8 @@ A row: id, title, first prompt, cwd, branches, start and end, the ticket-shaped 
 files or reviewed a pull request, cost and tokens per model, subagent cost, context sizes, active minutes, the
 prompts, interrupts and failed tool calls, and what it used (skills, slash commands, MCP servers, hooks, subagents).
 
-The cost is Claude Code's own when ~/.claude.json still holds it, since it counts API calls the transcript leaves
-out; otherwise the tokens priced with config.json. config.json also holds the default settings, which
-~/.config/worklog.json overrides key by key; README.md describes each key.
+A session's cost and tokens are Claude Code's own figures when ~/.claude.json still holds them, since they count
+API calls the transcript leaves out; otherwise its replies priced at the list prices in models.json.
 """
 import json
 import os
@@ -17,13 +16,15 @@ from collections import defaultdict
 from datetime import datetime
 from pathlib import Path
 
-CONFIG = json.loads((Path(__file__).resolve().parent / "config.json").read_text())
-FILE = Path.home() / ".config" / "worklog.json"  # your settings
-settings = {**CONFIG["settings"], **(json.loads(FILE.read_text()) if FILE.exists() else {})}
-MODELS = CONFIG["models"]
-DEV = Path(settings["dev_dir"]).expanduser()  # the folder that holds the repos
-DATA = DEV / "worklog"  # the ledger, the Jira cache, the saved mappings and notes, the pages
-CLAUDE_STATE = Path.home() / ".claude.json"  # where Claude Code keeps the cost of the last session in each folder
+from settings import DATA, DEV
+
+PRICING = json.loads((Path(__file__).resolve().parent / "models.json").read_text())
+MODELS = PRICING["models"]
+CLAUDE_STATE = Path.home() / ".claude.json"  # Claude Code's figures for the last session in each folder
+STATE_TOKENS = {"in": "inputTokens", "out": "outputTokens", "write": "cacheCreationInputTokens",
+                "read": "cacheReadInputTokens"}
+WAIT = 30  # seconds; Claude Code writes ~/.claude.json about a second after the SessionEnd hook starts
+BACKGROUND = "Background"  # Claude Code's own calls, on a model none of the session's replies used
 LEDGER = DATA / "sessions.jsonl"
 PROJECTS = Path.home() / ".claude" / "projects"
 KEY_SHAPE = re.compile(r"\b[A-Za-z][A-Za-z0-9]{1,9}-\d+\b")  # the ledger keeps these; the report filters them
@@ -50,55 +51,69 @@ def records(path):
 
 
 def listed(model):
-    """The config.json entry of a model id: the longest listed id it starts with, so a dated id still matches."""
+    """The models.json entry of a model id: the longest listed id it starts with, so a dated id still matches."""
     return next((MODELS[m] for m in sorted(MODELS, key=len, reverse=True) if (model or "").startswith(m)), None)
 
 
-def price(usage):
-    """What one reply cost in USD at API list prices, from config.json. An unlisted model is priced as
-    default_model."""
-    rates = (listed(usage.get("model")) or MODELS[CONFIG["default_model"]])["prices"]
-    write = CONFIG["cache_write"]
-    hour = (usage.get("cache_creation") or {}).get("ephemeral_1h_input_tokens") or 0
-    minutes = (usage.get("cache_creation_input_tokens") or 0) - hour
-    tokens = {"input": (usage.get("input_tokens") or 0) + write["5m"] * minutes + write["1h"] * hour,
-              "output": usage.get("output_tokens") or 0, "cache_read": usage.get("cache_read_input_tokens") or 0}
-    fast = CONFIG["fast"] if usage.get("speed") == "fast" else 1
-    return sum(n * rates[kind] for kind, n in tokens.items()) / 1e6 * fast
-
-
 def name(model):
-    """A model's name on the page: from config.json, else its family (claude-haiku-5-5 -> Haiku), else the id."""
-    if listed(model):
-        return listed(model)["name"]
-    found = re.match(r"claude-([a-z]+)", model or "")
-    return found[1].capitalize() if found else (model or "Unknown")
+    """A model's name on the page: from models.json, else its family (claude-haiku-5-5 -> Haiku), else the id."""
+    found = listed(model)
+    if found:
+        return found["name"]
+    family = re.match(r"claude-([a-z]+)", model or "")
+    return family[1].capitalize() if family else (model or "Unknown")
+
+
+QUESTION_MODEL = name(PRICING["question_model"])  # the model the tips suggest for sessions that only ask questions
+
+
+def price(usage):
+    """What one reply cost in USD at the list prices in models.json, fast mode at the model's fast prices. An
+    unlisted model is priced as default_model."""
+    model = listed(usage.get("model")) or MODELS[PRICING["default_model"]]
+    rates = model.get("fast", model["prices"]) if usage.get("speed") == "fast" else model["prices"]
+    hour = (usage.get("cache_creation") or {}).get("ephemeral_1h_input_tokens") or 0
+    tokens = {"input": usage.get("input_tokens") or 0, "output": usage.get("output_tokens") or 0,
+              "cache_read": usage.get("cache_read_input_tokens") or 0,
+              "cache_write_5m": (usage.get("cache_creation_input_tokens") or 0) - hour, "cache_write_1h": hour}
+    return sum(n * rates[kind] for kind, n in tokens.items()) / 1e6
 
 
 def measured():
-    """{session id: {model name: USD}} for the sessions ~/.claude.json still holds: the last one in each folder.
-    Claude Code counts every API call there, including the ones its transcripts leave out."""
+    """{session id: {model id: {cost, tokens}}} for the sessions ~/.claude.json still holds: the last one in each
+    folder. Claude Code counts every API call there, including the ones its transcripts leave out."""
     try:
         folders = json.loads(CLAUDE_STATE.read_text()).get("projects", {})
     except (OSError, ValueError):
         return {}
-    found = {}
-    for folder in folders.values():
-        if folder.get("lastSessionId") and folder.get("lastModelUsage"):
-            models = defaultdict(float)
-            for model, use in folder["lastModelUsage"].items():
-                models[name(model)] += use.get("costUSD") or 0
-            found[folder["lastSessionId"]] = models
-    return found
+    return {folder["lastSessionId"]: {model: {"cost": use.get("costUSD") or 0,
+                                              "tokens": {kind: use.get(field) or 0 for kind, field in STATE_TOKENS.items()}}
+                                      for model, use in folder["lastModelUsage"].items()}
+            for folder in folders.values() if folder.get("lastSessionId") and folder.get("lastModelUsage")}
 
 
-def settle(row, models):
-    """Takes Claude Code's cost for a row when it is at least the priced one; a lower one is from a resumed run
-    that counted only part of the session."""
-    if models and sum(models.values()) >= row["cost"]:
-        row["models"] = {m: round(usd, 4) for m, usd in models.items()}
-        row["cost"] = round(sum(models.values()), 4)
-        row["measured"] = True
+def total(figures):
+    return sum(f["cost"] for f in (figures or {}).values())
+
+
+def settle(row, figures):
+    """Gives a freshly read row Claude Code's figures: cost and tokens per model, with the subagent cost scaled by
+    the same ratio. Only when they are at least the priced cost; lower ones are from a resumed run that counted
+    only part of the session. A model none of the session's replies used shows as BACKGROUND."""
+    if not figures or total(figures) < row["cost"]:
+        return row
+    replied = set(row["models"])
+    models, tokens = defaultdict(float), {}
+    for model, f in figures.items():
+        shown = name(model) if name(model) in replied else BACKGROUND
+        models[shown] += f["cost"]
+        t = tokens.setdefault(shown, dict.fromkeys(TOKENS, 0))
+        for kind in TOKENS:
+            t[kind] += f["tokens"][kind]
+    if row["cost"]:
+        row["subagent_cost"] = round(row["subagent_cost"] * total(figures) / row["cost"], 4)
+    row.update(models={m: round(usd, 4) for m, usd in models.items()}, cost=round(total(figures), 4),
+               tokens_by_model=tokens, measured=figures)
     return row
 
 
@@ -225,17 +240,17 @@ class Session:
         return row
 
 
-def record(path, wait=60):
-    """The SessionEnd hook's step: appends one session, with Claude Code's cost once ~/.claude.json names it
-    (checked every 5 seconds, up to wait seconds). Appending is safe when sessions end at the same time; refresh
-    folds the extra rows away later."""
+def record(path):
+    """The SessionEnd hook's step: appends one session, with Claude Code's figures once ~/.claude.json names it
+    (checked every second, up to WAIT). Appending is safe when sessions end at the same time; refresh folds the
+    extra rows away later."""
     row = Session(path).result()
     if not row:
         return
-    for _ in range(wait // 5):
+    for _ in range(WAIT):
         if row["id"] in measured():
             break
-        time.sleep(5)
+        time.sleep(1)
     settle(row, measured().get(row["id"]))
     DATA.mkdir(parents=True, exist_ok=True)
     with LEDGER.open("a") as out:
@@ -243,9 +258,9 @@ def record(path, wait=60):
 
 
 def refresh():
-    """Every session: the ledger's rows, updated from each transcript still on disk. A cost Claude Code measured
-    is kept. Rewrites the ledger with one row per session (the newest), so it grows with sessions, not with
-    reports."""
+    """Every session: the ledger's rows, updated from each transcript still on disk, with the larger of the
+    figures the row kept and the ones ~/.claude.json holds now. Rewrites the ledger with one row per session (the
+    newest), so it grows with sessions, not with reports."""
     rows = {}
     if LEDGER.exists():
         with LEDGER.open() as lines:
@@ -257,9 +272,8 @@ def refresh():
     for path in sorted(PROJECTS.glob("*/*.jsonl")):
         row = Session(path).result()
         if row:
-            old = rows.get(row["id"], {})
-            settle(row, old.get("models") if old.get("measured") else None)
-            rows[row["id"]] = settle(row, found.get(row["id"]))
+            kept = rows.get(row["id"], {}).get("measured")
+            rows[row["id"]] = settle(row, max(kept, found.get(row["id"]), key=total))
     DATA.mkdir(parents=True, exist_ok=True)
     fresh = LEDGER.with_suffix(".tmp")
     fresh.write_text("".join(json.dumps(r) + "\n" for r in rows.values()))

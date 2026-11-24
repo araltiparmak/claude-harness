@@ -213,29 +213,46 @@ class Ledger(Base):
         self.assertEqual(sorted((r["id"], r["cost"]) for r in found), [("s1", 2.0), ("s2", 1.0)])
         self.assertEqual(len(ledger.LEDGER.read_text().splitlines()), 2)
 
-    def test_prices_come_from_config_and_an_unlisted_model_is_priced_as_the_default(self):
+    def test_prices_come_from_models_json_and_an_unlisted_model_is_priced_as_the_default(self):
         usage = {"input_tokens": 1_000_000, "output_tokens": 1_000_000, "cache_read_input_tokens": 1_000_000,
                  "cache_creation_input_tokens": 1_000_000, "cache_creation": {"ephemeral_1h_input_tokens": 1_000_000}}
-        self.assertAlmostEqual(ledger.price({**usage, "model": "claude-sonnet-5-5-20261101"}), 2 * 3 + 10 + 0.10)
+        self.assertAlmostEqual(ledger.price({**usage, "model": "claude-sonnet-5-5-20261101"}), 2 + 10 + 0.10 + 4)
+        self.assertAlmostEqual(ledger.price({**usage, "model": "claude-opus-5-5", "speed": "fast"}), 8 + 40 + 0.40 + 16)
         self.assertAlmostEqual(ledger.price({**usage, "model": "claude-new-9"}),
                                ledger.price({**usage, "model": "claude-opus-5-5"}))
         self.assertEqual((ledger.name("claude-sonnet-5-5"), ledger.name("claude-haiku-5-5")), ("Sonnet", "Haiku"))
 
-    def test_claude_codes_cost_wins_unless_it_counted_less(self):
+    def test_claude_codes_figures_win_unless_they_count_less(self):
         reply = {"type": "assistant", "timestamp": "2026-11-01T09:00:00Z", "cwd": "/x",
                  "message": {"id": "m1", "model": "claude-opus-5-5", "content": [],
                              "usage": {"input_tokens": 100_000, "output_tokens": 0}}}  # $0.40 at list prices
-        self.transcript([reply], "s1")
+        self.transcript([reply, {**reply, "isSidechain": True, "message": {**reply["message"], "id": "m2"}}], "s1")
         self.transcript([reply], "s2")
+
+        def use(usd, tokens):
+            return {"costUSD": usd, "inputTokens": tokens, "outputTokens": 0, "cacheReadInputTokens": 0,
+                    "cacheCreationInputTokens": 0}
         state = {"projects": {"/a": {"lastSessionId": "s1", "lastModelUsage": {
-            "claude-opus-5-5": {"costUSD": 0.42}, "claude-haiku-5-5": {"costUSD": 0.01}}},
-            "/b": {"lastSessionId": "s2", "lastModelUsage": {"claude-opus-5-5": {"costUSD": 0.1}}}}}
+            "claude-opus-5-5": use(1.0, 250_000), "claude-haiku-5-5": use(0.01, 100)}},
+            "/b": {"lastSessionId": "s2", "lastModelUsage": {"claude-opus-5-5": use(0.1, 25_000)}}}}
         ledger.CLAUDE_STATE.write_text(json.dumps(state))
         found = {r["id"]: r for r in ledger.refresh()}
-        self.assertEqual((found["s1"]["cost"], found["s1"]["models"]), (0.43, {"Opus": 0.42, "Haiku": 0.01}))
-        self.assertEqual((found["s2"]["cost"], found["s2"].get("measured")), (0.4, None))
+        s1 = found["s1"]
+        self.assertEqual((s1["cost"], s1["models"]), (1.01, {"Opus": 1.0, "Background": 0.01}))
+        self.assertEqual((s1["tokens_by_model"]["Opus"]["in"], s1["subagent_cost"]), (250_000, 0.505))
+        self.assertEqual((found["s2"]["cost"], "measured" in found["s2"]), (0.4, False))
         ledger.CLAUDE_STATE.write_text("{}")  # the next session in that folder replaced it; the ledger keeps it
-        self.assertEqual({r["id"]: r["cost"] for r in ledger.refresh()}, {"s1": 0.43, "s2": 0.4})
+        self.assertEqual({r["id"]: r["cost"] for r in ledger.refresh()}, {"s1": 1.01, "s2": 0.4})
+
+    def test_the_hook_records_claude_codes_figures(self):
+        reply = {"type": "assistant", "timestamp": "2026-11-01T09:00:00Z", "cwd": "/x",
+                 "message": {"id": "m1", "model": "claude-opus-5-5", "content": [],
+                             "usage": {"input_tokens": 100_000, "output_tokens": 0}}}
+        ledger.CLAUDE_STATE.write_text(json.dumps({"projects": {"/a": {"lastSessionId": "s1", "lastModelUsage": {
+            "claude-opus-5-5": {"costUSD": 0.5, "inputTokens": 125_000}}}}}))
+        ledger.record(self.transcript([reply], "s1"))
+        row = json.loads(ledger.LEDGER.read_text())
+        self.assertEqual((row["cost"], row["tokens_by_model"]["Opus"]["in"]), (0.5, 125_000))
 
     def test_github_splits_your_pull_requests_into_opened_and_earlier(self):
         def node(n, created):

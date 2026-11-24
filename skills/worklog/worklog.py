@@ -15,7 +15,8 @@ and reviews, with time, cost and tips. Everything stays on this computer.
   worklog.py check                             checks the setup: settings, hook, ledger, git, gh and Jira
   worklog.py record                            the SessionEnd hook: adds the session on stdin to the ledger
 
-Settings: ~/.config/worklog.json over the defaults in config.json, both described in README.md. Data: <DEV_DIR>/worklog, with sessions.jsonl (the
+Settings: ~/.config/worklog.json over the defaults in settings.json; models and prices: models.json; README.md
+describes both. Data: <DEV_DIR>/worklog, with sessions.jsonl (the
 ledger), jira.json (the issue cache), mapped.json (the tickets chosen with map) and notes.json (the outcomes).
 ledger.py reads transcripts, page.py writes the HTML, github.py and jira.py fetch pull requests and issues.
 """
@@ -34,7 +35,8 @@ import github
 import jira
 import ledger
 import page
-from ledger import BIG_CONTEXT, CONFIG, DATA, DEV, FILE, SENT, TOKENS, cost, models_of, name, repo_of, settings
+from ledger import BIG_CONTEXT, QUESTION_MODEL, SENT, TOKENS, cost, models_of, repo_of
+from settings import DATA, DEV, FILE, settings
 
 JIRA_PREFIXES, SUPPORT_PREFIXES, EXCLUDE_REPOS = (
     settings[k] for k in ("jira_prefixes", "support_prefixes", "exclude_repos"))
@@ -46,11 +48,10 @@ SUPPORT = {p.upper() for p in SUPPORT_PREFIXES}
 TOP = 10  # the most expensive sessions listed
 MIN_SESSIONS = 5  # fewer sessions than this give no tips
 # A tip shows when its measure crosses its line. The lines are rules of thumb, not targets.
-LINES = {"big": 0.5, "cache_hit": 0.85, "idle": 0.25, "dear_questions": 0.10, "interrupted": 0.2,
+LINES = {"big": 0.5, "cache_hit": 0.85, "idle": 0.25, "off_model_questions": 0.10, "interrupted": 0.2,
          "compacted": 3, "subagents": 0.3, "errors": 3}
 
-QUESTIONS = name(CONFIG["question_model"])  # the model the tips suggest for questions
-pull_requests, commit_pulls = github.pull_requests, github.commit_pulls  # demo and tests swap them
+pull_requests, commit_pulls = github.pull_requests, github.commit_pulls  # tests swap them
 
 
 # ---- Jira
@@ -304,8 +305,8 @@ def measures(rows):
         "big": share("context", lambda r: cost(r) if r["context"]["peak"] > BIG_CONTEXT else 0),
         "subagents": share("subagent_cost", lambda r: r["subagent_cost"]),
         "idle": share("edits", lambda r: cost(r) if question(r) else 0),
-        "dear_questions": share("edits", lambda r: sum(usd for m, usd in models_of(r).items() if m != QUESTIONS)
-                                if question(r) else 0),
+        "off_model_questions": share("edits", lambda r: sum(usd for m, usd in models_of(r).items()
+                                                           if m != QUESTION_MODEL) if question(r) else 0),
         "rated": len(rated),
         "prompts": per_session(lambda r: r["prompts"]),
         "interrupted": per_session(lambda r: r["interrupts"] > 0),
@@ -335,9 +336,10 @@ def tips(m):
                       "The cache expires after a pause (5 minutes by default), and the next reply pays full price for "
                       "the whole context. Finish a task in one sitting, or start fresh after a long break instead of "
                       "resuming."))
-    if over("dear_questions"):
-        found.append((f"Sessions that only asked questions spent {m['dear_questions']:.0%} of the cost on models "
-                      f"other than {QUESTIONS}.", f"{QUESTIONS} answers most questions well for less; switch with /model."))
+    if over("off_model_questions"):
+        found.append((f"Sessions that only asked questions spent {m['off_model_questions']:.0%} of the cost on "
+                      f"models other than {QUESTION_MODEL}.",
+                      f"{QUESTION_MODEL} answers most questions well for less; switch with /model."))
     if over("idle"):
         found.append((f"{m['idle']:.0%} of the cost went to sessions that changed no files and reviewed nothing.",
                       "Questions are fine. For exploration, a narrower first prompt (the file, the symptom, what you "
@@ -537,9 +539,6 @@ def main():
             ledger.record(Path(path))
     elif command == "report":
         report(args)
-        if (Path(__file__).resolve().parent / "demo.py").exists():  # a local add-on, kept out of the repo
-            import demo
-            demo.main(args)
     elif command == "prepare":
         prepare(args)
     elif command == "map":

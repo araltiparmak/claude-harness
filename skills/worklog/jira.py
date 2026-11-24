@@ -15,7 +15,7 @@ import subprocess
 import sys
 from datetime import date, timedelta
 
-from ledger import settings
+from settings import settings
 
 ISSUE_CMD, SEARCH_CMD, IN_PROGRESS = settings["jira_issue_cmd"], settings["jira_search_cmd"], settings["jira_in_progress"]
 
