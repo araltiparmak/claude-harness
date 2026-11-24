@@ -53,7 +53,7 @@ SMALL = 1.0  # USD; tickets that cost less share one box
 # for 5 minutes, 2x for 1 hour; fast mode costs 2x. An id not listed is priced as claude-opus-5-5.
 PRICES = {"claude-opus-5-5": (4, 20, 0.20), "claude-opus-5": (5, 25, 0.50), "claude-opus-4": (5, 25, 0.50),
           "claude-sonnet-5-5": (2, 10, 0.10), "claude-sonnet-5": (2, 10, 0.20), "claude-sonnet-4": (3, 15, 0.30)}
-MODEL_SLOTS = {"Opus": 1, "Fable": 7, "Sonnet": 2, "Haiku": 3}  # a model keeps its colour on every page; others grey
+MODEL_SLOTS = {"Opus": 1, "Sonnet": 2, "Haiku": 3}  # a model keeps its colour on every page; others grey
 STATUS = {"merged": "✓ Merged", "closed": "✕ Closed, not merged", "open": "○ Open", "draft": "○ Draft"}
 SHOW_COST = True  # report --no-cost turns it off
 SHOW_USAGE = True  # report --no-usage turns it off
@@ -790,7 +790,7 @@ def efficiency_section(data):
         return "-" if v is None else f"{v:.0%}"
     rows = [["Sessions", now["sessions"]], ["Cache hit rate (cache reads / all input)", pct(now["cache_hit"])]]
     if SHOW_COST:
-        rows = [["Cost", money(now["cost"])]] + rows + [
+        rows += [
             ["Cost per merged pull request", money(now["cost"] / merged) if merged else "-"],
             ["Cost per resolved ticket", money(sum(t.cost for t in done) / len(done)) if done else "-"]]
     rows += [[label, pct(now[k])]
