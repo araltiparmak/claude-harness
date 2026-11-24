@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
-"""Jira issues, through the two commands in config.py (the jira CLI by default).
+"""Jira issues, through the two commands set in jira_issue_cmd and jira_search_cmd (the jira CLI by default).
 
   python3 jira.py issue KEY...           prints {key: {summary, type, subtask, parent}} as JSON
   python3 jira.py resolved SINCE UNTIL   prints the keys assigned to you and resolved in the period
   python3 jira.py updated SINCE UNTIL    prints {key: {summary, type}} of the issues assigned to you and updated
                                          in the period
   python3 jira.py in-progress DAY        prints {key: {summary, type}} of the issues assigned to you that were in
-                                         the in-progress status (jira_in_progress in config.py) on that day
+                                         the in-progress status (jira_in_progress) on that day
 
 All raise on a command that fails or prints something that is not JSON.
 """
@@ -15,7 +15,7 @@ import subprocess
 import sys
 from datetime import date, timedelta
 
-from config import settings
+from ledger import settings
 
 ISSUE_CMD, SEARCH_CMD, IN_PROGRESS = settings["jira_issue_cmd"], settings["jira_search_cmd"], settings["jira_in_progress"]
 

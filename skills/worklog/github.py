@@ -15,6 +15,7 @@ import json
 import re
 import subprocess
 import sys
+from datetime import date, datetime
 
 QUERY = """query($q: String!, $after: String) {
   viewer { login }
@@ -46,9 +47,16 @@ def search(query):
         after = data["search"]["pageInfo"]["endCursor"]
 
 
+def status_of(node):
+    """open, draft, merged or closed."""
+    if node["state"] != "OPEN":
+        return node["state"].lower()
+    return "draft" if node["isDraft"] else "open"
+
+
 def brief(node, when):
     commits = "\n".join(c["commit"]["message"] for c in (node.get("commits") or {}).get("nodes", []))
-    status = ("draft" if node["isDraft"] else "open") if node["state"] == "OPEN" else node["state"].lower()
+    status = status_of(node)
     return {"date": when, "repo": node["repository"]["name"], "title": node["title"], "url": node["url"],
             "status": status, "author": (node["author"] or {}).get("login", ""), "branch": node["headRefName"],
             "text": f"{node['title']}\n{node['headRefName']}\n{node['body'] or ''}\n{commits}"}
@@ -58,6 +66,7 @@ def pull_requests(since, until):
     """Opened: created in the period. Earlier: yours, created before the period and updated since; their branches
     still name a ticket. Reviewed: by others, with a review of yours in the period, dated by it. One search finds
     both of yours, since a pull request created in the period was also updated in it."""
+    since, until = date.fromisoformat(since).isoformat(), date.fromisoformat(until).isoformat()
     login, mine = search(f"is:pr author:@me updated:>={since}")
     _, theirs = search(f"is:pr reviewed-by:@me -author:@me updated:>={since}")
     reviewed = []
@@ -72,19 +81,21 @@ def pull_requests(since, until):
             "reviewed": sorted(reviewed, key=lambda p: p["date"])}
 
 
-def output(cmd):
-    return subprocess.run(cmd, capture_output=True, text=True, timeout=60, check=True).stdout.strip()
+def output(cmd, cwd=None):
+    return subprocess.run(cmd, capture_output=True, text=True, timeout=60, check=True, cwd=cwd).stdout.strip()
 
 
 def commit_pulls(repo_dir, start, end):
     """The texts (title, branch, description) of the pull requests that hold the commits you made in the repo at
     repo_dir between start and end, read with git and gh. [] when that is not a GitHub repo or gh fails."""
-    git = ["git", "-C", repo_dir]
     try:
-        found = re.search(r"github\.com[:/]([\w.-]+/[\w.-]+?)(?:\.git)?$", output(git + ["remote", "get-url", "origin"]))
-        shas = output(git + ["log", "--all", f"--author={output(git + ['config', 'user.email'])}",
-                             f"--since={start}", f"--until={end}", "--format=%H"]).split()
-    except Exception:  # no repo there any more, no origin, no email
+        start, end = (datetime.fromisoformat(t.replace("Z", "+00:00")).isoformat() for t in (start, end))
+        found = re.search(r"github\.com[:/]([\w.-]+/[\w.-]+?)(?:\.git)?$",
+                          output(["git", "remote", "get-url", "origin"], repo_dir))
+        email = output(["git", "config", "user.email"], repo_dir)
+        shas = output(["git", "log", "--all", f"--author={email}", f"--since={start}", f"--until={end}", "--format=%H"],
+                      repo_dir).split()
+    except Exception:  # no repo there any more, no origin, no email, a time that is not ISO
         return []
     texts = []
     for sha in shas[:10] if found else []:

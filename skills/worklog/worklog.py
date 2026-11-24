@@ -15,7 +15,7 @@ and reviews, with time, cost and tips. Everything stays on this computer.
   worklog.py check                             checks the setup: settings, hook, ledger, git, gh and Jira
   worklog.py record                            the SessionEnd hook: adds the session on stdin to the ledger
 
-Settings: ~/.config/worklog.json, described in config.py. Data: <DEV_DIR>/worklog, with sessions.jsonl (the
+Settings: ~/.config/worklog.json over the defaults in config.json, both described in README.md. Data: <DEV_DIR>/worklog, with sessions.jsonl (the
 ledger), jira.json (the issue cache), mapped.json (the tickets chosen with map) and notes.json (the outcomes).
 ledger.py reads transcripts, page.py writes the HTML, github.py and jira.py fetch pull requests and issues.
 """
@@ -34,8 +34,7 @@ import github
 import jira
 import ledger
 import page
-from config import DATA, DEV, FILE, settings
-from ledger import BIG_CONTEXT, SENT, TOKENS, cost, models_of, repo_of
+from ledger import BIG_CONTEXT, CONFIG, DATA, DEV, FILE, SENT, TOKENS, cost, models_of, name, repo_of, settings
 
 JIRA_PREFIXES, SUPPORT_PREFIXES, EXCLUDE_REPOS = (
     settings[k] for k in ("jira_prefixes", "support_prefixes", "exclude_repos"))
@@ -47,9 +46,10 @@ SUPPORT = {p.upper() for p in SUPPORT_PREFIXES}
 TOP = 10  # the most expensive sessions listed
 MIN_SESSIONS = 5  # fewer sessions than this give no tips
 # A tip shows when its measure crosses its line. The lines are rules of thumb, not targets.
-LINES = {"big": 0.5, "cache_hit": 0.85, "idle": 0.25, "opus_questions": 0.10, "interrupted": 0.2,
+LINES = {"big": 0.5, "cache_hit": 0.85, "idle": 0.25, "dear_questions": 0.10, "interrupted": 0.2,
          "compacted": 3, "subagents": 0.3, "errors": 3}
 
+QUESTIONS = name(CONFIG["question_model"])  # the model the tips suggest for questions
 pull_requests, commit_pulls = github.pull_requests, github.commit_pulls  # demo and tests swap them
 
 
@@ -260,15 +260,34 @@ def collect(since, until):
 
 # ---- measuring how you use Claude
 
-def measures(rows):
-    """How the sessions used tokens and how smoothly they went, from the ledger alone. A share is of cost over
-    the sessions that recorded the field; None when none did, or when too few did for a tip."""
-    total = sum(cost(r) for r in rows) or 0.0
+def token_totals(rows):
+    """{model: {in, out, read, write}} over the rows."""
     tokens = defaultdict(lambda: dict.fromkeys(TOKENS, 0))
     for r in rows:
         for model, t in r.get("tokens_by_model", {}).items():
-            for name in TOKENS:
-                tokens[model][name] += t[name]
+            for kind in TOKENS:
+                tokens[model][kind] += t[kind]
+    return {m: t for m, t in tokens.items() if any(t.values())}
+
+
+def context_stats(rows):
+    """The context sizes of the sessions that recorded them."""
+    contexts = [r for r in rows if "context" in r]
+    peaks = [r["context"]["peak"] for r in contexts]
+    return {"sessions": len(contexts), "avg": sum(r["context"]["avg"] for r in contexts) // max(len(contexts), 1),
+            "peak_avg": sum(peaks) // max(len(peaks), 1), "peak": max(peaks, default=0),
+            "big": sum(p > BIG_CONTEXT for p in peaks)}
+
+
+def question(r):
+    """A session that changed no files and reviewed nothing."""
+    return not (r["edits"] or r["review"])
+
+
+def measures(rows):
+    """How the sessions used tokens and how smoothly they went, from the ledger alone. A share is of cost over
+    the sessions that recorded the field; None when none did, or when too few did for a tip."""
+    tokens = token_totals(rows)
     sent = sum(t[k] for t in tokens.values() for k in SENT)
 
     def share(field, part):
@@ -276,26 +295,23 @@ def measures(rows):
         whole = sum(cost(r) for r in known)
         return sum(part(r) for r in known) / whole if whole else None
 
-    def question(r):
-        return not (r["edits"] or r["review"])
+    def per_session(field):
+        return sum(field(r) for r in rated) / len(rated) if rated else None
     rated = [r for r in rows if "prompts" in r]  # rows recorded before these were kept have none
-    contexts = [r for r in rows if "context" in r]
-    peaks = [r["context"]["peak"] for r in contexts]
     return {
-        "cost": total, "sessions": len(rows), "tokens": {m: t for m, t in tokens.items() if any(t.values())},
+        "cost": sum(cost(r) for r in rows) or 0.0, "sessions": len(rows), "tokens": tokens,
         "cache_hit": sum(t["read"] for t in tokens.values()) / sent if sent else None,
         "big": share("context", lambda r: cost(r) if r["context"]["peak"] > BIG_CONTEXT else 0),
         "subagents": share("subagent_cost", lambda r: r["subagent_cost"]),
         "idle": share("edits", lambda r: cost(r) if question(r) else 0),
-        "opus_questions": share("edits", lambda r: models_of(r).get("Opus", 0) if question(r) else 0),
+        "dear_questions": share("edits", lambda r: sum(usd for m, usd in models_of(r).items() if m != QUESTIONS)
+                                if question(r) else 0),
         "rated": len(rated),
-        "prompts": sum(r["prompts"] for r in rated) / len(rated) if rated else None,
-        "interrupted": sum(r["interrupts"] > 0 for r in rated) / len(rated) if rated else None,
-        "errors": sum(r["errors"] for r in rated) / len(rated) if rated else None,
-        "context": {"sessions": len(contexts), "avg": sum(r["context"]["avg"] for r in contexts) // max(len(contexts), 1),
-                    "peak_avg": sum(peaks) // max(len(peaks), 1), "peak": max(peaks, default=0),
-                    "big": sum(p > BIG_CONTEXT for p in peaks)},
-        "compacted": sum(r["context"]["compactions"] > 0 for r in contexts),
+        "prompts": per_session(lambda r: r["prompts"]),
+        "interrupted": per_session(lambda r: r["interrupts"] > 0),
+        "errors": per_session(lambda r: r["errors"]),
+        "context": context_stats(rows),
+        "compacted": sum(r["context"]["compactions"] > 0 for r in rows if "context" in r),
         "top": sorted(rows, key=lambda r: -cost(r))[:TOP]}
 
 
@@ -319,9 +335,9 @@ def tips(m):
                       "The cache expires after a pause (5 minutes by default), and the next reply pays full price for "
                       "the whole context. Finish a task in one sitting, or start fresh after a long break instead of "
                       "resuming."))
-    if over("opus_questions"):
-        found.append((f"Sessions that only asked questions spent {m['opus_questions']:.0%} of the cost on Opus.",
-                      "Sonnet answers most questions well for less; switch with /model."))
+    if over("dear_questions"):
+        found.append((f"Sessions that only asked questions spent {m['dear_questions']:.0%} of the cost on models "
+                      f"other than {QUESTIONS}.", f"{QUESTIONS} answers most questions well for less; switch with /model."))
     if over("idle"):
         found.append((f"{m['idle']:.0%} of the cost went to sessions that changed no files and reviewed nothing.",
                       "Questions are fine. For exploration, a narrower first prompt (the file, the symptom, what you "
@@ -344,25 +360,30 @@ def tips(m):
     return found
 
 
+def skills_of(row, installed):
+    """A session's skill uses: Skill calls, and slash commands named after an installed or a plugin skill."""
+    used = row.get("used", {})
+    skills = dict(used.get("skill", {}))
+    for skill, n in used.get("command", {}).items():
+        if skill in installed or ":" in skill:
+            skills[skill] = skills.get(skill, 0) + n
+    return skills
+
+
 def usage_of(rows):
-    """What the sessions used, as {kind: {name: [uses, sessions]}} for skills, MCP servers and subagents (a slash
-    command counts as a skill when a skill of that name is installed or it names a plugin skill), cost per day
-    per model, and the peak context of each session."""
+    """What the sessions used, as {kind: {name: [uses, sessions]}} for skills, MCP servers and subagents, cost per
+    day per model, and the peak context of each session."""
     folder = Path.home() / ".claude" / "skills"
     installed = {p.name for p in folder.iterdir()} if folder.is_dir() else set()
     found = defaultdict(lambda: defaultdict(lambda: [0, 0]))
+    found["daily"] = defaultdict(lambda: defaultdict(float))  # day: {model: cost}
     for r in rows:
         used = r.get("used", {})
-        skills = dict(used.get("skill", {}))
-        for name, n in used.get("command", {}).items():
-            if name in installed or ":" in name:
-                skills[name] = skills.get(name, 0) + n
-        for kind, counts in (("skill", skills), ("mcp", used.get("mcp", {})), ("agent", used.get("agent", {}))):
-            for name, n in counts.items():
-                found[kind][name][0] += n
-                found[kind][name][1] += 1
-    found["daily"] = defaultdict(lambda: defaultdict(float))  # day: {model family: cost}
-    for r in rows:
+        for kind, counts in (("skill", skills_of(r, installed)), ("mcp", used.get("mcp", {})),
+                             ("agent", used.get("agent", {}))):
+            for item, n in counts.items():
+                found[kind][item][0] += n
+                found[kind][item][1] += 1
         for model, usd in models_of(r).items():
             found["daily"][r["start"][:10]][model] += usd
     found["peaks"] = [(r["start"][:10], r["context"]["peak"], r["title"] or r["prompt"][:60])
@@ -447,22 +468,18 @@ def pairs(args, usage):
     return list(zip(args[::2], args[1::2]))
 
 
-def check():
-    """One line per part of the setup: ok, warn (the report runs but misses something) or FAIL; exits 1 on a FAIL."""
-    found = []
+LABELS = {True: "ok  ", None: "warn", False: "FAIL"}
 
-    def line(ok, what, fix=""):
-        found.append(ok)
-        print(f"{'ok  ' if ok is True else 'warn' if ok is None else 'FAIL'}  {what}" + (f": {fix}" if fix and ok is not True else ""))
 
-    def runs(cmd):
-        try:
-            return subprocess.run(cmd, capture_output=True, text=True, timeout=30).returncode == 0
-        except (OSError, subprocess.TimeoutExpired):
-            return False
-    line(FILE.exists() or None, f"settings {FILE}", "not found; config.py lists the keys")
-    line(bool(PREFIXES) or None, f"jira_prefixes {', '.join(JIRA_PREFIXES)}".strip(), "empty, so no session finds a ticket")
-    line(DEV.is_dir() or None, f"dev_dir {DEV}", "not a folder; sessions are named by their own folder")
+def runs(cmd):
+    try:
+        return subprocess.run(cmd, capture_output=True, text=True, timeout=30).returncode == 0
+    except (OSError, subprocess.TimeoutExpired):
+        return False
+
+
+def check_claude(line):
+    """The SessionEnd hook and how long Claude Code keeps transcripts."""
     live = Path.home() / ".claude" / "settings.json"
     try:
         claude = json.loads(live.read_text()) if live.exists() else {}
@@ -474,11 +491,10 @@ def check():
     keep = claude.get("cleanupPeriodDays", 30)
     line(keep >= 60 or None, f"transcripts kept {keep} days", 'set "cleanupPeriodDays": 90 so report catches '
                                                               "sessions the hook missed")
-    if ledger.LEDGER.exists():
-        with ledger.LEDGER.open() as rows:
-            line(True, f"ledger {ledger.LEDGER}, {sum(1 for _ in rows)} sessions")
-    else:
-        line(None, f"ledger {ledger.LEDGER}", "none yet; the first report builds it from the transcripts")
+
+
+def check_sources(line):
+    """git, gh and Jira, which the report asks for pull requests and issues."""
     line(runs(["git", "config", "user.email"]) or None, "git user.email", "not set; commits cannot find their pull requests")
     line(bool(shutil.which("gh")) and runs(["gh", "auth", "status"]) or None, "gh",
          "not installed or not logged in (gh auth login); no pull requests or reviews")
@@ -488,6 +504,25 @@ def check():
             line(True, "Jira search")
         except Exception as err:  # CLI missing, not logged in, output that is not JSON
             line(None, "Jira search", f"failed ({err}); tickets show by key only")
+
+
+def check():
+    """One line per part of the setup: ok, warn (the report runs but misses something) or FAIL; exits 1 on a FAIL."""
+    found = []
+
+    def line(ok, what, fix=""):
+        found.append(ok)
+        print(f"{LABELS[ok]}  {what}" + (f": {fix}" if fix and ok is not True else ""))
+    line(FILE.exists() or None, f"settings {FILE}", "not found; README.md lists the keys")
+    line(bool(PREFIXES) or None, f"jira_prefixes {', '.join(JIRA_PREFIXES)}".strip(), "empty, so no session finds a ticket")
+    line(DEV.is_dir() or None, f"dev_dir {DEV}", "not a folder; sessions are named by their own folder")
+    check_claude(line)
+    if ledger.LEDGER.exists():
+        with ledger.LEDGER.open() as rows:
+            line(True, f"ledger {ledger.LEDGER}, {sum(1 for _ in rows)} sessions")
+    else:
+        line(None, f"ledger {ledger.LEDGER}", "none yet; the first report builds it from the transcripts")
+    check_sources(line)
     if False in found:
         sys.exit(1)
 

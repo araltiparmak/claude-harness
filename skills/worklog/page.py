@@ -10,13 +10,13 @@ from datetime import date, timedelta
 from pathlib import Path
 from string import Template
 
-from config import settings
-from ledger import BIG_CONTEXT, IDLE, SENT, cost, repo_of
+from ledger import BIG_CONTEXT, CONFIG, IDLE, MODELS, SENT, cost, repo_of, settings
 
 JIRA_URL = settings["jira_url"]
 TEMPLATE = Path(__file__).resolve().parent / "report.html"
 SMALL = 1.0  # USD; tickets that cost less share one box
-MODEL_SLOTS = {"Opus": 1, "Sonnet": 2, "Haiku": 3}  # a model keeps its colour on every page; others grey
+QUESTION_MODEL = MODELS[CONFIG["question_model"]]["name"]  # the model the tips suggest for questions
+MODEL_SLOTS = {m["name"]: m["colour"] for m in MODELS.values() if "colour" in m}  # from config.json; others grey
 STATUS = {"merged": "✓ Merged", "closed": "✕ Closed, not merged", "open": "○ Open", "draft": "○ Draft"}
 
 
@@ -34,7 +34,9 @@ def day(stamp):
 
 def hours(minutes):
     """Active minutes as hours, '-' for none."""
-    return "-" if not minutes else "<0.1h" if minutes < 6 else f"{minutes / 60:.1f}h"
+    if not minutes:
+        return "-"
+    return "<0.1h" if minutes < 6 else f"{minutes / 60:.1f}h"
 
 
 def worked_on(days):
@@ -62,7 +64,9 @@ def pct(share):
 
 def amount(n):
     """1234567 as 1.2M, 45678 as 46k."""
-    return f"{n / 1e6:.1f}M" if n >= 1e6 else f"{n / 1e3:.0f}k" if n >= 1e3 else str(n)
+    if n >= 1e6:
+        return f"{n / 1e6:.1f}M"
+    return f"{n / 1e3:.0f}k" if n >= 1e3 else str(n)
 
 
 def tag(name, text, **attrs):
@@ -207,7 +211,11 @@ class Page:
 
     def section(self, title, intro, *parts, usd=None, minutes=None, slot=None):
         """A boxed section with its total at the right of the title: cost on your page, time on a shared one."""
-        total = hours(minutes) if self.share and minutes else money(usd) if not self.share and usd and paid(usd) else ""
+        total = ""
+        if self.share and minutes:
+            total = hours(minutes)
+        elif not self.share and usd and paid(usd):
+            total = money(usd)
         name = [(dot(slot) if slot is not None else "") + (title[0] if isinstance(title, list) else html.escape(title))]
         head = tag("div", [tag("h2", name)] + ([tag("span", total, class_="total")] if total else []), class_="head")
         return tag("section", [head] + ([tag("p", intro, class_="intro")] if intro else []) + list(parts),
@@ -272,8 +280,10 @@ class Page:
         top, total = max([g[basis] for g in rows] + [0.01]), sum(g[basis] for g in rows) or 0.01
 
         def share(g):
+            if not g[basis]:
+                return "-"
             part = g[basis] / total
-            return "-" if not g[basis] else "<1%" if part < 0.005 else f"{part:.0%}"
+            return "<1%" if part < 0.005 else f"{part:.0%}"
 
         def spend(g):
             bar = tag("div", [tag("span", "", class_=f"c{g['slot']}", style=f"width:{g[basis] / top * 100:.1f}%")],
@@ -292,46 +302,53 @@ class Page:
         return self.section("Overview", intro, split + legend + self.grid(head, body))
 
     def ticket_boxes(self, tickets, slot, name):
-        """One box per ticket, the most expensive first: its note first in the intro, then a table with the
-        ticket's own work and each sub-task, indented, with its own time and cost. The tickets that cost less than
-        SMALL share one last box, a row each with its sub-tasks included and its note in the small print."""
-        notes = self.data["notes"]
+        """One box per ticket, the most expensive first, then one box for the tickets that cost less than SMALL."""
         typed = any(w.type for t in tickets for w in t.works)
         head = ["Ticket"] + (["Type"] if typed else []) + ["Worked on", "Pull requests", "Models", "Time", "Cost"]
         ranked = sorted(tickets, key=lambda t: -t.cost)
         small = [t for t in ranked if t.cost < SMALL]
-        boxes = []
-        for t in ranked[:len(ranked) - len(small)]:
-            rows = [[ticket_cell(w.key, w.summary, w.mapped)] + ([w.type or "-"] if typed else [])
-                    + [worked_on(w.days), pr_links(w.prs), self.model_split(w.models), hours(w.minutes), money(w.cost)]
-                    for w in t.works]
-            label = f"{t.key} {t.own.summary}".strip()
-            title = [tag("a", label, href=jira_link(t.key))] if JIRA_URL else label
-            titles = list(dict.fromkeys(pr["title"] for w in t.works for pr in w.prs))
-            intro = notes[t.key] + " " if t.key in notes else ""
-            intro += f"Repos: {', '.join(t.repos)}." if t.repos else ""
-            intro += f" Pull requests: {'; '.join(titles)}." if titles else ""
-            intro += " The total includes the sub-tasks." if t.subs else ""
-            boxes.append(self.section(title, intro.strip(), self.grid(head, rows, [""] + ["sub"] * len(t.subs)),
-                                      usd=t.cost, minutes=t.minutes, slot=slot))
+        boxes = [self.ticket_box(t, head, typed, slot) for t in ranked[:len(ranked) - len(small)]]
         if small:
-            rows = []
-            for t in small:
-                models = defaultdict(float)
-                for w in t.works:
-                    for model, usd in w.models.items():
-                        models[model] += usd
-                summary = f"{t.own.summary}. {notes[t.key]}" if t.key in notes else t.own.summary
-                rows.append([ticket_cell(t.key, summary, sum(w.mapped for w in t.works))]
-                            + ([t.own.type or "-"] if typed else [])
-                            + [worked_on(set().union(*(w.days for w in t.works))),
-                               pr_links([pr for w in t.works for pr in w.prs]), self.model_split(models),
-                               hours(t.minutes), money(t.cost)])
-            intro = (f"{plural(len(small), name[:-1])} with little session time." if self.share else
-                     f"{plural(len(small), name[:-1])} that cost less than {money(SMALL)} each, sub-tasks included.")
-            boxes.append(self.section(f"Smaller {name}", intro, self.grid(head, rows), usd=sum(t.cost for t in small),
-                                      minutes=sum(t.minutes for t in small), slot=slot))
+            boxes.append(self.small_box(small, head, typed, slot, name))
         return boxes
+
+    def ticket_box(self, t, head, typed, slot):
+        """A ticket's box: its note first in the intro, then a table with the ticket's own work and each sub-task,
+        indented, with its own time and cost."""
+        notes = self.data["notes"]
+        rows = [[ticket_cell(w.key, w.summary, w.mapped)] + ([w.type or "-"] if typed else [])
+                + [worked_on(w.days), pr_links(w.prs), self.model_split(w.models), hours(w.minutes), money(w.cost)]
+                for w in t.works]
+        label = f"{t.key} {t.own.summary}".strip()
+        title = [tag("a", label, href=jira_link(t.key))] if JIRA_URL else label
+        titles = list(dict.fromkeys(pr["title"] for w in t.works for pr in w.prs))
+        intro = notes[t.key] + " " if t.key in notes else ""
+        intro += f"Repos: {', '.join(t.repos)}." if t.repos else ""
+        intro += f" Pull requests: {'; '.join(titles)}." if titles else ""
+        intro += " The total includes the sub-tasks." if t.subs else ""
+        return self.section(title, intro.strip(), self.grid(head, rows, [""] + ["sub"] * len(t.subs)),
+                            usd=t.cost, minutes=t.minutes, slot=slot)
+
+    def small_box(self, small, head, typed, slot, name):
+        """The tickets that cost less than SMALL in one box, a row each with its sub-tasks included and its note in
+        the small print."""
+        notes = self.data["notes"]
+        rows = []
+        for t in small:
+            models = defaultdict(float)
+            for w in t.works:
+                for model, usd in w.models.items():
+                    models[model] += usd
+            summary = f"{t.own.summary}. {notes[t.key]}" if t.key in notes else t.own.summary
+            rows.append([ticket_cell(t.key, summary, sum(w.mapped for w in t.works))]
+                        + ([t.own.type or "-"] if typed else [])
+                        + [worked_on(set().union(*(w.days for w in t.works))),
+                           pr_links([pr for w in t.works for pr in w.prs]), self.model_split(models),
+                           hours(t.minutes), money(t.cost)])
+        intro = (f"{plural(len(small), name[:-1])} with little session time." if self.share else
+                 f"{plural(len(small), name[:-1])} that cost less than {money(SMALL)} each, sub-tasks included.")
+        return self.section(f"Smaller {name}", intro, self.grid(head, rows), usd=sum(t.cost for t in small),
+                            minutes=sum(t.minutes for t in small), slot=slot)
 
     def work(self):
         """The overview, then the ticket boxes, pull requests without a ticket, other work and code reviews."""
@@ -383,7 +400,7 @@ class Page:
                 [f"Share of cost in sessions past {BIG_CONTEXT // 1000}k context", pct(m["big"])],
                 ["Share of cost in subagents", pct(m["subagents"])],
                 ["Share of cost in sessions that changed nothing", pct(m["idle"])],
-                ["Share of cost on Opus in sessions that changed nothing", pct(m["opus_questions"])],
+                [f"Share of cost not on {QUESTION_MODEL} in sessions that changed nothing", pct(m["dear_questions"])],
                 ["Prompts per session", f"{m['prompts']:.1f}" if m["prompts"] is not None else "-"],
                 ["Prompts per merged pull request",
                  f"{m['prompts'] * m['rated'] / merged:.0f}" if m["prompts"] is not None and merged else "-"],

@@ -4,8 +4,8 @@ A monthly look at how you work with Claude Code, and what the work was. It reads
 keeps on your computer, your pull requests (`gh`) and your Jira issues (`jira` CLI), and writes one HTML page.
 
 It is for learning about your own habits: where tokens go, which sessions went smoothly, and what you delivered.
-It is not a way to compare people. Costs are estimates at API list prices, and time is an estimate from message
-times, so both vary with how a person works, not only with how much they do.
+It is not a way to compare people. Costs are estimates at API list prices (see [Cost](#cost)), and time is an
+estimate from message times, so both vary with how a person works, not only with how much they do.
 
 ## What you get
 
@@ -39,14 +39,23 @@ has no pull requests or ticket names.
    }
    ```
 
-3. Write your settings to `~/.config/worklog.json`. Every key is optional; `config.py` describes each one:
+3. Write your settings to `~/.config/worklog.json`. Every key is optional; a key you leave out keeps its default
+   from the `settings` part of `config.json`:
 
    ```json
    {"jira_url": "https://yourcompany.atlassian.net", "jira_prefixes": ["ABC"], "support_prefixes": ["SUP"],
     "exclude_repos": ["my-side-project"], "dev_dir": "~/code"}
    ```
 
-   `dev_dir` is the folder that holds your repos; the data goes to `<dev_dir>/worklog`.
+   | Key | What it is |
+   |---|---|
+   | `jira_url` | Ticket keys link to `<jira_url>/browse/<key>` |
+   | `jira_prefixes` | Every Jira project whose keys you use, such as `ABC` for `ABC-123` |
+   | `support_prefixes` | The prefixes of support tickets |
+   | `exclude_repos` | Repos (folder or GitHub name) the report leaves out |
+   | `dev_dir` | The folder that holds your repos; the data goes to `<dev_dir>/worklog` |
+   | `jira_issue_cmd`, `jira_search_cmd` | The commands that print Jira JSON for one issue (`{key}`) and for a JQL query (`{jql}`) |
+   | `jira_in_progress` | The name of the status your Jira uses for work in progress |
 4. Log in: `gh auth login`, and `jira init` for the [jira CLI](https://github.com/ankitpokhrel/jira-cli) (or set
    `jira_issue_cmd` and `jira_search_cmd` to another command that prints Jira JSON).
 5. Check: `python3 ~/.claude/skills/worklog/worklog.py check` prints one line per part of the setup.
@@ -86,7 +95,7 @@ A sub-task counts for its parent ticket. Naming the key in the branch, or in you
 | Cost past 100k context | Cost of sessions whose largest reply context passed 100k tokens | over 50% |
 | Cost in subagents | Cost of the replies made by subagents | over 30% |
 | Cost in sessions that changed nothing | Sessions with no file edit and no review | over 25% |
-| Opus in sessions that changed nothing | The Opus part of those | over 10% |
+| Other models in sessions that changed nothing | The part of those not on `question_model` (Sonnet) | over 10% |
 | Sessions you interrupted | Sessions with at least one "Request interrupted by user" | over 20% |
 | Failed tool calls per session | Tool results marked as errors | over 3 |
 | Sessions compacted | Sessions where the context was compacted | 3 or more |
@@ -95,6 +104,23 @@ Tips need at least 5 sessions. The lines are in `LINES` at the top of `worklog.p
 
 Active time adds up the gaps between a session's messages and leaves out every gap over 15 minutes. Sessions that
 run side by side add up, so the total can be more than the hours on the clock.
+
+## Cost
+
+A session's cost is Claude Code's own figure when `~/.claude.json` still holds it. Claude Code keeps there the
+cost of the last session in each folder, and it counts API calls the transcripts leave out (3 to 9% more in
+sessions run in auto mode). The SessionEnd hook waits up to a minute for it, and every report takes the ones still
+there. A session without it is priced from its transcript's tokens at the list prices in `config.json`:
+
+| Key | What it is |
+|---|---|
+| `models` | Per model id: the name on the page, its colour (`1` to `3`; a model without one is grey), and USD per million tokens for input, output and cache reads. An id that starts with a listed one, such as a dated id, takes its entry |
+| `default_model` | How an unlisted model is priced |
+| `question_model` | The cheaper model the tips suggest for sessions that only ask questions |
+| `cache_write` | The price of a cache write, as a multiple of input, for 5-minute and 1-hour caches |
+| `fast` | The multiple fast mode costs |
+
+When a new model comes out, add its id to `models`.
 
 ## Data
 
@@ -105,5 +131,5 @@ saved), and the pages. Nothing is sent anywhere unless you run `/worklog share` 
 ## Files
 
 `worklog.py` (commands, sorting, measures and tips), `ledger.py` (reads transcripts), `page.py` and
-`report.html` (the page), `github.py` and `jira.py` (fetching; each runs on its own), `config.py` (settings),
+`report.html` (the page), `github.py` and `jira.py` (fetching; each runs on its own), `config.json` (default settings, models and prices),
 `test_worklog.py` (`python3 -m unittest test_worklog`).

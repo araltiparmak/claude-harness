@@ -48,6 +48,7 @@ class Base(unittest.TestCase):
         tmp = Path(tempfile.mkdtemp())
         self.tmp = tmp
         ledger.DATA, ledger.LEDGER, ledger.PROJECTS = tmp, tmp / "sessions.jsonl", tmp / "projects"
+        ledger.CLAUDE_STATE = tmp / "claude.json"
         w.DATA, w.MAPPED, w.NOTES = tmp, tmp / "mapped.json", tmp / "notes.json"
         w.KEY, w.PREFIXES, w.SUPPORT = re.compile(r"\b(?:ABC)-\d+\b", re.I), "ABC", set()
         w.jira.issue = lambda key: ISSUES[key]
@@ -211,6 +212,30 @@ class Ledger(Base):
         found = ledger.refresh()
         self.assertEqual(sorted((r["id"], r["cost"]) for r in found), [("s1", 2.0), ("s2", 1.0)])
         self.assertEqual(len(ledger.LEDGER.read_text().splitlines()), 2)
+
+    def test_prices_come_from_config_and_an_unlisted_model_is_priced_as_the_default(self):
+        usage = {"input_tokens": 1_000_000, "output_tokens": 1_000_000, "cache_read_input_tokens": 1_000_000,
+                 "cache_creation_input_tokens": 1_000_000, "cache_creation": {"ephemeral_1h_input_tokens": 1_000_000}}
+        self.assertAlmostEqual(ledger.price({**usage, "model": "claude-sonnet-5-5-20261101"}), 2 * 3 + 10 + 0.10)
+        self.assertAlmostEqual(ledger.price({**usage, "model": "claude-new-9"}),
+                               ledger.price({**usage, "model": "claude-opus-5-5"}))
+        self.assertEqual((ledger.name("claude-sonnet-5-5"), ledger.name("claude-haiku-5-5")), ("Sonnet", "Haiku"))
+
+    def test_claude_codes_cost_wins_unless_it_counted_less(self):
+        reply = {"type": "assistant", "timestamp": "2026-11-01T09:00:00Z", "cwd": "/x",
+                 "message": {"id": "m1", "model": "claude-opus-5-5", "content": [],
+                             "usage": {"input_tokens": 100_000, "output_tokens": 0}}}  # $0.40 at list prices
+        self.transcript([reply], "s1")
+        self.transcript([reply], "s2")
+        state = {"projects": {"/a": {"lastSessionId": "s1", "lastModelUsage": {
+            "claude-opus-5-5": {"costUSD": 0.42}, "claude-haiku-5-5": {"costUSD": 0.01}}},
+            "/b": {"lastSessionId": "s2", "lastModelUsage": {"claude-opus-5-5": {"costUSD": 0.1}}}}}
+        ledger.CLAUDE_STATE.write_text(json.dumps(state))
+        found = {r["id"]: r for r in ledger.refresh()}
+        self.assertEqual((found["s1"]["cost"], found["s1"]["models"]), (0.43, {"Opus": 0.42, "Haiku": 0.01}))
+        self.assertEqual((found["s2"]["cost"], found["s2"].get("measured")), (0.4, None))
+        ledger.CLAUDE_STATE.write_text("{}")  # the next session in that folder replaced it; the ledger keeps it
+        self.assertEqual({r["id"]: r["cost"] for r in ledger.refresh()}, {"s1": 0.43, "s2": 0.4})
 
     def test_github_splits_your_pull_requests_into_opened_and_earlier(self):
         def node(n, created):
