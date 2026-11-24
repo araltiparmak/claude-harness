@@ -9,7 +9,9 @@ import worklog as w
 
 ISSUES = {"ABC-1": {"summary": "Export", "type": "Story", "subtask": False, "parent": ""},
           "ABC-2": {"summary": "CSV", "type": "Sub-task", "subtask": True, "parent": "ABC-1"},
-          "ABC-9": {"summary": "Billing", "type": "Epic", "subtask": False, "parent": ""}}
+          "ABC-9": {"summary": "Billing", "type": "Epic", "subtask": False, "parent": ""},
+          "ABC-3": {"summary": "Typo", "type": "Bug", "subtask": False, "parent": ""},
+          "ABC-4": {"summary": "Label", "type": "Bug", "subtask": False, "parent": ""}}
 
 
 def session(n, keys=(), cost=1.0, edits=True, review=False, branches=("main",), pulls=(), repo="api"):
@@ -84,6 +86,13 @@ class Report(unittest.TestCase):
         finally:
             w.subprocess.run(["rm", "-rf", str(w.DEV)])
             w.DEV = dev
+
+    def test_tickets_under_a_dollar_share_one_box_with_their_sum(self):
+        data = self.collect([session(1, ["ABC-1"], 2.0), session(2, ["ABC-3"], 0.4), session(3, ["ABC-4"], 0.3)])
+        boxes = w.ticket_boxes(data["tickets"], 1, "tickets")
+        self.assertEqual(len(boxes), 2)
+        self.assertIn("Smaller tickets", boxes[1])
+        self.assertTrue(all(usd in boxes[1] for usd in ("$0.70", "$0.40", "$0.30")))
 
     def test_month_before_keeps_the_day_or_takes_the_last(self):
         self.assertEqual((w.month_before("2026-11-23"), w.month_before("2026-03-31")), ("2026-10-23", "2026-02-28"))

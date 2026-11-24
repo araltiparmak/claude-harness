@@ -1,19 +1,19 @@
 #!/usr/bin/env python3
-"""Jira issues, through the two commands below (the jira CLI by default).
+"""Jira issues, through the two commands in config.py (the jira CLI by default).
 
   python3 jira.py issue KEY...           prints {key: {summary, type, subtask, parent}} as JSON
   python3 jira.py resolved SINCE UNTIL   prints the keys assigned to you and resolved in the period
 
 Both raise on a command that fails or prints something that is not JSON.
 """
-# The commands that print Jira JSON: one issue ({key}), and the issues a JQL query finds ({jql}).
-ISSUE_CMD = "jira issue view {key} --raw"
-SEARCH_CMD = "jira issue list -q {jql} --raw"
-
 import json
 import subprocess
 import sys
 from datetime import date, timedelta
+
+from config import settings
+
+ISSUE_CMD, SEARCH_CMD = settings["jira_issue_cmd"], settings["jira_search_cmd"]
 
 
 def run(template, **values):

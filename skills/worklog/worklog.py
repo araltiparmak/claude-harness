@@ -12,17 +12,11 @@
                                                period's tickets, for /worklog to choose from
   worklog.py map SESSION KEY [SESSION KEY...]  saves a ticket for a session the rules gave none
 
+Settings: ~/.config/worklog.json, described in config.py.
 Data: <DEV_DIR>/worklog, with sessions.jsonl (the ledger), jira.json (the issue cache) and mapped.json
 (the tickets chosen with map).
 github.py and jira.py fetch pull requests and issues; each runs on its own too.
 """
-# Settings: set your own on your machine; the repo keeps these empty.
-JIRA_URL = ""  # such as "https://example.atlassian.net"; ticket keys then link to <JIRA_URL>/browse/<key>
-JIRA_PREFIXES = []  # every Jira project whose keys you use, such as ["ABC"] for ABC-123
-SUPPORT_PREFIXES = []  # the prefixes of support tickets
-EXCLUDE_REPOS = []  # repos (folder or GitHub name) the report leaves out, such as personal ones
-DEV_DIR = "~/dev"  # the folder that holds the repos; the data lives in <DEV_DIR>/worklog
-
 import csv
 import html
 import json
@@ -38,6 +32,10 @@ from string import Template
 
 import github
 import jira
+from config import settings
+
+JIRA_URL, JIRA_PREFIXES, SUPPORT_PREFIXES, EXCLUDE_REPOS, DEV_DIR = (
+    settings[k] for k in ("jira_url", "jira_prefixes", "support_prefixes", "exclude_repos", "dev_dir"))
 
 HERE = Path(__file__).resolve().parent
 DEV = Path(DEV_DIR).expanduser()
@@ -57,6 +55,7 @@ TOKENS = {"in": "input_tokens", "out": "output_tokens", "write": "cache_creation
           "read": "cache_read_input_tokens"}
 SENT = ("in", "write", "read")  # the input a reply is sent: its context
 BIG_CONTEXT = 100_000  # tokens
+SMALL = 1.0  # USD; tickets that cost less share one box
 # API list prices in USD per million tokens: input, output, cache read. A cache write costs 1.25x input
 # for 5 minutes, 2x for 1 hour; fast mode costs 2x. An id not listed is priced as claude-opus-5-5.
 PRICES = {"claude-opus-5-5": (4, 20, 0.20), "claude-opus-5": (5, 25, 0.50), "claude-opus-4": (5, 25, 0.50),
@@ -616,23 +615,39 @@ def repos(tickets):
     return ", ".join(found) or "-"
 
 
-def ticket_boxes(tickets, slot):
+def ticket_boxes(tickets, slot, name):
     """One box per ticket, the most expensive first: its total cost in the title, then a table with the
-    ticket's own work and each sub-task, indented, with its own cost."""
+    ticket's own work and each sub-task, indented, with its own cost. The tickets that cost less than SMALL share
+    one last box, a row each with its sub-tasks included, and their sum in its title."""
     typed = any(w.type for t in tickets for w in t.works)
     head = ["Ticket"] + (["Type"] if typed else []) + ["Worked on", "Pull requests", "Models", "Cost"]
+    ranked = sorted(tickets, key=lambda t: -t.cost)
+    small = [t for t in ranked if t.cost < SMALL]
     boxes = []
-    for t in sorted(tickets, key=lambda t: -t.cost):
+    for t in ranked[:len(ranked) - len(small)]:
         rows = [[(w.key, jira_link(w.key), w.summary)] + ([w.type or "-"] if typed else [])
                 + [worked_on(w.days), pr_links(w.prs), model_split(w.models), money(w.cost)] for w in t.works]
-        name = f"{t.key} {t.own.summary}".strip()
-        title = [tag("a", name, href=jira_link(t.key))] if JIRA_URL else name
+        label = f"{t.key} {t.own.summary}".strip()
+        title = [tag("a", label, href=jira_link(t.key))] if JIRA_URL else label
         titles = list(dict.fromkeys(pr["title"] for w in t.works for pr in w.prs))
         intro = f"Repos: {', '.join(t.repos)}." if t.repos else ""
         intro += f" Pull requests: {'; '.join(titles)}." if titles else ""
         intro += " The total includes the sub-tasks." if t.subs and SHOW_COST else ""
         boxes.append(section(title, intro.strip(), grid(head, rows, [""] + ["sub"] * len(t.subs)),
                              total=t.cost, slot=slot))
+    if small:
+        rows = []
+        for t in small:
+            models = defaultdict(float)
+            for w in t.works:
+                for model, usd in w.models.items():
+                    models[model] += usd
+            rows.append([(t.key, jira_link(t.key), t.own.summary)] + ([t.own.type or "-"] if typed else [])
+                        + [worked_on(set().union(*(w.days for w in t.works))),
+                           pr_links([pr for w in t.works for pr in w.prs]), model_split(models), money(t.cost)])
+        intro = (f"{plural(len(small), name[:-1])} that cost less than {money(SMALL)} each, sub-tasks included."
+                 if SHOW_COST else f"{plural(len(small), name[:-1])} with little session time.")
+        boxes.append(section(f"Smaller {name}", intro, grid(head, rows), total=sum(t.cost for t in small), slot=slot))
     return boxes
 
 
@@ -866,7 +881,7 @@ def page(data, group, name="report.html"):
                                 "the closest measure of effort the records hold.", overview(list(group.values())))]
     for gid in ("tickets", "support"):
         if data[gid]:
-            body += ticket_boxes(data[gid], group[gid]["slot"])
+            body += ticket_boxes(data[gid], group[gid]["slot"], group[gid]["name"].lower())
     if data["incidents"]:
         body.append(boxed("incidents", "Incidents and investigations", "Sessions that followed a PagerDuty alert.",
                           grid(["Date", "Session", "Ticket", "Repo", "Cost"],
