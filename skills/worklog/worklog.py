@@ -180,6 +180,7 @@ class Session:
         sizes = list(self.contexts.values()) or [0]
         row["context"] = {"peak": max(sizes), "avg": sum(sizes) // len(sizes), "compactions": self.compactions}
         row["active"] = active_minutes(self.times)
+        row["end"] = max(self.times, default=row["start"])
         return row
 
 
@@ -263,7 +264,7 @@ class Jira:
         return self.ask(jira.resolved, since, until) or []
 
 
-pull_requests = github.pull_requests  # demo and tests swap it
+pull_requests, commit_pulls = github.pull_requests, github.commit_pulls  # demo and tests swap them
 
 
 # ---- sorting the sessions
@@ -286,8 +287,9 @@ def saved(file):
 
 def ticket(row, by_branch, issues):
     """The key the rules give a session: a support key it names, else Jira.pick of its keys, else the ticket of a
-    pull request opened from one of its branches. A branch name alone settles it when it names one ticket;
-    otherwise the repo must match too. collect falls back to the key saved with map."""
+    pull request from one of its branches, else Jira.pick of the keys in the pull requests that hold the commits
+    you made in its repo while it ran. A branch name alone settles it when it names one ticket; otherwise the repo
+    must match too. collect falls back to the key saved with map."""
     keys = keys_of(row)
     support = [k for k in keys if is_support(k)]
     if support:
@@ -299,6 +301,10 @@ def ticket(row, by_branch, issues):
             return by_branch[repo_of(row), b]
         if len(by_branch.get(b, ())) == 1:
             return next(iter(by_branch[b]))
+    if PREFIXES and row.get("end") and Path(row["cwd"] or "/nowhere").is_dir():
+        found = [k.upper() for text in commit_pulls(row["cwd"], row["start"], row["end"]) for k in KEY.findall(text)]
+        if found:
+            return issues.pick(list(dict.fromkeys(found)))
     return ""
 
 
@@ -405,7 +411,7 @@ def collect(since, until):
 
     chosen = saved(MAPPED)
     by_branch = {}  # (repo, branch): ticket, and branch: {tickets of the pull requests from a branch of that name}
-    for pr in prs["opened"]:
+    for pr in prs["opened"] + prs.get("earlier", []):
         pr["sub"] = issues.pick(list(dict.fromkeys(k.upper() for k in KEY.findall(pr["text"]))))
         pr["ticket"] = issues.top(pr["sub"])
         if pr["ticket"]:
@@ -426,7 +432,7 @@ def collect(since, until):
             other[repo_of(row)]["cost"] += cost(row)
             other[repo_of(row)]["minutes"] += row.get("active", 0)
             unmapped.append(row)
-    for pr in prs["opened"]:
+    for pr in prs["opened"]:  # the earlier ones only lent their branches
         if pr["ticket"]:
             t = on(pr["sub"])
             t.part(pr["sub"]).prs.append(pr)
@@ -937,17 +943,20 @@ def report(args):
 
 
 def prepare(args):
-    """What /worklog needs, as JSON: the sessions in Other work to map, the period's tickets with their pull
-    request and session titles to write notes from, and the other Jira issues assigned to you and updated in the
-    period, which a session may also be mapped to."""
+    """What /worklog needs, as JSON: the sessions in Other work to map, each with the Jira issues you had in
+    progress on its day, the period's tickets with their pull request and session titles to write notes from, and
+    the other Jira issues assigned to you and updated in the period, which a session may also be mapped to."""
     since, until = period(args[0] if args else "")
     data = collect(since, until)
     tickets = data["tickets"] + data["support"]
     shown = {w.key for t in tickets for w in t.works}
     assigned = data["jira"].ask(jira.updated, since, until) or {}
+    days = {r["start"][:10] for r in data["unmapped"]}
+    busy = {d: data["jira"].ask(jira.in_progress, d) or {} for d in sorted(days)}
     print(json.dumps({
         "sessions": [{"id": r["id"], "date": r["start"][:10], "repo": repo_of(r), "branches": r["branches"],
-                      "title": r["title"], "prompt": r["prompt"], "cost": round(cost(r), 2)}
+                      "title": r["title"], "prompt": r["prompt"], "cost": round(cost(r), 2),
+                      "in_progress": busy[r["start"][:10]]}
                      for r in data["unmapped"]],
         "tickets": [{"key": t.key, "summary": t.own.summary, "type": t.own.type, "repos": list(t.repos),
                      "cost": round(t.cost, 2), "hours": round(t.minutes / 60, 1), "note": data["notes"].get(t.key, ""),

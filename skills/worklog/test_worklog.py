@@ -7,6 +7,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
+import github
 import worklog as w
 
 ISSUES = {"ABC-1": {"summary": "Export", "type": "Story", "subtask": False, "parent": ""},
@@ -30,13 +31,16 @@ def pr(n, text, branch, author="me", status="merged"):
 
 
 class Report(unittest.TestCase):
-    def collect(self, rows, opened=(), reviewed=(), resolved=(), mapped=()):
+    def collect(self, rows, opened=(), reviewed=(), resolved=(), mapped=(), earlier=(), commits=()):
         tmp = Path(tempfile.mkdtemp())
         w.DATA, w.LEDGER, w.MAPPED, w.NOTES = tmp, tmp / "sessions.jsonl", tmp / "mapped.json", tmp / "notes.json"
         w.LEDGER.write_text("\n".join(json.dumps(r) for r in rows))
         w.KEY, w.PREFIXES, w.SUPPORT = re.compile(r"\b(?:ABC)-\d+\b", re.I), "ABC", set()
         w.append = lambda paths: None
-        w.pull_requests = lambda since, until: {"opened": list(opened), "reviewed": list(reviewed)}
+        w.pull_requests = lambda since, until: {"opened": list(opened), "earlier": list(earlier),
+                                                "reviewed": list(reviewed)}
+        w.commit_pulls = lambda repo_dir, start, end: list(commits)
+        w.jira.in_progress = lambda day: {"ABC-3": {"summary": "Typo", "type": "Bug"}} if day == "2026-11-02" else {}
         w.jira.issue = lambda key: ISSUES[key]
         w.jira.resolved = lambda since, until: list(resolved)
         w.jira.updated = lambda since, until: {k: {"summary": v["summary"], "type": v["type"]} for k, v in ISSUES.items()}
@@ -57,6 +61,31 @@ class Report(unittest.TestCase):
     def test_session_takes_the_ticket_of_the_pull_request_from_its_branch(self):
         data = self.collect([session(1, branches=["feature-x"])], opened=[pr(4, "fixes ABC-1", "feature-x")])
         self.assertEqual([t.key for t in data["tickets"]], ["ABC-1"])
+
+    def test_a_branch_of_an_earlier_pull_request_still_names_its_ticket(self):
+        data = self.collect([session(1, branches=["feature-y"])], earlier=[pr(3, "ABC-4 label", "feature-y")])
+        (t,) = data["tickets"]
+        self.assertEqual((t.key, t.own.prs), ("ABC-4", []))
+
+    def test_session_takes_the_ticket_of_the_pull_request_holding_its_commits(self):
+        row = {**session(1, repo="tools"), "cwd": tempfile.mkdtemp(), "end": "2026-11-01T10:00:00Z"}
+        data = self.collect([row], commits=["Fix label\nfix-label\nCloses ABC-3"])
+        self.assertEqual([t.key for t in data["tickets"]], ["ABC-3"])
+
+    def test_github_splits_your_pull_requests_into_opened_and_earlier(self):
+        def node(n, created):
+            return {"title": f"PR {n}", "url": f"https://github.com/acme/api/pull/{n}", "state": "MERGED",
+                    "isDraft": False, "createdAt": created, "headRefName": f"b{n}", "body": "", "author": {"login": "me"},
+                    "repository": {"name": "api"}, "reviews": {"nodes": []}, "commits": {"nodes": []}}
+        search = github.search
+        github.search = lambda q: ("me", [node(1, "2026-10-20T09:00:00Z"), node(2, "2026-11-03T09:00:00Z"),
+                                          node(3, "2026-12-01T09:00:00Z")] if "author:@me" in q else [])
+        try:
+            found = github.pull_requests("2026-11-01", "2026-11-30")
+        finally:
+            github.search = search
+        self.assertEqual(([p["title"] for p in found["opened"]], [p["title"] for p in found["earlier"]]),
+                         (["PR 2"], ["PR 1"]))
 
     def test_review_sessions_add_up_to_one_total(self):
         rows = [session(1, edits=False, review=True, cost=1.5), session(2, edits=False, review=True, cost=0.5)]
@@ -80,6 +109,7 @@ class Report(unittest.TestCase):
         found = json.loads(out.getvalue())
         self.assertEqual(sorted(found["assigned"]), ["ABC-2", "ABC-3", "ABC-4", "ABC-9"])
         self.assertEqual([s["id"] for s in found["sessions"]], ["s2"])
+        self.assertEqual(list(found["sessions"][0]["in_progress"]), ["ABC-3"])
         boxes = w.ticket_boxes(data["tickets"], 1, "tickets", {"ABC-1": "Shipped the export."})
         self.assertIn("Shipped the export.", boxes[0])
 
