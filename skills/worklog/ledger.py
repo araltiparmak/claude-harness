@@ -65,7 +65,6 @@ def name(model):
     return family[1].capitalize() if family else (model or "Unknown")
 
 
-QUESTION_MODEL = name(PRICING["question_model"])  # the model the tips suggest for sessions that only ask questions
 
 
 def price(usage):

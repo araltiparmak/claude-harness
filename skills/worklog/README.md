@@ -98,9 +98,7 @@ A sub-task counts for its parent ticket. Naming the key in the branch, or in you
 | Cost past 100k context | Cost of sessions whose largest reply context passed 100k tokens | over 50% |
 | Cost in subagents | Cost of the replies made by subagents | over 30% |
 | Cost in sessions that changed nothing | Sessions with no file edit and no review | over 25% |
-| Other models in sessions that changed nothing | The part of those not on `question_model` (Sonnet) | over 10% |
 | Sessions you interrupted | Sessions with at least one "Request interrupted by user" | over 20% |
-| Failed tool calls per session | Tool results marked as errors | over 3 |
 | Sessions compacted | Sessions where the context was compacted | 3 or more |
 
 Tips need at least 5 sessions. The lines and the advice are in `TIPS` in `worklog.py`.
@@ -123,7 +121,6 @@ A session without those figures is priced from its transcript's tokens at the li
 |---|---|
 | `models` | Per model id: the name on the page, its colour (`1` to `3`; a model without one is grey), `prices` in USD per million tokens (input, output, cache read, 5-minute and 1-hour cache write), and `fast` prices for a model that has fast mode. An id that starts with a listed one, such as a dated id, takes its entry |
 | `default_model` | How an unlisted model is priced |
-| `question_model` | The cheaper model the tips suggest for sessions that only ask questions |
 
 The list holds Opus 5.5 and Sonnet 5.5, plus Fable 5.2, which some sessions ran on; priced as Opus, a Fable
 session would show about half its cost. When a new model comes out, add its id and prices to `models`.

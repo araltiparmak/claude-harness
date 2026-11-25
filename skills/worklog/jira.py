@@ -2,7 +2,6 @@
 """Jira issues, from the Jira Cloud REST API at jira_url, as jira_email with the API token in $JIRA_API_TOKEN.
 
   python3 jira.py issue KEY...           prints {key: {summary, type, subtask, parent}} as JSON
-  python3 jira.py resolved SINCE UNTIL   prints the keys assigned to you and resolved in the period
   python3 jira.py updated SINCE UNTIL    prints {key: {summary, type}} of the issues assigned to you and updated
                                          in the period
   python3 jira.py in-progress DAY        prints {key: {summary, type}} of the issues assigned to you that were in
@@ -68,10 +67,6 @@ def brief(issues):
             for i in issues}
 
 
-def resolved(since, until):
-    return [i["key"] for i in search(between("resolved", since, until))]
-
-
 def updated(since, until):
     return brief(search(between("updated", since, until)))
 
@@ -83,8 +78,6 @@ def in_progress(day):
 if __name__ == "__main__":
     if len(sys.argv) > 2 and sys.argv[1] == "issue":
         print(json.dumps({key: issue(key) for key in sys.argv[2:]}, indent=1))
-    elif len(sys.argv) == 4 and sys.argv[1] == "resolved":
-        print(json.dumps(resolved(sys.argv[2], sys.argv[3])))
     elif len(sys.argv) == 4 and sys.argv[1] == "updated":
         print(json.dumps(updated(sys.argv[2], sys.argv[3]), indent=1))
     elif len(sys.argv) == 3 and sys.argv[1] == "in-progress":

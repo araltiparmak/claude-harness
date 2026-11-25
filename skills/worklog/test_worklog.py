@@ -82,12 +82,11 @@ class Base(unittest.TestCase):
         self.addCleanup(patch.stop)
         time.tzset()
 
-    def collect(self, rows, opened=(), reviewed=(), resolved=(), mapped=(), earlier=(), commits=()):
+    def collect(self, rows, opened=(), reviewed=(), mapped=(), earlier=(), commits=()):
         ledger.LEDGER.write_text("".join(json.dumps(r) + "\n" for r in rows))
         self.patch(w, pull_requests=lambda since, until: {"opened": list(opened), "earlier": list(earlier),
                                                           "reviewed": list(reviewed)},
                    commit_pulls=lambda repo_dir, start, end: list(commits))
-        self.patch(w.jira, resolved=lambda since, until: list(resolved))
         if mapped:
             quiet(w.save, w.MAPPED, {s: w.checked(k) for s, k in w.pairs(list(mapped), "map")})
         return w.collect("2026-11-01", "2026-11-30")
@@ -95,10 +94,10 @@ class Base(unittest.TestCase):
 
 class Sorting(Base):
     def test_sub_task_counts_for_its_parent_with_its_own_cost(self):
-        data = self.collect([session(1, ["ABC-1"], 2.0), session(2, ["abc-2"], 3.0)], resolved=["ABC-2"])
+        data = self.collect([session(1, ["ABC-1"], 2.0), session(2, ["abc-2"], 3.0)])
         (t,) = data["tickets"]
         self.assertEqual((t.key, t.cost, t.own.cost), ("ABC-1", 5.0, 2.0))
-        self.assertEqual((t.subs["ABC-2"].cost, t.subs["ABC-2"].resolved, t.resolved), (3.0, True, False))
+        self.assertEqual(t.subs["ABC-2"].cost, 3.0)
 
     def test_ticket_wins_over_an_epic_named_with_it(self):
         (t,) = self.collect([session(1, ["ABC-9", "ABC-1"])])["tickets"]
@@ -144,9 +143,8 @@ class Sorting(Base):
                 raise urllib.error.HTTPError(key, 404, "Not Found", {}, io.BytesIO())
             return ISSUES[key]
         self.patch(w.jira, issue=issue)
-        data = self.collect([session(1, ["ABC-404"]), session(2, ["ABC-1"])], resolved=["ABC-1"])
-        self.assertEqual({t.key: (t.own.summary, t.resolved) for t in data["tickets"]},
-                         {"ABC-404": ("", False), "ABC-1": ("Export", True)})
+        data = self.collect([session(1, ["ABC-404"]), session(2, ["ABC-1"])])
+        self.assertEqual({t.key: t.own.summary for t in data["tickets"]}, {"ABC-404": "", "ABC-1": "Export"})
 
         def down(condition):
             raise urllib.error.URLError("no route to host")
@@ -230,6 +228,15 @@ class Pages(Base):
         self.assertEqual(groups, [(' open="open"', "draft", "1"), (' open="open"', "open", "2"),
                                   (' open="open"', "closed", "1"), ("", "merged", "1")])  # merged starts folded
 
+    def test_no_resolved_count_and_a_cost_per_ticket(self):
+        data = self.collect([session(1, ["ABC-1"], 2.0), session(2, ["ABC-3"], 1.0)])
+        view = page.Page(data)
+        self.assertNotIn("resolved", " ".join(label for _, label in view.headline()))
+        claude = view.using_claude()
+        self.assertIn("<td>Cost per ticket</td><td>$1.50</td>", claude)  # $3.00 over 2 tickets
+        for gone in ("resolved", "Failed tool calls per session", "not on Sonnet"):
+            self.assertNotIn(gone, claude)
+
     def test_hours(self):
         self.assertEqual((page.hours(0), page.hours(3), page.hours(90)), ("-", "<0.1h", "1.5h"))
 
@@ -260,8 +267,10 @@ class Measures(Base):
         heavy = {"context": {"peak": 150_000, "avg": 90_000, "compactions": 1}, "interrupts": 1, "edits": False}
         rows = [session(n, **heavy) for n in range(1, 7)]
         found = " ".join(f for f, _ in w.tips(w.measures(rows)))
-        for words in ("past 100k", "only asked questions", "changed no files", "stopped Claude", "compacted"):
+        for words in ("past 100k", "changed no files", "stopped Claude", "compacted"):
             self.assertIn(words, found)
+        self.assertNotIn("only asked questions", found)  # no tip on the model of question sessions
+        self.assertNotIn("Tool calls failed", found)
         self.assertEqual(w.tips(w.measures(rows[:4])), [])
         healthy = {"tokens_by_model": {"Opus": {"in": 1, "out": 10, "read": 95, "write": 4}}}
         self.assertEqual(w.tips(w.measures([session(n, **healthy) for n in range(1, 7)])), [])

@@ -39,7 +39,7 @@ import inventory
 import jira
 import ledger
 import page
-from ledger import BIG_CONTEXT, QUESTION_MODEL, SENT, TOKENS, cost, models_of, repo_of
+from ledger import BIG_CONTEXT, SENT, TOKENS, cost, models_of, repo_of
 from settings import DATA, DEV, FILE, settings
 
 JIRA_PREFIXES, SUPPORT_PREFIXES, EXCLUDE_REPOS = (
@@ -110,9 +110,6 @@ class Jira:
         main = next((k for k in rest if not self.issue(k).get("subtask")), rest[0] if rest else "")
         return main or (epics[0] if epics else "")
 
-    def resolved(self, since, until):
-        return self.ask(jira.resolved, since, until) or []
-
     def save(self):
         if self.cache:
             (DATA / "jira.json").write_text(json.dumps(self.cache, indent=1))
@@ -168,7 +165,7 @@ class Work:
         issue = issue or {}
         self.key, self.summary, self.type = key, issue.get("summary", ""), issue.get("type", "")
         self.days, self.cost, self.models, self.prs = set(), 0.0, defaultdict(float), []
-        self.minutes, self.titles, self.mapped, self.resolved = 0.0, [], 0, False
+        self.minutes, self.titles, self.mapped = 0.0, [], 0
 
     def add(self, row, mapped=False):
         self.days.add(row["day"])
@@ -186,7 +183,6 @@ class Ticket:
 
     def __init__(self, key, issues):
         self.key, self.issues, self.own, self.subs, self.repos = key, issues, Work(key, issues.issue(key)), {}, {}
-        self.resolved = False
 
     def part(self, key):
         if key == self.key:
@@ -260,10 +256,6 @@ def collect(since, until):
             t = on(pr["sub"])
             t.part(pr["sub"]).prs.append(pr)
             t.repos[pr["repo"]] = None
-    for key in issues.resolved(since, until):  # a resolved sub-task does not resolve its parent
-        t = on(key)
-        t.part(key).resolved = True
-        t.resolved |= key == t.key
     issues.save()
     measured = measures(rows)
     return {"since": since, "until": until, "other": other, "unmapped": unmapped, "prs": prs,
@@ -321,12 +313,9 @@ def measures(rows):
         "big": share("context", lambda r: cost(r) if r["context"]["peak"] > BIG_CONTEXT else 0),
         "subagents": share("subagent_cost", lambda r: r["subagent_cost"]),
         "idle": share("edits", lambda r: cost(r) if question(r) else 0),
-        "off_model_questions": share("edits", lambda r: sum(usd for m, usd in models_of(r).items()
-                                                           if m != QUESTION_MODEL) if question(r) else 0),
         "rated": len(rated),
         "prompts": per_session(lambda r: r["prompts"]),
         "interrupted": per_session(lambda r: r["interrupts"] > 0),
-        "errors": per_session(lambda r: r["errors"]),
         "context": context_stats(rows),
         "compacted": sum(r["context"]["compactions"] > 0 for r in rows if "context" in r),
         "top": sorted(rows, key=lambda r: -cost(r))[:TOP]}
@@ -341,9 +330,6 @@ TIPS = [
     ("cache_hit", lt, 0.85, "Only {:.0%} of the input came from the prompt cache.",
      "The cache expires after a pause (5 minutes by default), and the next reply pays full price for the whole "
      "context. Finish a task in one sitting, or start fresh after a long break instead of resuming."),
-    ("off_model_questions", gt, 0.10,
-     f"Sessions that only asked questions spent {{:.0%}} of the cost on models other than {QUESTION_MODEL}.",
-     f"{QUESTION_MODEL} answers most questions well for less; switch with /model."),
     ("idle", gt, 0.25, "{:.0%} of the cost went to sessions that changed no files and reviewed nothing.",
      "Questions are fine. For exploration, a narrower first prompt (the file, the symptom, what you expect) usually "
      "gets there in fewer turns."),
@@ -355,11 +341,8 @@ TIPS = [
      "goal and the limits helps it start right."),
     ("compacted", ge, 3, "{} sessions ran out of context and were compacted.",
      "Compaction loses detail. Split long tasks into sessions, with a short hand-over note."),
-    ("errors", gt, 3, "Tool calls failed {:.1f} times per session.",
-     "Repeated failures often mean a missing permission, a wrong working folder or a missing tool; the most "
-     "expensive sessions show where."),
 ]
-PER_SESSION = ("interrupted", "errors")  # averages over the sessions that recorded prompts (rated)
+PER_SESSION = ("interrupted",)  # averages over the sessions that recorded prompts (rated)
 
 
 def tips(m):

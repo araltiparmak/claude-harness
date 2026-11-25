@@ -10,7 +10,7 @@ from datetime import date, timedelta
 from pathlib import Path
 from string import Template
 
-from ledger import BIG_CONTEXT, IDLE, MODELS, QUESTION_MODEL, SENT, cost, repo_of
+from ledger import BIG_CONTEXT, IDLE, MODELS, SENT, cost, repo_of
 from settings import settings
 
 JIRA_URL = settings["jira_url"]
@@ -257,12 +257,9 @@ class Page:
 
         def s(n):
             return "" if n == 1 else "s"
-        resolved, support_resolved = sum(t.resolved for t in tickets), sum(t.resolved for t in support)
         merged, reviewed = sum(pr["status"] == "merged" for pr in prs["opened"]), len(prs["reviewed"])
         touched = {t.key for t in tickets + support}  # reviews for others do not count
         tiles = [(len(touched), f"ticket{s(len(touched))} worked on", touched),
-                 (resolved, f"ticket{s(resolved)} resolved, of {len(tickets)}", tickets),
-                 (support_resolved, f"support ticket{s(support_resolved)} resolved, of {len(support)}", support),
                  (merged, f"pull request{s(merged)} merged, of {len(prs['opened'])} opened", prs["opened"]),
                  (reviewed, f"pull request{s(reviewed)} reviewed", reviewed)]
         tiles = [(number, label) for number, label, behind in tiles if behind]
@@ -386,23 +383,21 @@ class Page:
         d = self.data
         m = d["measures"]
         merged = sum(pr["status"] == "merged" for pr in d["prs"]["opened"])
-        done = [t for t in d["tickets"] + d["support"] if t.resolved]
+        worked = d["tickets"] + d["support"]
         advice = (tag("ul", [tag("li", [tag("strong", found) + " " + html.escape(todo)]) for found, todo in d["tips"]],
                       class_="tips") if d["tips"] else
                   tag("p", "Every measure is within its line. Nothing to change this period.", class_="intro"))
         rows = [["Sessions", m["sessions"]],
                 ["Cost per merged pull request", money(m["cost"] / merged) if merged else "-"],
-                ["Cost per resolved ticket", money(sum(t.cost for t in done) / len(done)) if done else "-"],
+                ["Cost per ticket", money(sum(t.cost for t in worked) / len(worked)) if worked else "-"],
                 ["Cache hit rate (cache reads / all input)", pct(m["cache_hit"])],
                 [f"Share of cost in sessions past {BIG_CONTEXT // 1000}k context", pct(m["big"])],
                 ["Share of cost in subagents", pct(m["subagents"])],
                 ["Share of cost in sessions that changed nothing", pct(m["idle"])],
-                [f"Share of cost not on {QUESTION_MODEL} in sessions that changed nothing", pct(m["off_model_questions"])],
                 ["Prompts per session", f"{m['prompts']:.1f}" if m["prompts"] is not None else "-"],
                 ["Prompts per merged pull request",
                  f"{m['prompts'] * m['rated'] / merged:.0f}" if m["prompts"] is not None and merged else "-"],
                 ["Sessions you interrupted", pct(m["interrupted"])],
-                ["Failed tool calls per session", f"{m['errors']:.1f}" if m["errors"] is not None else "-"],
                 ["Sessions compacted", m["compacted"]]]
         top = self.grid(["Date", "Session", "Peak context", "Prompts", "Interrupts", "Failed tools", "Cost"],
                         [[day(r["day"]), (r["title"] or r["prompt"][:80] or "(no title)", "", repo_of(r)),
