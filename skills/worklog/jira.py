@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Jira issues, through the two commands set in jira_issue_cmd and jira_search_cmd (the jira CLI by default).
+"""Jira issues, from the Jira Cloud REST API at jira_url, as jira_email with the API token in $JIRA_API_TOKEN.
 
   python3 jira.py issue KEY...           prints {key: {summary, type, subtask, parent}} as JSON
   python3 jira.py resolved SINCE UNTIL   prints the keys assigned to you and resolved in the period
@@ -8,33 +8,55 @@
   python3 jira.py in-progress DAY        prints {key: {summary, type}} of the issues assigned to you that were in
                                          the in-progress status (jira_in_progress) on that day
 
-All raise on a command that fails or prints something that is not JSON.
+All raise when Jira cannot be reached or refuses: urllib.error.HTTPError with code 404 for a key Jira does not
+know, KeyError when jira_url, jira_email or the token is not set.
 """
+import base64
 import json
-import subprocess
+import os
 import sys
+import urllib.parse
+import urllib.request
 from datetime import date, timedelta
 
 from settings import settings
 
-ISSUE_CMD, SEARCH_CMD, IN_PROGRESS = settings["jira_issue_cmd"], settings["jira_search_cmd"], settings["jira_in_progress"]
+IN_PROGRESS = settings["jira_in_progress"]
+FIELDS = "summary,issuetype,parent"
 
 
-def run(template, **values):
-    cmd = [part.format(**values) for part in template.split()]
-    return json.loads(subprocess.run(cmd, capture_output=True, timeout=60, check=True).stdout)
+def call(path, body=None):
+    """GET path, or POST body as JSON to it, and return the JSON Jira answers."""
+    token = os.environ.get("JIRA_API_TOKEN", "")
+    for name, value in (("jira_url", settings["jira_url"]), ("jira_email", settings["jira_email"]),
+                        ("JIRA_API_TOKEN", token)):
+        if not value:
+            raise KeyError(f"{name} is not set")
+    login = f'{settings["jira_email"]}:{token}'
+    request = urllib.request.Request(
+        settings["jira_url"].rstrip("/") + path, data=body and json.dumps(body).encode(),
+        headers={"Authorization": "Basic " + base64.b64encode(login.encode()).decode(),
+                 "Accept": "application/json", "Content-Type": "application/json"})
+    with urllib.request.urlopen(request, timeout=60) as answer:
+        return json.load(answer)
 
 
 def issue(key):
-    fields = run(ISSUE_CMD, key=key)["fields"]
+    fields = call(f"/rest/api/3/issue/{urllib.parse.quote(key)}?fields={FIELDS}")["fields"]
     return {"summary": fields.get("summary", ""), "type": fields["issuetype"]["name"],
             "subtask": bool(fields["issuetype"].get("subtask")), "parent": (fields.get("parent") or {}).get("key", "")}
 
 
 def search(condition):
     """The issues assigned to you that meet a JQL condition."""
-    found = run(SEARCH_CMD, jql=f"assignee = currentUser() AND {condition}")
-    return found if isinstance(found, list) else found.get("issues", [])
+    body, issues = {"jql": f"assignee = currentUser() AND {condition}", "fields": FIELDS.split(","),
+                    "maxResults": 100}, []
+    while True:
+        page = call("/rest/api/3/search/jql", body)
+        issues += page.get("issues", [])
+        if page.get("isLast", True) or not page.get("nextPageToken"):
+            return issues
+        body["nextPageToken"] = page["nextPageToken"]
 
 
 def between(field, since, until):

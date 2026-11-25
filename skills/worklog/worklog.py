@@ -26,6 +26,7 @@ import re
 import shutil
 import subprocess
 import sys
+import urllib.error
 import webbrowser
 from collections import defaultdict
 from datetime import date, timedelta
@@ -70,7 +71,7 @@ class Jira:
             return None
         try:
             return call(*args)
-        except Exception as err:  # CLI missing, not logged in, output that is not JSON
+        except Exception as err:  # not set up, not reachable, login refused
             print(f"note: Jira is not answering ({err}); tickets are shown by key only\n", file=sys.stderr)
             self.down = True
 
@@ -87,7 +88,9 @@ class Jira:
         typo, an example in a prompt, a deleted issue): it is skipped, and Jira stays on for the other keys."""
         try:
             return jira.issue(key)
-        except subprocess.CalledProcessError:
+        except urllib.error.HTTPError as err:
+            if err.code != 404:
+                raise
             jira.search("updated >= -1d")  # raises when Jira itself is not answering
             self.unknown.add(key)
             return None
@@ -518,8 +521,9 @@ def check_sources(line):
         try:
             jira.search("updated >= -1d")
             line(True, "Jira search")
-        except Exception as err:  # CLI missing, not logged in, output that is not JSON
-            line(None, "Jira search", f"failed ({err}); tickets show by key only")
+        except Exception as err:  # not set up, not reachable, login refused
+            line(None, "Jira search", f"failed ({err}); set jira_url, jira_email and JIRA_API_TOKEN; tickets show "
+                                      "by key only")
 
 
 def check():

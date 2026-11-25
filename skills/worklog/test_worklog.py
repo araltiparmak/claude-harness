@@ -5,14 +5,15 @@ import io
 import json
 import os
 import re
-import subprocess
 import tempfile
 import time
 import unittest
+import urllib.error
 from pathlib import Path
 from unittest import mock
 
 import github
+import jira
 import ledger
 import page
 import worklog as w
@@ -137,7 +138,7 @@ class Sorting(Base):
     def test_a_key_jira_does_not_know_leaves_jira_on_for_the_others(self):
         def issue(key):
             if key not in ISSUES:
-                raise subprocess.CalledProcessError(1, ["jira"])
+                raise urllib.error.HTTPError(key, 404, "Not Found", {}, io.BytesIO())
             return ISSUES[key]
         self.patch(w.jira, issue=issue)
         data = self.collect([session(1, ["ABC-404"]), session(2, ["ABC-1"])], resolved=["ABC-1"])
@@ -145,7 +146,7 @@ class Sorting(Base):
                          {"ABC-404": ("", False), "ABC-1": ("Export", True)})
 
         def down(condition):
-            raise OSError("jira: command not found")
+            raise urllib.error.URLError("no route to host")
         self.patch(w.jira, search=down)
         issues = w.Jira()
         with contextlib.redirect_stderr(io.StringIO()):
@@ -242,6 +243,35 @@ class Measures(Base):
         self.assertEqual([r["id"] for r in m["top"]], ["s2", "s3", "s1"])
 
 
+
+class JiraApi(unittest.TestCase):
+    patch = Base.patch  # Base.setUp stubs the functions these tests call
+
+    def test_issue_and_a_search_over_two_pages(self):
+        answers = {
+            "/rest/api/3/issue/ABC-2?fields=summary,issuetype,parent": {"fields": {
+                "summary": "Fix", "issuetype": {"name": "Sub-task", "subtask": True}, "parent": {"key": "ABC-1"}}},
+            None: {"issues": [{"key": "ABC-1", "fields": {"summary": "Export", "issuetype": {"name": "Story"}}}],
+                   "nextPageToken": "t2", "isLast": False},
+            "t2": {"issues": [{"key": "ABC-3", "fields": {"summary": "Import", "issuetype": {"name": "Bug"}}}],
+                   "isLast": True}}
+        sent = []
+
+        def call(path, body=None):
+            sent.append(dict(body) if body else path)
+            return answers[body.get("nextPageToken") if body else path]
+        self.patch(jira, call=call)
+        self.assertEqual(jira.issue("ABC-2"), {"summary": "Fix", "type": "Sub-task", "subtask": True, "parent": "ABC-1"})
+        self.assertEqual(jira.updated("2026-11-01", "2026-11-30"),
+                         {"ABC-1": {"summary": "Export", "type": "Story"}, "ABC-3": {"summary": "Import", "type": "Bug"}})
+        self.assertEqual(sent[1]["jql"], 'assignee = currentUser() AND updated >= "2026-11-01" AND updated < "2026-12-01"')
+
+    def test_a_missing_setting_is_named(self):
+        self.patch(jira, settings={"jira_url": "https://x.atlassian.net", "jira_email": ""})
+        with self.assertRaisesRegex(KeyError, "jira_email"):
+            jira.issue("ABC-1")
+
+
 class Ledger(Base):
     def transcript(self, lines, name="t1"):
         folder = ledger.PROJECTS / "proj"
@@ -335,6 +365,7 @@ class Ledger(Base):
         self.assertEqual({kind: [(p["title"], p["date"]) for p in prs] for kind, prs in found.items()},
                          {"opened": [("PR 2", "2026-11-01")], "earlier": [("PR 1", "2026-10-20")],
                           "reviewed": [("PR 4", "2026-11-03")]})
+
 
 
 if __name__ == "__main__":

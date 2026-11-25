@@ -1,7 +1,7 @@
 # worklog
 
 A monthly look at how you work with Claude Code, and what the work was. It reads the session records Claude Code
-keeps on your computer, your pull requests (`gh`) and your Jira issues (`jira` CLI), and writes one HTML page.
+keeps on your computer, your pull requests (`gh`) and your Jira issues (the Jira REST API), and writes one HTML page.
 
 It is for learning about your own habits: where tokens go, which sessions went smoothly, and what you delivered.
 It is not a way to compare people. Costs are estimates at API list prices (see [Cost](#cost)), and time is an
@@ -23,7 +23,7 @@ time, with no costs and none of the Using Claude sections. It can also publish i
 
 ## Setup
 
-Needs macOS or Linux, Python 3.9 or newer, and git. `gh` and the `jira` CLI are optional; without them the page
+Needs macOS or Linux, Python 3.9 or newer, and git. `gh` and a Jira API token are optional; without them the page
 has no pull requests or ticket names.
 
 1. Put this folder at `~/.claude/skills/worklog` (copy it, or link it from a clone).
@@ -43,21 +43,22 @@ has no pull requests or ticket names.
    from `settings.json`:
 
    ```json
-   {"jira_url": "https://yourcompany.atlassian.net", "jira_prefixes": ["ABC"], "support_prefixes": ["SUP"],
+   {"jira_url": "https://yourcompany.atlassian.net", "jira_email": "you@yourcompany.com", "jira_prefixes": ["ABC"], "support_prefixes": ["SUP"],
     "exclude_repos": ["my-side-project"], "dev_dir": "~/code"}
    ```
 
    | Key | What it is |
    |---|---|
-   | `jira_url` | Ticket keys link to `<jira_url>/browse/<key>` |
+   | `jira_url` | Your Jira Cloud site; ticket keys link to `<jira_url>/browse/<key>` |
+   | `jira_email` | The email you log in to Jira with |
    | `jira_prefixes` | Every Jira project whose keys you use, such as `ABC` for `ABC-123` |
    | `support_prefixes` | The prefixes of support tickets |
    | `exclude_repos` | Repos (folder or GitHub name) the report leaves out |
    | `dev_dir` | The folder that holds your repos; the data goes to `<dev_dir>/worklog` |
-   | `jira_issue_cmd`, `jira_search_cmd` | The commands that print Jira JSON for one issue (`{key}`) and for a JQL query (`{jql}`) |
    | `jira_in_progress` | The name of the status your Jira uses for work in progress |
-4. Log in: `gh auth login`, and `jira init` for the [jira CLI](https://github.com/ankitpokhrel/jira-cli) (or set
-   `jira_issue_cmd` and `jira_search_cmd` to another command that prints Jira JSON).
+4. Log in: `gh auth login` for GitHub. For Jira, make an API token at
+   https://id.atlassian.com/manage-profile/security/api-tokens and export it in your shell profile as
+   `JIRA_API_TOKEN`, so Claude Code sees it.
 5. Check: `python3 ~/.claude/skills/worklog/worklog.py check` prints one line per part of the setup.
 
 ## Use

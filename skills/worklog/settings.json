@@ -1,10 +1,9 @@
 {
   "jira_url": "",
+  "jira_email": "",
   "jira_prefixes": [],
   "support_prefixes": [],
   "exclude_repos": [],
   "dev_dir": "~/dev",
-  "jira_issue_cmd": "jira issue view {key} --raw",
-  "jira_search_cmd": "jira issue list -q {jql} --raw",
   "jira_in_progress": "In Progress"
 }
