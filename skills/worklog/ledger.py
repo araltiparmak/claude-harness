@@ -32,12 +32,11 @@ REVIEW = re.compile(r"gh pr (diff|review|checkout)|<command-name>/code-review")
 COMMAND = re.compile(r"<command-name>/([\w:.-]+)</command-name>")
 INTERRUPT = "[Request interrupted by user"
 SYNTHETIC = "<synthetic>"  # the model of the replies Claude Code writes itself: API errors, usage limits
-TOKENS ={"in": "input_tokens", "out": "output_tokens", "write": "cache_creation_input_tokens",
+TOKENS = {"in": "input_tokens", "out": "output_tokens", "write": "cache_creation_input_tokens",
           "read": "cache_read_input_tokens"}
 SENT = ("in", "write", "read")  # the input a reply is sent: its context
 BIG_CONTEXT = 100_000  # tokens; a session past this re-reads a large context on every reply
 IDLE = 15  # minutes; a longer gap between two messages of a session is a break, not work
-
 
 
 def records(path):
@@ -65,9 +64,6 @@ def name(model):
     return family[1].capitalize() if family else (model or "Unknown")
 
 
-QUESTION_MODEL = name(PRICING["question_model"])  # the model the tips suggest for sessions that only ask questions
-
-
 def price(usage):
     """What one reply cost in USD at the list prices in models.json, fast mode at the model's fast prices. An
     unlisted model is priced as default_model."""
@@ -88,7 +84,8 @@ def measured():
     except (OSError, ValueError):
         return {}
     return {folder["lastSessionId"]: {model: {"cost": use.get("costUSD") or 0,
-                                              "tokens": {kind: use.get(field) or 0 for kind, field in STATE_TOKENS.items()}}
+                                              "tokens": {kind: use.get(field) or 0
+                                                         for kind, field in STATE_TOKENS.items()}}
                                       for model, use in folder["lastModelUsage"].items()}
             for folder in folders.values() if folder.get("lastSessionId") and folder.get("lastModelUsage")}
 
@@ -261,11 +258,13 @@ def record(path):
     row = Session(path).result()
     if not row:
         return
+    figures = None
     for _ in range(WAIT):
-        if row["id"] in measured():
+        figures = measured().get(row["id"])
+        if figures:
             break
         time.sleep(1)
-    settle(row, measured().get(row["id"]))
+    settle(row, figures)
     DATA.mkdir(parents=True, exist_ok=True)
     with LEDGER.open("a") as out:
         out.write(json.dumps(row) + "\n")

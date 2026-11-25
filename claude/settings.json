@@ -3,6 +3,7 @@
     "commit": "",
     "pr": ""
   },
+  "autoCompactWindow": 250000,
   "cleanupPeriodDays": 90,
   "permissions": {
     "deny": [

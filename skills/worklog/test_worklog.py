@@ -5,14 +5,16 @@ import io
 import json
 import os
 import re
-import subprocess
 import tempfile
 import time
 import unittest
+import urllib.error
 from pathlib import Path
 from unittest import mock
 
 import github
+import inventory
+import jira
 import ledger
 import page
 import worklog as w
@@ -55,10 +57,12 @@ class Base(unittest.TestCase):
         tmp = self.tmp = Path(folder.name)
         self.patch(ledger, DATA=tmp, LEDGER=tmp / "sessions.jsonl", PROJECTS=tmp / "projects",
                    CLAUDE_STATE=tmp / "claude.json")
-        self.patch(w, DATA=tmp, MAPPED=tmp / "mapped.json", NOTES=tmp / "notes.json",
-                   KEY=re.compile(r"\b(?:ABC)-\d+\b", re.I), PREFIXES="ABC", SUPPORT=set(), EXCLUDE_REPOS=[],
-                   SKILLS=tmp / "skills")
+        self.patch(w, DATA=tmp, MAPPED=tmp / "mapped.json", NOTES=tmp / "notes.json", JIRA_CACHE=tmp / "jira.json",
+                   KEY=re.compile(r"\b(?:ABC)-\d+\b", re.I), PREFIXES="ABC", SUPPORT=set(), EXCLUDE_REPOS=[])
+        self.patch(inventory, SKILLS=tmp / "skills", PROJECTS=tmp / "projects", SETTINGS=tmp / "settings.json",
+                   STATE=tmp / "claude-state.json", PLUGINS=tmp / "plugins")
         self.patch(page, JIRA_URL="")
+        self.patch(github, CACHE=tmp / "commits.json")
         self.patch(w.jira, issue=lambda key: ISSUES[key], search=lambda condition: [],
                    updated=lambda since, until: {k: {"summary": v["summary"], "type": v["type"]}
                                                  for k, v in ISSUES.items()},
@@ -78,12 +82,11 @@ class Base(unittest.TestCase):
         self.addCleanup(patch.stop)
         time.tzset()
 
-    def collect(self, rows, opened=(), reviewed=(), resolved=(), mapped=(), earlier=(), commits=()):
+    def collect(self, rows, opened=(), reviewed=(), mapped=(), earlier=(), commits=()):
         ledger.LEDGER.write_text("".join(json.dumps(r) + "\n" for r in rows))
-        self.patch(w, pull_requests=lambda since, until: {"opened": list(opened), "earlier": list(earlier),
-                                                          "reviewed": list(reviewed)},
+        self.patch(github, pull_requests=lambda since, until: {"opened": list(opened), "earlier": list(earlier),
+                                                               "reviewed": list(reviewed)},
                    commit_pulls=lambda repo_dir, start, end: list(commits))
-        self.patch(w.jira, resolved=lambda since, until: list(resolved))
         if mapped:
             quiet(w.save, w.MAPPED, {s: w.checked(k) for s, k in w.pairs(list(mapped), "map")})
         return w.collect("2026-11-01", "2026-11-30")
@@ -91,10 +94,10 @@ class Base(unittest.TestCase):
 
 class Sorting(Base):
     def test_sub_task_counts_for_its_parent_with_its_own_cost(self):
-        data = self.collect([session(1, ["ABC-1"], 2.0), session(2, ["abc-2"], 3.0)], resolved=["ABC-2"])
+        data = self.collect([session(1, ["ABC-1"], 2.0), session(2, ["abc-2"], 3.0)])
         (t,) = data["tickets"]
         self.assertEqual((t.key, t.cost, t.own.cost), ("ABC-1", 5.0, 2.0))
-        self.assertEqual((t.subs["ABC-2"].cost, t.subs["ABC-2"].resolved, t.resolved), (3.0, True, False))
+        self.assertEqual(t.subs["ABC-2"].cost, 3.0)
 
     def test_ticket_wins_over_an_epic_named_with_it(self):
         (t,) = self.collect([session(1, ["ABC-9", "ABC-1"])])["tickets"]
@@ -119,11 +122,13 @@ class Sorting(Base):
         data = self.collect(rows, reviewed=[pr(7, "", "b", author="teammate")])
         self.assertEqual((data["reviews"].cost, page.Page(data).groups["reviews"]["cost"]), (2.0, 2.0))
 
-    def test_a_mapped_session_counts_for_its_ticket_and_rules_still_win(self):
-        rows = [session(1, repo="tools"), session(2, ["ABC-9"]), session(3, repo="tools")]
-        data = self.collect(rows, mapped=["s1", "abc-1", "s2", "ABC-2"])
+    def test_a_mapped_session_counts_for_its_ticket_and_rules_and_reviews_still_win(self):
+        rows = [session(1, repo="tools"), session(2, ["ABC-9"]), session(3, repo="tools"),
+                session(4, edits=False, review=True)]
+        data = self.collect(rows, mapped=["s1", "abc-1", "s2", "ABC-2", "s4", "ABC-3"])
         self.assertEqual(sorted(t.key for t in data["tickets"]), ["ABC-1", "ABC-9"])
         self.assertEqual([r["id"] for r in data["unmapped"]], ["s3"])
+        self.assertEqual(data["reviews"].cost, 1.0)
         self.assertEqual({t.key: t.own.mapped for t in data["tickets"]}, {"ABC-1": 1, "ABC-9": 0})
         boxes = page.Page(data).ticket_boxes(data["tickets"], 1, "tickets")
         self.assertIn("1 session mapped by /worklog", "".join(boxes))
@@ -137,15 +142,14 @@ class Sorting(Base):
     def test_a_key_jira_does_not_know_leaves_jira_on_for_the_others(self):
         def issue(key):
             if key not in ISSUES:
-                raise subprocess.CalledProcessError(1, ["jira"])
+                raise urllib.error.HTTPError(key, 404, "Not Found", {}, io.BytesIO())
             return ISSUES[key]
         self.patch(w.jira, issue=issue)
-        data = self.collect([session(1, ["ABC-404"]), session(2, ["ABC-1"])], resolved=["ABC-1"])
-        self.assertEqual({t.key: (t.own.summary, t.resolved) for t in data["tickets"]},
-                         {"ABC-404": ("", False), "ABC-1": ("Export", True)})
+        data = self.collect([session(1, ["ABC-404"]), session(2, ["ABC-1"])])
+        self.assertEqual({t.key: t.own.summary for t in data["tickets"]}, {"ABC-404": "", "ABC-1": "Export"})
 
         def down(condition):
-            raise OSError("jira: command not found")
+            raise urllib.error.URLError("no route to host")
         self.patch(w.jira, search=down)
         issues = w.Jira()
         with contextlib.redirect_stderr(io.StringIO()):
@@ -191,12 +195,13 @@ class Prepare(Base):
 
 
 class Pages(Base):
-    def test_tickets_under_a_dollar_share_one_box_with_their_sum(self):
-        data = self.collect([session(1, ["ABC-1"], 2.0), session(2, ["ABC-3"], 0.4), session(3, ["ABC-4"], 0.3)])
+    def test_tickets_under_two_dollars_share_one_box_with_their_sum(self):
+        data = self.collect([session(1, ["ABC-1"], 2.0), session(2, ["ABC-3"], 1.5), session(3, ["ABC-4"], 0.3)])
         boxes = page.Page(data).ticket_boxes(data["tickets"], 1, "tickets")
-        self.assertEqual(len(boxes), 2)
+        self.assertEqual(len(boxes), 2)  # ABC-1 at $2.00 keeps its own box
         self.assertIn("Smaller tickets", boxes[1])
-        self.assertTrue(all(usd in boxes[1] for usd in ("$0.70", "$0.40", "$0.30")))
+        self.assertIn("that cost less than $2.00 each", boxes[1])
+        self.assertTrue(all(usd in boxes[1] for usd in ("$1.80", "$1.50", "$0.30")))
 
     def test_shared_page_shows_time_and_no_cost_or_usage(self):
         data = self.collect([session(1, ["ABC-1"], 2.0), session(2, edits=False, repo="tools")])
@@ -212,18 +217,51 @@ class Pages(Base):
         data.update(minutes=30, timed=1)
         self.assertIn("from the 1 of 2 sessions that recorded it", page.Page(data).write(self.tmp / "r.html").read_text())
 
+    def test_code_reviews_group_by_status_with_merged_folded(self):
+        statuses = ["merged", "open", "closed", "draft", "open"]
+        reviewed = [pr(n, "", f"b{n}", author="teammate", status=st) for n, st in enumerate(statuses, 1)]
+        data = self.collect([session(1)], reviewed=reviewed)
+        html = "".join(page.Page(data).work())
+        reviews = html[html.index("Code reviews"):]
+        shown = re.findall(r"pull/(\d+)", reviews)
+        self.assertEqual(list(dict.fromkeys(shown)), ["4", "2", "5", "3", "1"])  # an open pair keeps its order
+        groups = re.findall(r'<details( open="open")?><summary><span class="status (\w+)">.*?</span>'
+                            r'<span class="count"> (\d+)</span>', reviews)
+        self.assertEqual(groups, [(' open="open"', "draft", "1"), (' open="open"', "open", "2"),
+                                  (' open="open"', "closed", "1"), ("", "merged", "1")])  # merged starts folded
+
+    def test_no_resolved_count_and_a_cost_per_ticket(self):
+        data = self.collect([session(1, ["ABC-1"], 2.0), session(2, ["ABC-3"], 1.0)])
+        view = page.Page(data)
+        self.assertNotIn("resolved", " ".join(label for _, label in view.headline()))
+        claude = view.using_claude()
+        self.assertIn("<td>Cost per ticket</td><td>$1.50</td>", claude)  # $3.00 over 2 tickets
+        for gone in ("resolved", "Failed tool calls per session", "not on Sonnet"):
+            self.assertNotIn(gone, claude)
+
     def test_hours(self):
         self.assertEqual((page.hours(0), page.hours(3), page.hours(90)), ("-", "<0.1h", "1.5h"))
 
-    def test_tools_list_the_installed_skills_no_session_used(self):
-        for name in ("deck", "todo", "explain"):
-            (w.SKILLS / name).mkdir(parents=True)
-            (w.SKILLS / name / "SKILL.md").touch()
-        (w.SKILLS / "synced").mkdir()  # a folder Claude Code keeps there, not a skill
-        rows = [session(1, used={"skill": {"deck": 2}}), session(2, used={"command": {"todo": 1, "clear": 1}})]
+    def test_misc_lists_what_loaded_unused_with_its_share_of_the_cached_context(self):
+        for name, description in (("deck", "x" * 30), ("todo", "x" * 30), ("explain", "x" * 393)):
+            (inventory.SKILLS / name).mkdir(parents=True)
+            (inventory.SKILLS / name / "SKILL.md").write_text(f"---\nname: {name}\ndescription: {description}\n---\n")
+        (inventory.SKILLS / "synced").mkdir()  # a folder Claude Code keeps there, not a skill
+        inventory.STATE.write_text(json.dumps({"projects": {"/dev/site": {"mcpServers": {"playwright": {}}}}}))
+        cached = {"Opus": {"in": 0, "out": 0, "read": 1_000_000, "write": 0}}  # $0.20 of cache reads
+        rows = [{**session(1, used={"skill": {"deck": 2}}), "context": {"peak": 20_000, "avg": 10_000, "compactions": 0},
+                 "tokens_by_model": cached},
+                {**session(2, used={"command": {"todo": 1, "clear": 1}}), "context": {"peak": 20_000, "avg": 10_000, "compactions": 0},
+                 "tokens_by_model": cached}]
         data = self.collect(rows)
-        self.assertEqual(data["usage"]["unused"], ["explain"])
-        self.assertIn("1 skill installed but not used in this period: explain.", page.Page(data).tools())
+        unused = data["usage"]["unused"]
+        self.assertEqual([(u["name"], u["kind"], u["tokens"]) for u in unused],
+                         [("explain", "skill", 100), ("playwright", "MCP server, in /dev/site", None)])
+        self.assertAlmostEqual(unused[0]["usd"], 2 * 100 / 10_000 * 0.20)  # 1% of the context in 2 sessions
+        self.assertIsNone(unused[1]["usd"])
+        misc = page.Page(data).misc()
+        self.assertIn("2 items sat in the context of every session without being used", misc)
+        self.assertIn("<h2>Misc", misc)
 
 
 class Measures(Base):
@@ -231,8 +269,10 @@ class Measures(Base):
         heavy = {"context": {"peak": 150_000, "avg": 90_000, "compactions": 1}, "interrupts": 1, "edits": False}
         rows = [session(n, **heavy) for n in range(1, 7)]
         found = " ".join(f for f, _ in w.tips(w.measures(rows)))
-        for words in ("past 100k", "only asked questions", "changed no files", "stopped Claude", "compacted"):
+        for words in ("past 100k", "changed no files", "stopped Claude", "compacted"):
             self.assertIn(words, found)
+        self.assertNotIn("only asked questions", found)  # no tip on the model of question sessions
+        self.assertNotIn("Tool calls failed", found)
         self.assertEqual(w.tips(w.measures(rows[:4])), [])
         healthy = {"tokens_by_model": {"Opus": {"in": 1, "out": 10, "read": 95, "write": 4}}}
         self.assertEqual(w.tips(w.measures([session(n, **healthy) for n in range(1, 7)])), [])
@@ -240,6 +280,34 @@ class Measures(Base):
     def test_most_expensive_sessions_come_first(self):
         m = w.measures([session(1, cost=1.0), session(2, cost=5.0), session(3, cost=2.0)])
         self.assertEqual([r["id"] for r in m["top"]], ["s2", "s3", "s1"])
+
+
+class JiraApi(unittest.TestCase):
+    patch = Base.patch  # Base.setUp stubs the functions these tests call
+
+    def test_issue_and_a_search_over_two_pages(self):
+        answers = {
+            "/rest/api/3/issue/ABC-2?fields=summary,issuetype,parent": {"fields": {
+                "summary": "Fix", "issuetype": {"name": "Sub-task", "subtask": True}, "parent": {"key": "ABC-1"}}},
+            None: {"issues": [{"key": "ABC-1", "fields": {"summary": "Export", "issuetype": {"name": "Story"}}}],
+                   "nextPageToken": "t2", "isLast": False},
+            "t2": {"issues": [{"key": "ABC-3", "fields": {"summary": "Import", "issuetype": {"name": "Bug"}}}],
+                   "isLast": True}}
+        sent = []
+
+        def call(path, body=None):
+            sent.append(dict(body) if body else path)
+            return answers[body.get("nextPageToken") if body else path]
+        self.patch(jira, call=call)
+        self.assertEqual(jira.issue("ABC-2"), {"summary": "Fix", "type": "Sub-task", "subtask": True, "parent": "ABC-1"})
+        self.assertEqual(jira.updated("2026-11-01", "2026-11-30"),
+                         {"ABC-1": {"summary": "Export", "type": "Story"}, "ABC-3": {"summary": "Import", "type": "Bug"}})
+        self.assertEqual(sent[1]["jql"], 'assignee = currentUser() AND updated >= "2026-11-01" AND updated < "2026-12-01"')
+
+    def test_a_missing_setting_is_named(self):
+        self.patch(jira, settings={"jira_url": "https://x.atlassian.net", "jira_email": ""})
+        with self.assertRaisesRegex(KeyError, "jira_email"):
+            jira.issue("ABC-1")
 
 
 class Ledger(Base):
@@ -321,6 +389,8 @@ class Ledger(Base):
         row = json.loads(ledger.LEDGER.read_text())
         self.assertEqual((row["cost"], row["tokens_by_model"]["Opus"]["in"]), (0.5, 125_000))
 
+
+class GitHub(Base):
     def test_github_splits_your_pull_requests_into_opened_and_earlier(self):
         def node(n, created, reviews=()):
             return {"title": f"PR {n}", "url": f"https://github.com/acme/api/pull/{n}", "state": "MERGED",
@@ -335,6 +405,22 @@ class Ledger(Base):
         self.assertEqual({kind: [(p["title"], p["date"]) for p in prs] for kind, prs in found.items()},
                          {"opened": [("PR 2", "2026-11-01")], "earlier": [("PR 1", "2026-10-20")],
                           "reviewed": [("PR 4", "2026-11-03")]})
+
+    def test_one_gh_request_per_session_for_the_commits_not_cached(self):
+        asked = []
+
+        def output(cmd, cwd=None):
+            if cmd[0] == "git":
+                return {"remote": "git@github.com:acme/api.git", "config": "me@acme.com"}.get(cmd[1], "aaa\nbbb")
+            asked.append(re.findall(r'oid: "(\w+)"', cmd[4]))
+            return json.dumps({"data": {"repository": {
+                "c0": {"associatedPullRequests": {"nodes": [{"title": "Export", "headRefName": "ABC-1", "body": None}]}},
+                "c1": None}}})  # c1: a commit GitHub does not have, never pushed
+        self.patch(github, output=output)
+        for _ in range(2):
+            self.assertEqual(github.commit_pulls(str(self.tmp), "2026-11-01T09:00:00Z", "2026-11-01T10:00:00Z"),
+                             ["Export\nABC-1\n"])
+        self.assertEqual(asked, [["aaa", "bbb"], ["bbb"]])  # aaa came from commits.json the second time
 
 
 if __name__ == "__main__":

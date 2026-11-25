@@ -3,7 +3,7 @@ flowchart TB
   subgraph fetch [2. Fetch]
     direction LR
     gh[GitHub] -- gh api graphql --> ghp[github.py] -- PRs opened,<br/>earlier, reviewed --> prs[PR list]
-    jc[Jira] -- jira CLI --> jp[jira.py] -- issue type,<br/>parent --> cache[(jira.json)]
+    jc[Jira] -- REST API --> jp[jira.py] -- issue type,<br/>parent --> cache[(jira.json)]
   end
   subgraph rec [1. Record]
     direction LR

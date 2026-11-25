@@ -1,7 +1,7 @@
 """The HTML page of a report, from the data worklog.collect returns.
 
 Page(data) is the page for you: the work with time and cost, then what the sessions say about how you use
-Claude (tips, measures, the most expensive sessions, tokens, context, tools). Page(data, share=True) is the page
+Claude (tips, measures, the most expensive sessions, tokens, context, misc). Page(data, share=True) is the page
 for other readers: the work, outcomes and time, with no costs and none of the Using Claude sections.
 """
 import html
@@ -10,14 +10,16 @@ from datetime import date, timedelta
 from pathlib import Path
 from string import Template
 
-from ledger import BIG_CONTEXT, IDLE, MODELS, QUESTION_MODEL, SENT, cost, repo_of
+from ledger import BIG_CONTEXT, IDLE, MODELS, SENT, cost, repo_of
 from settings import settings
 
 JIRA_URL = settings["jira_url"]
 TEMPLATE = Path(__file__).resolve().parent / "report.html"
-SMALL = 1.0  # USD; tickets that cost less share one box
+SMALL = 2.0  # USD; tickets that cost less share one box
 MODEL_SLOTS = {m["name"]: m["colour"] for m in MODELS.values() if "colour" in m}  # from models.json; others grey
-STATUS = {"merged": "✓ Merged", "closed": "✕ Closed, not merged", "open": "○ Open", "draft": "○ Draft"}
+STATUS = {"merged": ("✓", "Merged"), "closed": ("✕", "Closed, not merged"), "open": ("○", "Open"),
+          "draft": ("○", "Draft")}  # a pull request's status: its mark, then its words
+REVIEW_ORDER = ["draft", "open", "closed", "merged"]  # code reviews: still moving first, done last
 
 
 # ---- plain helpers
@@ -82,7 +84,7 @@ def dot(slot):
 
 
 def status_cell(name):
-    return [tag("span", STATUS[name], class_=f"status {name}")]
+    return [tag("span", " ".join(STATUS[name]), class_=f"status {name}")]
 
 
 def jira_link(key):
@@ -92,8 +94,8 @@ def jira_link(key):
 def pr_links(prs):
     """Each pull request as 'repo#123 status', one per line."""
     links = [tag("a", f"{pr['repo']}#{pr['url'].rsplit('/', 1)[-1]}", href=pr["url"], title=pr["title"])
-             + " " + tag("span", STATUS[pr["status"]].split()[0], class_=f"status {pr['status']}",
-                         title=STATUS[pr["status"]].split(" ", 1)[1]) for pr in prs]
+             + " " + tag("span", STATUS[pr["status"]][0], class_=f"status {pr['status']}",
+                         title=STATUS[pr["status"]][1]) for pr in prs]
     return ["<br>".join(links)] if links else "-"
 
 
@@ -245,8 +247,8 @@ class Page:
         found = {gid: {"name": name, "tickets": n, "repos": r, "cost": sum(p.cost for p in parts),
                        "minutes": sum(p.minutes for p in parts)}
                  for gid, name, n, r, parts in rows if parts}
-        for i, g in enumerate(found.values()):
-            g["slot"] = i + 1 if i < 8 else 0  # eight palette colours in a fixed order; past them, grey
+        for i, g in enumerate(found.values(), 1):
+            g["slot"] = i  # palette colours in a fixed order
         return found
 
     def headline(self):
@@ -256,17 +258,15 @@ class Page:
 
         def s(n):
             return "" if n == 1 else "s"
-        resolved, support_resolved = sum(t.resolved for t in tickets), sum(t.resolved for t in support)
         merged, reviewed = sum(pr["status"] == "merged" for pr in prs["opened"]), len(prs["reviewed"])
         touched = {t.key for t in tickets + support}  # reviews for others do not count
         tiles = [(len(touched), f"ticket{s(len(touched))} worked on", touched),
-                 (resolved, f"ticket{s(resolved)} resolved, of {len(tickets)}", tickets),
-                 (support_resolved, f"support ticket{s(support_resolved)} resolved, of {len(support)}", support),
                  (merged, f"pull request{s(merged)} merged, of {len(prs['opened'])} opened", prs["opened"]),
                  (reviewed, f"pull request{s(reviewed)} reviewed", reviewed)]
         tiles = [(number, label) for number, label, behind in tiles if behind]
         if d["minutes"]:
-            part = "" if d["timed"] == d["sessions"] else f", from the {d['timed']} of {d['sessions']} sessions that recorded it"
+            part = ("" if d["timed"] == d["sessions"]
+                    else f", from the {d['timed']} of {d['sessions']} sessions that recorded it")
             tiles.append((hours(d["minutes"]), "of active time in Claude Code" + part))
         if not self.share:
             tiles.append((money(d["total"]), "at API list prices"))
@@ -306,7 +306,7 @@ class Page:
         head = ["Ticket"] + (["Type"] if typed else []) + ["Worked on", "Pull requests", "Models", "Time", "Cost"]
         ranked = sorted(tickets, key=lambda t: -t.cost)
         small = [t for t in ranked if t.cost < SMALL]
-        boxes = [self.ticket_box(t, head, typed, slot) for t in ranked[:len(ranked) - len(small)]]
+        boxes = [self.ticket_box(t, head, typed, slot) for t in ranked if t.cost >= SMALL]
         if small:
             boxes.append(self.small_box(small, head, typed, slot, name))
         return boxes
@@ -375,10 +375,7 @@ class Page:
         if "reviews" in g:
             intro = ("Pull requests by teammates that you reviewed." if prs["reviewed"]
                      else "GitHub listed no reviews in the period.")
-            body.append(boxed("reviews", "Code reviews", intro, *([self.grid(
-                ["Reviewed", "Pull request", "Status"],
-                [[day(pr["date"]), (pr["title"], pr["url"], f"{pr['repo']} · {pr['author']}"), status_cell(pr["status"])]
-                 for pr in prs["reviewed"]])] if prs["reviewed"] else [])))
+            body.append(boxed("reviews", "Code reviews", intro, *self.review_groups(prs["reviewed"])))
         return body
 
     # -- how you use Claude (your page only)
@@ -388,23 +385,21 @@ class Page:
         d = self.data
         m = d["measures"]
         merged = sum(pr["status"] == "merged" for pr in d["prs"]["opened"])
-        done = [t for t in d["tickets"] + d["support"] if t.resolved]
+        worked = d["tickets"] + d["support"]
         advice = (tag("ul", [tag("li", [tag("strong", found) + " " + html.escape(todo)]) for found, todo in d["tips"]],
                       class_="tips") if d["tips"] else
                   tag("p", "Every measure is within its line. Nothing to change this period.", class_="intro"))
         rows = [["Sessions", m["sessions"]],
                 ["Cost per merged pull request", money(m["cost"] / merged) if merged else "-"],
-                ["Cost per resolved ticket", money(sum(t.cost for t in done) / len(done)) if done else "-"],
+                ["Cost per ticket", money(sum(t.cost for t in worked) / len(worked)) if worked else "-"],
                 ["Cache hit rate (cache reads / all input)", pct(m["cache_hit"])],
                 [f"Share of cost in sessions past {BIG_CONTEXT // 1000}k context", pct(m["big"])],
                 ["Share of cost in subagents", pct(m["subagents"])],
                 ["Share of cost in sessions that changed nothing", pct(m["idle"])],
-                [f"Share of cost not on {QUESTION_MODEL} in sessions that changed nothing", pct(m["off_model_questions"])],
                 ["Prompts per session", f"{m['prompts']:.1f}" if m["prompts"] is not None else "-"],
                 ["Prompts per merged pull request",
                  f"{m['prompts'] * m['rated'] / merged:.0f}" if m["prompts"] is not None and merged else "-"],
                 ["Sessions you interrupted", pct(m["interrupted"])],
-                ["Failed tool calls per session", f"{m['errors']:.1f}" if m["errors"] is not None else "-"],
                 ["Sessions compacted", m["compacted"]]]
         top = self.grid(["Date", "Session", "Peak context", "Prompts", "Interrupts", "Failed tools", "Cost"],
                         [[day(r["day"]), (r["title"] or r["prompt"][:80] or "(no title)", "", repo_of(r)),
@@ -438,9 +433,23 @@ class Page:
                        for name, t in models]),
             tag("h3", "Cost per day by model"), daily_chart(usage["daily"], d["since"], d["until"]))
 
-    def tools(self):
-        """The skills, MCP servers and subagents the sessions used, most used first, then the installed skills no
-        session used."""
+    def review_groups(self, reviewed):
+        """The reviewed pull requests in one collapsible group per status: draft, open, closed, then merged, each
+        by date. Merged, the long finished list, starts folded."""
+        groups = []
+        for status in REVIEW_ORDER:
+            group = [pr for pr in reviewed if pr["status"] == status]
+            if group:
+                head = tag("summary", status_cell(status) + [tag("span", f" {len(group)}", class_="count")])
+                table = self.grid(["Reviewed", "Pull request"],
+                                  [[day(pr["date"]), (pr["title"], pr["url"], f"{pr['repo']} · {pr['author']}")]
+                                   for pr in group])
+                groups.append(tag("details", [head, table], **({} if status == "merged" else {"open": "open"})))
+        return groups
+
+    def misc(self):
+        """The skills, MCP servers and subagents the sessions used, most used first; then what loaded into every
+        session without being used, with what it cost, the total at the right of the title."""
         usage = self.data["usage"]
         parts = []
         for kind, head in {"skill": "Skill", "mcp": "MCP server", "agent": "Subagent"}.items():
@@ -448,11 +457,20 @@ class Page:
                 rows = most_used(usage[kind])
                 parts.append(self.grid([head, "Uses", "Sessions"], [[name, bar_cell(n, n, rows[0][1][0]), sessions]
                                                                      for name, (n, sessions) in rows]))
-        unused = usage.get("unused")
+        unused = usage.get("unused") or []
+        total = sum(u["usd"] or 0 for u in unused)
         if unused:
-            parts.append(tag("p", f"{plural(len(unused), 'skill')} installed but not used in this period: "
-                                  f"{', '.join(unused)}.", class_="intro unused"))
-        return self.section("Tools used", "Skills, MCP servers and subagents, most used first.", *parts) if parts else ""
+            parts += [tag("h3", "Loaded but not used"),
+                      tag("p", f"{plural(len(unused), 'item')} sat in the context of every session without being "
+                               f"used, about {money(total)} in this period. Each reply re-reads them, so this is "
+                               "their share of what the sessions paid for cached context. Remove skills from "
+                               "~/.claude/skills, plugins with /plugin and MCP servers with /mcp.",
+                          class_="intro unused"),
+                      self.grid(["Item", "Kind", "Tokens per session", "Cost"],
+                                [[u["name"], u["kind"], "?" if u["tokens"] is None else amount(u["tokens"]),
+                                  "?" if u["usd"] is None else money(u["usd"])] for u in unused])]
+        intro = "Skills, MCP servers and subagents the sessions used, most used first, and what loaded unused."
+        return self.section("Misc", intro, *parts, usd=total) if parts else ""
 
     def write(self, file):
         d = self.data
@@ -464,7 +482,7 @@ class Page:
             body.append(self.using_claude())
         body += self.work()
         if not self.share:
-            body += [self.tokens_and_context(), self.tools()]
+            body += [self.tokens_and_context(), self.misc()]
         body.append(tag("footer", "Sources: Jira, GitHub and the records Claude Code keeps on this computer. "
                         f"Time is active time in sessions: a gap over {IDLE} minutes counts as a break, and sessions "
                         "that ran side by side add up. "

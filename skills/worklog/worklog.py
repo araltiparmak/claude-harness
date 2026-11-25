@@ -16,9 +16,10 @@ and reviews, with time, cost and tips. Everything stays on this computer.
   worklog.py record                            the SessionEnd hook: adds the session on stdin to the ledger
 
 Settings: ~/.config/worklog.json over the defaults in settings.json; models and prices: models.json; README.md
-describes both. Data: <DEV_DIR>/worklog, with sessions.jsonl (the
-ledger), jira.json (the issue cache), mapped.json (the tickets chosen with map) and notes.json (the outcomes).
-ledger.py reads transcripts, page.py writes the HTML, github.py and jira.py fetch pull requests and issues.
+describes both. Data: <DEV_DIR>/worklog, with sessions.jsonl (the ledger), jira.json (the issue cache),
+commits.json (the pull requests of your commits), mapped.json (the tickets chosen with map) and notes.json (the
+outcomes). ledger.py reads transcripts, page.py writes the HTML, github.py and jira.py fetch pull requests and
+issues, inventory.py finds what loads into every session.
 """
 import json
 import os
@@ -26,32 +27,32 @@ import re
 import shutil
 import subprocess
 import sys
+import urllib.error
 import webbrowser
-from collections import defaultdict
+from collections import Counter, defaultdict
 from datetime import date, timedelta
 from operator import ge, gt, lt
 from pathlib import Path
 
 import github
+import inventory
 import jira
 import ledger
 import page
-from ledger import BIG_CONTEXT, QUESTION_MODEL, SENT, TOKENS, cost, models_of, repo_of
+from ledger import BACKGROUND, BIG_CONTEXT, SENT, TOKENS, cost, models_of, repo_of
 from settings import DATA, DEV, FILE, settings
 
 JIRA_PREFIXES, SUPPORT_PREFIXES, EXCLUDE_REPOS = (
     settings[k] for k in ("jira_prefixes", "support_prefixes", "exclude_repos"))
 MAPPED = DATA / "mapped.json"
 NOTES = DATA / "notes.json"
-SKILLS = Path.home() / ".claude" / "skills"  # the installed skills, a folder or a link each
+JIRA_CACHE = DATA / "jira.json"
 CLAUDE_SETTINGS = Path.home() / ".claude" / "settings.json"  # where check looks for the hook
 PREFIXES = "|".join(re.escape(p) for p in JIRA_PREFIXES)
 KEY = re.compile(rf"\b(?:{PREFIXES})-\d+\b", re.I) if PREFIXES else re.compile(r"[^\s\S]")  # never matches
 SUPPORT = {p.upper() for p in SUPPORT_PREFIXES}
 TOP = 10  # the most expensive sessions listed
 MIN_SESSIONS = 5  # fewer sessions than this give no tips
-
-pull_requests, commit_pulls = github.pull_requests, github.commit_pulls  # tests swap them
 
 
 # ---- Jira
@@ -61,8 +62,8 @@ class Jira:
     Jira does not know (see fetch)."""
 
     def __init__(self):
-        file = DATA / "jira.json"
-        self.cache, self.down = json.loads(file.read_text()) if file.exists() else {}, not PREFIXES
+        self.cache = saved(JIRA_CACHE)
+        self.down = not PREFIXES
         self.unknown = set()  # keys Jira refused in this run
 
     def ask(self, call, *args):
@@ -70,7 +71,7 @@ class Jira:
             return None
         try:
             return call(*args)
-        except Exception as err:  # CLI missing, not logged in, output that is not JSON
+        except Exception as err:  # not set up, not reachable, login refused
             print(f"note: Jira is not answering ({err}); tickets are shown by key only\n", file=sys.stderr)
             self.down = True
 
@@ -87,7 +88,10 @@ class Jira:
         typo, an example in a prompt, a deleted issue): it is skipped, and Jira stays on for the other keys."""
         try:
             return jira.issue(key)
-        except subprocess.CalledProcessError:
+        except urllib.error.HTTPError as err:
+            err.close()  # the answer's body, unread
+            if err.code != 404:
+                raise
             jira.search("updated >= -1d")  # raises when Jira itself is not answering
             self.unknown.add(key)
             return None
@@ -105,12 +109,9 @@ class Jira:
         main = next((k for k in rest if not self.issue(k).get("subtask")), rest[0] if rest else "")
         return main or (epics[0] if epics else "")
 
-    def resolved(self, since, until):
-        return self.ask(jira.resolved, since, until) or []
-
     def save(self):
         if self.cache:
-            (DATA / "jira.json").write_text(json.dumps(self.cache, indent=1))
+            JIRA_CACHE.write_text(json.dumps(self.cache, indent=1))
 
 
 # ---- sorting the sessions
@@ -148,7 +149,8 @@ def ticket(row, by_branch, issues):
         if len(by_branch.get(b, ())) == 1:
             return next(iter(by_branch[b]))
     if PREFIXES and row.get("end") and Path(row["cwd"] or "/nowhere").is_dir():
-        found = [k.upper() for text in commit_pulls(row["cwd"], row["start"], row["end"]) for k in KEY.findall(text)]
+        found = [k.upper() for text in github.commit_pulls(row["cwd"], row["start"], row["end"])
+                 for k in KEY.findall(text)]
         if found:
             return issues.pick(list(dict.fromkeys(found)))
     return ""
@@ -163,7 +165,7 @@ class Work:
         issue = issue or {}
         self.key, self.summary, self.type = key, issue.get("summary", ""), issue.get("type", "")
         self.days, self.cost, self.models, self.prs = set(), 0.0, defaultdict(float), []
-        self.minutes, self.titles, self.mapped, self.resolved = 0.0, [], 0, False
+        self.minutes, self.titles, self.mapped = 0.0, [], 0
 
     def add(self, row, mapped=False):
         self.days.add(row["day"])
@@ -181,7 +183,6 @@ class Ticket:
 
     def __init__(self, key, issues):
         self.key, self.issues, self.own, self.subs, self.repos = key, issues, Work(key, issues.issue(key)), {}, {}
-        self.resolved = False
 
     def part(self, key):
         if key == self.key:
@@ -221,7 +222,7 @@ def collect(since, until):
     if not rows:
         sys.exit(f"no sessions from {since} to {until}")
     prs = {kind: [pr for pr in found if pr["repo"] not in EXCLUDE_REPOS]
-           for kind, found in pull_requests(since, until).items()}
+           for kind, found in github.pull_requests(since, until).items()}
     issues, tickets, reviews, other, unmapped = Jira(), {}, Work(), defaultdict(Work), []  # other: {repo: Work}
 
     def on(key):
@@ -232,7 +233,7 @@ def collect(since, until):
 
     chosen = saved(MAPPED)
     by_branch = {}  # (repo, branch): ticket, and branch: {tickets of the pull requests from a branch of that name}
-    for pr in prs["opened"] + prs.get("earlier", []):
+    for pr in prs["opened"] + prs["earlier"]:
         pr["sub"] = issues.pick(list(dict.fromkeys(k.upper() for k in KEY.findall(pr["text"]))))
         pr["ticket"] = issues.top(pr["sub"])
         if pr["ticket"]:
@@ -240,12 +241,13 @@ def collect(since, until):
             by_branch.setdefault(pr["branch"], set()).add(pr["ticket"])
     for row in rows:
         rule = ticket(row, by_branch, issues)
-        named = rule or chosen.get(row["id"], "")
+        review = row["review"] and not row["edits"]
+        named = rule or ("" if review else chosen.get(row["id"], ""))  # map only places what would be Other work
         if named:
             t = on(named)
             t.part(named).add(row, mapped=not rule)
             t.repos[repo_of(row)] = None
-        elif row["review"] and not row["edits"]:
+        elif review:
             reviews.add(row)
         else:
             other[repo_of(row)].add(row)
@@ -255,10 +257,6 @@ def collect(since, until):
             t = on(pr["sub"])
             t.part(pr["sub"]).prs.append(pr)
             t.repos[pr["repo"]] = None
-    for key in issues.resolved(since, until):  # a resolved sub-task does not resolve its parent
-        t = on(key)
-        t.part(key).resolved = True
-        t.resolved |= key == t.key
     issues.save()
     measured = measures(rows)
     return {"since": since, "until": until, "other": other, "unmapped": unmapped, "prs": prs,
@@ -301,6 +299,7 @@ def measures(rows):
     the sessions that recorded the field, and an average is over the rated sessions; None when none did."""
     tokens = token_totals(rows)
     sent = sum(t[k] for t in tokens.values() for k in SENT)
+    rated = [r for r in rows if "prompts" in r]  # rows recorded before these were kept have none
 
     def share(field, part):
         known = [r for r in rows if field in r]
@@ -309,19 +308,15 @@ def measures(rows):
 
     def per_session(field):
         return sum(field(r) for r in rated) / len(rated) if rated else None
-    rated = [r for r in rows if "prompts" in r]  # rows recorded before these were kept have none
     return {
-        "cost": sum(cost(r) for r in rows) or 0.0, "sessions": len(rows), "tokens": tokens,
+        "cost": sum(cost(r) for r in rows), "sessions": len(rows), "tokens": tokens,
         "cache_hit": sum(t["read"] for t in tokens.values()) / sent if sent else None,
         "big": share("context", lambda r: cost(r) if r["context"]["peak"] > BIG_CONTEXT else 0),
         "subagents": share("subagent_cost", lambda r: r["subagent_cost"]),
         "idle": share("edits", lambda r: cost(r) if question(r) else 0),
-        "off_model_questions": share("edits", lambda r: sum(usd for m, usd in models_of(r).items()
-                                                           if m != QUESTION_MODEL) if question(r) else 0),
         "rated": len(rated),
         "prompts": per_session(lambda r: r["prompts"]),
         "interrupted": per_session(lambda r: r["interrupts"] > 0),
-        "errors": per_session(lambda r: r["errors"]),
         "context": context_stats(rows),
         "compacted": sum(r["context"]["compactions"] > 0 for r in rows if "context" in r),
         "top": sorted(rows, key=lambda r: -cost(r))[:TOP]}
@@ -336,9 +331,6 @@ TIPS = [
     ("cache_hit", lt, 0.85, "Only {:.0%} of the input came from the prompt cache.",
      "The cache expires after a pause (5 minutes by default), and the next reply pays full price for the whole "
      "context. Finish a task in one sitting, or start fresh after a long break instead of resuming."),
-    ("off_model_questions", gt, 0.10,
-     f"Sessions that only asked questions spent {{:.0%}} of the cost on models other than {QUESTION_MODEL}.",
-     f"{QUESTION_MODEL} answers most questions well for less; switch with /model."),
     ("idle", gt, 0.25, "{:.0%} of the cost went to sessions that changed no files and reviewed nothing.",
      "Questions are fine. For exploration, a narrower first prompt (the file, the symptom, what you expect) usually "
      "gets there in fewer turns."),
@@ -350,11 +342,8 @@ TIPS = [
      "goal and the limits helps it start right."),
     ("compacted", ge, 3, "{} sessions ran out of context and were compacted.",
      "Compaction loses detail. Split long tasks into sessions, with a short hand-over note."),
-    ("errors", gt, 3, "Tool calls failed {:.1f} times per session.",
-     "Repeated failures often mean a missing permission, a wrong working folder or a missing tool; the most "
-     "expensive sessions show where."),
 ]
-PER_SESSION = ("interrupted", "errors")  # averages over the sessions that recorded prompts (rated)
+PER_SESSION = ("interrupted",)  # averages over the sessions that recorded prompts (rated)
 
 
 def tips(m):
@@ -380,12 +369,60 @@ def skills_of(row, installed):
     return skills
 
 
+RATES = {m["name"]: m["prices"] for m in ledger.MODELS.values()}  # model family: prices per million tokens
+DEFAULT_RATES = ledger.MODELS[ledger.PRICING["default_model"]]["prices"]
+KINDS = {"account": "claude.ai skill", "plugin, account": "claude.ai plugin", "mcp, claude.ai": "claude.ai connector"}
+
+
+def kind_name(kind):
+    """An inventory kind as the page names it: skill, plugin, MCP server, or its claude.ai variant."""
+    if kind in KINDS:
+        return KINDS[kind]
+    if kind.startswith("plugin, project "):
+        return "plugin, in " + kind[len("plugin, project "):]
+    if kind.startswith("mcp, local, "):
+        return "MCP server, in " + kind[len("mcp, local, "):]
+    if kind == "plugin":
+        return "plugin"
+    return "MCP server" if kind.startswith("mcp") else "skill"
+
+
+def loaded_cost(row, tokens):
+    """About what tokens loaded into every reply cost in one session: their share of its average context, times
+    what the session paid to read and write its cached context. Background calls carry no such context."""
+    avg = (row.get("context") or {}).get("avg")
+    if not avg or not tokens:
+        return 0.0
+    paid = 0.0
+    for model, t in row.get("tokens_by_model", {}).items():
+        if model != BACKGROUND:
+            rates = RATES.get(model, DEFAULT_RATES)
+            paid += t.get("read", 0) * rates["cache_read"] + t.get("write", 0) * rates["cache_write_1h"]
+    return min(tokens / avg, 1.0) * paid / 1e6
+
+
+def unused_of(rows, uses):
+    """The skills, plugins and MCP servers that load into sessions and that no session of the period used, as
+    {name, kind, tokens, usd}, the most expensive first. usd covers the sessions the item loaded into: all of
+    them, or those in its project for a project plugin or local server; None when the tokens are not known."""
+    found = []
+    for name, kind, tokens, _, project, usage_names in inventory.items():
+        if inventory.counts_for(usage_names, uses):
+            continue
+        sessions = [r for r in rows if not project or Path(r["cwd"] or "/").is_relative_to(project)]
+        usd = None if tokens is None else sum(loaded_cost(r, tokens) for r in sessions)
+        found.append({"name": name, "kind": kind_name(kind), "tokens": tokens, "usd": usd})
+    return sorted(found, key=lambda u: (u["usd"] is None, -(u["usd"] or 0), -(u["tokens"] or 0), u["name"]))
+
+
 def usage_of(rows):
     """What the sessions used, as {kind: {name: [uses, sessions]}} for skills, MCP servers and subagents, cost per
-    day per model, the peak context of each session, and the installed skills no session used."""
-    installed = {p.name for p in SKILLS.iterdir() if (p / "SKILL.md").is_file()} if SKILLS.is_dir() else set()
+    day per model, the peak context of each session, and what loaded into the sessions unused (unused_of)."""
+    installed = {p.name for p in inventory.SKILLS.iterdir() if (p / "SKILL.md").is_file()} \
+        if inventory.SKILLS.is_dir() else set()
     found = defaultdict(lambda: defaultdict(lambda: [0, 0]))
     found["daily"] = defaultdict(lambda: defaultdict(float))  # day: {model: cost}
+    names = Counter()  # every use under the names inventory counts it by
     for r in rows:
         used = r.get("used", {})
         for kind, counts in (("skill", skills_of(r, installed)), ("mcp", used.get("mcp", {})),
@@ -393,11 +430,12 @@ def usage_of(rows):
             for item, n in counts.items():
                 found[kind][item][0] += n
                 found[kind][item][1] += 1
+                names["mcp:" + item if kind == "mcp" else item] += n
         for model, usd in models_of(r).items():
             found["daily"][r["day"]][model] += usd
     found["peaks"] = [(r["day"], r["context"]["peak"], r["title"] or r["prompt"][:60])
                       for r in rows if "context" in r]
-    found["unused"] = sorted(installed - set(found["skill"]))
+    found["unused"] = unused_of(rows, names)
     return found
 
 
@@ -518,8 +556,9 @@ def check_sources(line):
         try:
             jira.search("updated >= -1d")
             line(True, "Jira search")
-        except Exception as err:  # CLI missing, not logged in, output that is not JSON
-            line(None, "Jira search", f"failed ({err}); tickets show by key only")
+        except Exception as err:  # not set up, not reachable, login refused
+            line(None, "Jira search", f"failed ({err}); set jira_url, jira_email and JIRA_API_TOKEN; tickets show "
+                                      "by key only")
 
 
 def check():
