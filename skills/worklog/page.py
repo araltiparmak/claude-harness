@@ -376,11 +376,7 @@ class Page:
         if "reviews" in g:
             intro = ("Pull requests by teammates that you reviewed." if prs["reviewed"]
                      else "GitHub listed no reviews in the period.")
-            body.append(boxed("reviews", "Code reviews", intro, *([self.grid(
-                ["Reviewed", "Pull request", "Status"],
-                [[day(pr["date"]), (pr["title"], pr["url"], f"{pr['repo']} · {pr['author']}"), status_cell(pr["status"])]
-                 for pr in sorted(prs["reviewed"], key=lambda pr: REVIEW_ORDER.index(pr["status"]))])]
-                if prs["reviewed"] else [])))
+            body.append(boxed("reviews", "Code reviews", intro, *self.review_groups(prs["reviewed"])))
         return body
 
     # -- how you use Claude (your page only)
@@ -439,6 +435,20 @@ class Page:
                         amount(t["read"]), amount(t["write"]), pct(t["read"] / max(sum(t[x] for x in SENT), 1))]
                        for name, t in models]),
             tag("h3", "Cost per day by model"), daily_chart(usage["daily"], d["since"], d["until"]))
+
+    def review_groups(self, reviewed):
+        """The reviewed pull requests in one collapsible group per status: draft, open, closed, then merged, each
+        by date. Merged, the long finished list, starts folded."""
+        groups = []
+        for status in REVIEW_ORDER:
+            group = [pr for pr in reviewed if pr["status"] == status]
+            if group:
+                head = tag("summary", status_cell(status) + [tag("span", f" {len(group)}", class_="count")])
+                table = self.grid(["Reviewed", "Pull request"],
+                                  [[day(pr["date"]), (pr["title"], pr["url"], f"{pr['repo']} · {pr['author']}")]
+                                   for pr in group])
+                groups.append(tag("details", [head, table], **({} if status == "merged" else {"open": "open"})))
+        return groups
 
     def misc(self):
         """The skills, MCP servers and subagents the sessions used, most used first; then what loaded into every

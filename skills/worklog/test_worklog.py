@@ -216,13 +216,18 @@ class Pages(Base):
         data.update(minutes=30, timed=1)
         self.assertIn("from the 1 of 2 sessions that recorded it", page.Page(data).write(self.tmp / "r.html").read_text())
 
-    def test_code_reviews_list_draft_open_closed_then_merged(self):
+    def test_code_reviews_group_by_status_with_merged_folded(self):
         statuses = ["merged", "open", "closed", "draft", "open"]
         reviewed = [pr(n, "", f"b{n}", author="teammate", status=st) for n, st in enumerate(statuses, 1)]
         data = self.collect([session(1)], reviewed=reviewed)
         html = "".join(page.Page(data).work())
-        shown = re.findall(r"pull/(\d+)", html[html.index("Code reviews"):])
+        reviews = html[html.index("Code reviews"):]
+        shown = re.findall(r"pull/(\d+)", reviews)
         self.assertEqual(list(dict.fromkeys(shown)), ["4", "2", "5", "3", "1"])  # an open pair keeps its order
+        groups = re.findall(r'<details( open="open")?><summary><span class="status (\w+)">.*?</span>'
+                            r'<span class="count"> (\d+)</span>', reviews)
+        self.assertEqual(groups, [(' open="open"', "draft", "1"), (' open="open"', "open", "2"),
+                                  (' open="open"', "closed", "1"), ("", "merged", "1")])  # merged starts folded
 
     def test_hours(self):
         self.assertEqual((page.hours(0), page.hours(3), page.hours(90)), ("-", "<0.1h", "1.5h"))
