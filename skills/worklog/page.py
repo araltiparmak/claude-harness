@@ -10,6 +10,7 @@ from datetime import date, timedelta
 from pathlib import Path
 from string import Template
 
+from agentsview import session_url, ticket_url
 from ledger import BIG_CONTEXT, IDLE, MODELS, SENT, cost, repo_of
 from settings import settings
 
@@ -105,10 +106,11 @@ def repos(tickets):
     return ", ".join(found) or "-"
 
 
-def ticket_cell(key, summary, mapped):
-    """A ticket's link, with its summary and how many of its sessions came from map in the small print."""
-    marked = f" · {plural(mapped, 'session')} mapped by /worklog" if mapped else ""
-    return key, jira_link(key), summary + marked
+def ticket_cell(key, summary, mapped, link=""):
+    """A ticket's link, with its summary, how many of its sessions came from map and the link (HTML) in the small
+    print."""
+    small = summary + (f" · {plural(mapped, 'session')} mapped by /worklog" if mapped else "")
+    return key, jira_link(key), [html.escape(small) + (" · " if small else "") + link] if link else small
 
 
 def bar_cell(shown, value, top):
@@ -231,6 +233,11 @@ class Page:
         parts = sorted(((m, usd) for m, usd in models.items() if paid(usd)), key=lambda item: -item[1])
         return ", ".join(f"{m} {'' if self.share else money(usd) + ' '}({usd / total:.0%})" for m, usd in parts)
 
+    def sessions_link(self, key):
+        """The ticket's sessions in AgentsView, as HTML; none on a shared page, whose readers cannot open it."""
+        url = "" if self.share else ticket_url(key)
+        return tag("a", "Sessions in AgentsView", href=url) if url else ""
+
     # -- the work
 
     def grouped(self):
@@ -325,7 +332,10 @@ class Page:
         intro += f"Repos: {', '.join(t.repos)}." if t.repos else ""
         intro += f" Pull requests: {'; '.join(titles)}." if titles else ""
         intro += " The total includes the sub-tasks." if t.subs else ""
-        return self.section(title, intro.strip(), self.grid(head, rows, [""] + ["sub"] * len(t.subs)),
+        intro, link = intro.strip(), self.sessions_link(t.key)
+        if link:
+            intro = [html.escape(intro) + (" " if intro else "") + link]
+        return self.section(title, intro, self.grid(head, rows, [""] + ["sub"] * len(t.subs)),
                             usd=t.cost, minutes=t.minutes, slot=slot)
 
     def small_box(self, small, head, typed, slot, name):
@@ -339,7 +349,7 @@ class Page:
                 for model, usd in w.models.items():
                     models[model] += usd
             summary = f"{t.own.summary}. {notes[t.key]}" if t.key in notes else t.own.summary
-            rows.append([ticket_cell(t.key, summary, sum(w.mapped for w in t.works))]
+            rows.append([ticket_cell(t.key, summary, sum(w.mapped for w in t.works), self.sessions_link(t.key))]
                         + ([t.own.type or "-"] if typed else [])
                         + [worked_on(set().union(*(w.days for w in t.works))),
                            pr_links([pr for w in t.works for pr in w.prs]), self.model_split(models),
@@ -402,7 +412,7 @@ class Page:
                 ["Sessions you interrupted", pct(m["interrupted"])],
                 ["Sessions compacted", m["compacted"]]]
         top = self.grid(["Date", "Session", "Peak context", "Prompts", "Interrupts", "Failed tools", "Cost"],
-                        [[day(r["day"]), (r["title"] or r["prompt"][:80] or "(no title)", "", repo_of(r)),
+                        [[day(r["day"]), (r["title"] or r["prompt"][:80] or "(no title)", session_url(r["id"]), repo_of(r)),
                           f"{r['context']['peak'] // 1000}k" if "context" in r else "-",
                           r.get("prompts", "-"), r.get("interrupts", "-"), r.get("errors", "-"), money(cost(r))]
                          for r in m["top"]])

@@ -20,6 +20,12 @@ estimate from message times, so both vary with how a person works, not only with
   being used (skills, plugins, MCP servers), with its tokens per session and its estimated cost in the period:
   its share of each session's average context, times what the session paid to read and write cached context.
 
+With [AgentsView](https://www.agentsview.io/) installed (`brew install --cask agentsview`), the page links into it:
+each of the 10 most expensive sessions opens its transcript in the app, and each ticket has a link to its sessions
+there. For that, the report gives every session of a ticket the AgentsView label `ticket=<KEY>` (a sub-task's
+sessions take the parent's key) and changes no other label. The ticket links open while the AgentsView app or its
+local server runs.
+
 `/worklog share` writes `share.html` for other readers (a manager, a review document): the work, outcomes and
 time, with no costs and none of the Using Claude sections. It can also publish it as a private Artifact link.
 
@@ -130,12 +136,14 @@ session would show about half its cost. When a new model comes out, add its id a
 
 Everything stays in `<dev_dir>/worklog` on your computer: `sessions.jsonl` (one row per session, including the
 first 200 characters of your first prompt), `jira.json` (issue names), `commits.json` (the pull requests your
-commits belong to), `mapped.json` and `notes.json` (what Claude saved), and the pages. Nothing is sent anywhere
+commits belong to), `mapped.json` and `notes.json` (what Claude saved), and the pages. The `ticket=` labels go to AgentsView's own
+local archive. Nothing is sent anywhere
 unless you run `/worklog share` and publish the link.
 
 ## Files
 
 `worklog.py` (commands, sorting, measures and tips), `ledger.py` (reads and prices sessions), `page.py` and
-`report.html` (the page), `github.py` and `jira.py` (fetching; each runs on its own), `inventory.py` (the skills,
+`report.html` (the page), `github.py` and `jira.py` (fetching; each runs on its own), `agentsview.py` (the
+AgentsView links and labels), `inventory.py` (the skills,
 plugins and MCP servers that load into a session, and their tokens), `settings.py` and `settings.json`
 (settings), `models.json` (models and prices), `test_worklog.py` (`python3 -m unittest test_worklog`).

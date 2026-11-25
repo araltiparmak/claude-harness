@@ -12,6 +12,7 @@ import urllib.error
 from pathlib import Path
 from unittest import mock
 
+import agentsview
 import github
 import inventory
 import jira
@@ -62,6 +63,7 @@ class Base(unittest.TestCase):
         self.patch(inventory, SKILLS=tmp / "skills", PROJECTS=tmp / "projects", SETTINGS=tmp / "settings.json",
                    STATE=tmp / "claude-state.json", PLUGINS=tmp / "plugins")
         self.patch(page, JIRA_URL="")
+        self.patch(agentsview, CLI=None, APP=False)
         self.patch(github, CACHE=tmp / "commits.json")
         self.patch(w.jira, issue=lambda key: ISSUES[key], search=lambda condition: [],
                    updated=lambda since, until: {k: {"summary": v["summary"], "type": v["type"]}
@@ -239,6 +241,17 @@ class Pages(Base):
         for gone in ("resolved", "Failed tool calls per session", "not on Sonnet"):
             self.assertNotIn(gone, claude)
 
+    def test_sessions_and_tickets_link_to_agentsview_only_when_it_is_installed(self):
+        data = self.collect([session(1, ["ABC-1"], 2.0), session(2, ["ABC-3"], 1.0)])
+        self.assertNotIn("agentsview", page.Page(data).write(self.tmp / "none.html").read_text().lower())
+        self.patch(agentsview, CLI="agentsview", APP=True)
+        mine = page.Page(data).write(self.tmp / "report.html").read_text()
+        self.assertIn('href="agentsview://sessions/s1"', mine)
+        for key in ("ABC-1", "ABC-3"):  # its own box, and a row of the Smaller tickets box
+            self.assertIn(f'href="http://127.0.0.1:8080/sessions?label=ticket%3D{key}"', mine)
+        shared = page.Page(data, share=True).write(self.tmp / "share.html").read_text()
+        self.assertNotIn("AgentsView", shared)
+
     def test_hours(self):
         self.assertEqual((page.hours(0), page.hours(3), page.hours(90)), ("-", "<0.1h", "1.5h"))
 
@@ -280,6 +293,33 @@ class Measures(Base):
     def test_most_expensive_sessions_come_first(self):
         m = w.measures([session(1, cost=1.0), session(2, cost=5.0), session(3, cost=2.0)])
         self.assertEqual([r["id"] for r in m["top"]], ["s2", "s3", "s1"])
+
+
+class AgentsView(Base):
+    def test_sessions_carry_their_tickets_label_and_only_changes_are_written(self):
+        data = self.collect([session(1, ["ABC-2"]), session(2), session(3, ["ABC-3"]), session(4, ["ABC-4"])])
+        self.assertEqual(data["ticket_of"], {"s1": "ABC-1", "s2": "", "s3": "ABC-3", "s4": "ABC-4"})  # sub-task: parent
+        held = {"s2": ["ticket=ABC-3", "mine"], "s3": ["ticket=ABC-3"], "s4": ["ticket=ABC-1"]}  # s1 not synced yet
+        pages = [{"sessions": [{"id": "s2", "labels": held["s2"]}], "next_cursor": "c"},
+                 {"sessions": [{"id": s, "labels": held[s]} for s in ("s3", "s4")]}]
+        calls = []
+
+        def run(*args):
+            calls.append(args)
+            return json.dumps(pages.pop(0)) if args[1] == "list" else ""
+        self.patch(agentsview, CLI="agentsview", run=run)
+        agentsview.label(data["ticket_of"], data["since"])
+        self.assertEqual(calls[1][-2:], ("--cursor", "c"))
+        self.assertEqual([c for c in calls if c[1] == "label"],
+                         [("session", "label", "s1", "ticket=ABC-1"),
+                          ("session", "label", "s2", "--remove", "ticket=ABC-3"),  # 'mine' stays
+                          ("session", "label", "s4", "ticket=ABC-4", "--remove", "ticket=ABC-1")])
+
+    def test_a_failing_agentsview_leaves_the_report_running(self):
+        def run(*args):
+            raise agentsview.subprocess.CalledProcessError(1, "agentsview")
+        self.patch(agentsview, CLI="agentsview", run=run)
+        self.assertIn("AgentsView labels not updated", quiet(agentsview.label, {"s1": "ABC-1"}, "2026-11-01"))
 
 
 class JiraApi(unittest.TestCase):

@@ -19,7 +19,8 @@ Settings: ~/.config/worklog.json over the defaults in settings.json; models and 
 describes both. Data: <DEV_DIR>/worklog, with sessions.jsonl (the ledger), jira.json (the issue cache),
 commits.json (the pull requests of your commits), mapped.json (the tickets chosen with map) and notes.json (the
 outcomes). ledger.py reads transcripts, page.py writes the HTML, github.py and jira.py fetch pull requests and
-issues, inventory.py finds what loads into every session.
+issues, inventory.py finds what loads into every session, agentsview.py labels sessions with their ticket in
+AgentsView.
 """
 import json
 import os
@@ -34,6 +35,7 @@ from datetime import date, timedelta
 from operator import ge, gt, lt
 from pathlib import Path
 
+import agentsview
 import github
 import inventory
 import jira
@@ -224,6 +226,7 @@ def collect(since, until):
     prs = {kind: [pr for pr in found if pr["repo"] not in EXCLUDE_REPOS]
            for kind, found in github.pull_requests(since, until).items()}
     issues, tickets, reviews, other, unmapped = Jira(), {}, Work(), defaultdict(Work), []  # other: {repo: Work}
+    ticket_of = {}  # session id: the ticket its box shows, or ''
 
     def on(key):
         top = issues.top(key)
@@ -243,8 +246,10 @@ def collect(since, until):
         rule = ticket(row, by_branch, issues)
         review = row["review"] and not row["edits"]
         named = rule or ("" if review else chosen.get(row["id"], ""))  # map only places what would be Other work
+        ticket_of[row["id"]] = ""
         if named:
             t = on(named)
+            ticket_of[row["id"]] = t.key
             t.part(named).add(row, mapped=not rule)
             t.repos[repo_of(row)] = None
         elif review:
@@ -262,7 +267,7 @@ def collect(since, until):
     return {"since": since, "until": until, "other": other, "unmapped": unmapped, "prs": prs,
             "reviews": reviews, "sessions": len(rows), "total": sum(cost(r) for r in rows), "excluded": excluded,
             "minutes": sum(r.get("active", 0) for r in rows), "timed": sum("active" in r for r in rows),
-            "notes": saved(NOTES), "jira": issues,
+            "notes": saved(NOTES), "jira": issues, "ticket_of": ticket_of,
             "usage": usage_of(rows), "measures": measured, "tips": tips(measured),
             "tickets": [t for t in tickets.values() if not is_support(t.key)],
             "support": [t for t in tickets.values() if is_support(t.key)]}
@@ -462,6 +467,7 @@ def report(args):
     shown = sum(g["cost"] for g in view.groups.values())
     if abs(shown - data["total"]) > 0.01:  # a session left off the page is a bug
         sys.exit(f"the page shows ${shown:.2f} but the sessions cost ${data['total']:.2f}")
+    agentsview.label(data["ticket_of"], data["since"])  # before the page, so its ticket links find the sessions
     file = view.write(DATA / ("share.html" if share else "report.html"))
     print(f"{data['since']} to {data['until']}: " + ", ".join(f"{n} {label}" for n, label in view.headline()))
     print(f"All {data['sessions']} sessions are on the page"
