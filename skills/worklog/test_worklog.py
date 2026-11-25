@@ -57,7 +57,7 @@ class Base(unittest.TestCase):
         tmp = self.tmp = Path(folder.name)
         self.patch(ledger, DATA=tmp, LEDGER=tmp / "sessions.jsonl", PROJECTS=tmp / "projects",
                    CLAUDE_STATE=tmp / "claude.json")
-        self.patch(w, DATA=tmp, MAPPED=tmp / "mapped.json", NOTES=tmp / "notes.json",
+        self.patch(w, DATA=tmp, MAPPED=tmp / "mapped.json", NOTES=tmp / "notes.json", JIRA_CACHE=tmp / "jira.json",
                    KEY=re.compile(r"\b(?:ABC)-\d+\b", re.I), PREFIXES="ABC", SUPPORT=set(), EXCLUDE_REPOS=[])
         self.patch(inventory, SKILLS=tmp / "skills", PROJECTS=tmp / "projects", SETTINGS=tmp / "settings.json",
                    STATE=tmp / "claude-state.json", PLUGINS=tmp / "plugins")
@@ -84,8 +84,8 @@ class Base(unittest.TestCase):
 
     def collect(self, rows, opened=(), reviewed=(), mapped=(), earlier=(), commits=()):
         ledger.LEDGER.write_text("".join(json.dumps(r) + "\n" for r in rows))
-        self.patch(w, pull_requests=lambda since, until: {"opened": list(opened), "earlier": list(earlier),
-                                                          "reviewed": list(reviewed)},
+        self.patch(github, pull_requests=lambda since, until: {"opened": list(opened), "earlier": list(earlier),
+                                                               "reviewed": list(reviewed)},
                    commit_pulls=lambda repo_dir, start, end: list(commits))
         if mapped:
             quiet(w.save, w.MAPPED, {s: w.checked(k) for s, k in w.pairs(list(mapped), "map")})
@@ -122,11 +122,13 @@ class Sorting(Base):
         data = self.collect(rows, reviewed=[pr(7, "", "b", author="teammate")])
         self.assertEqual((data["reviews"].cost, page.Page(data).groups["reviews"]["cost"]), (2.0, 2.0))
 
-    def test_a_mapped_session_counts_for_its_ticket_and_rules_still_win(self):
-        rows = [session(1, repo="tools"), session(2, ["ABC-9"]), session(3, repo="tools")]
-        data = self.collect(rows, mapped=["s1", "abc-1", "s2", "ABC-2"])
+    def test_a_mapped_session_counts_for_its_ticket_and_rules_and_reviews_still_win(self):
+        rows = [session(1, repo="tools"), session(2, ["ABC-9"]), session(3, repo="tools"),
+                session(4, edits=False, review=True)]
+        data = self.collect(rows, mapped=["s1", "abc-1", "s2", "ABC-2", "s4", "ABC-3"])
         self.assertEqual(sorted(t.key for t in data["tickets"]), ["ABC-1", "ABC-9"])
         self.assertEqual([r["id"] for r in data["unmapped"]], ["s3"])
+        self.assertEqual(data["reviews"].cost, 1.0)
         self.assertEqual({t.key: t.own.mapped for t in data["tickets"]}, {"ABC-1": 1, "ABC-9": 0})
         boxes = page.Page(data).ticket_boxes(data["tickets"], 1, "tickets")
         self.assertIn("1 session mapped by /worklog", "".join(boxes))
@@ -280,7 +282,6 @@ class Measures(Base):
         self.assertEqual([r["id"] for r in m["top"]], ["s2", "s3", "s1"])
 
 
-
 class JiraApi(unittest.TestCase):
     patch = Base.patch  # Base.setUp stubs the functions these tests call
 
@@ -388,6 +389,8 @@ class Ledger(Base):
         row = json.loads(ledger.LEDGER.read_text())
         self.assertEqual((row["cost"], row["tokens_by_model"]["Opus"]["in"]), (0.5, 125_000))
 
+
+class GitHub(Base):
     def test_github_splits_your_pull_requests_into_opened_and_earlier(self):
         def node(n, created, reviews=()):
             return {"title": f"PR {n}", "url": f"https://github.com/acme/api/pull/{n}", "state": "MERGED",
@@ -402,7 +405,6 @@ class Ledger(Base):
         self.assertEqual({kind: [(p["title"], p["date"]) for p in prs] for kind, prs in found.items()},
                          {"opened": [("PR 2", "2026-11-01")], "earlier": [("PR 1", "2026-10-20")],
                           "reviewed": [("PR 4", "2026-11-03")]})
-
 
     def test_one_gh_request_per_session_for_the_commits_not_cached(self):
         asked = []
@@ -419,6 +421,7 @@ class Ledger(Base):
             self.assertEqual(github.commit_pulls(str(self.tmp), "2026-11-01T09:00:00Z", "2026-11-01T10:00:00Z"),
                              ["Export\nABC-1\n"])
         self.assertEqual(asked, [["aaa", "bbb"], ["bbb"]])  # aaa came from commits.json the second time
+
 
 if __name__ == "__main__":
     unittest.main()

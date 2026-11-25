@@ -103,7 +103,8 @@ def installed_plugins(enabled):
 
 def servers():
     """{name: (scope, tokens or None, project path or "")} of the MCP servers: the user and local ones in
-    ~/.claude.json, and every server the newest session loaded (claude.ai connectors and servers of plugins and mods), with what it added."""
+    ~/.claude.json, and every server the newest session loaded (claude.ai connectors and servers of plugins and
+    mods), with what it added."""
     state = load(STATE)
     found = {name: ("user", "") for name in state.get("mcpServers", {})}
     for project, config in state.get("projects", {}).items():

@@ -37,7 +37,8 @@ def search(query):
     """(your login, the pull requests a GitHub search finds). On a gh error, what was read so far."""
     nodes, after, login = [], None, ""
     while True:
-        cmd = ["gh", "api", "graphql", "-f", f"query={QUERY}", "-f", f"q={query}"] + (["-f", f"after={after}"] if after else [])
+        cmd = ["gh", "api", "graphql", "-f", f"query={QUERY}", "-f", f"q={query}"]
+        cmd += ["-f", f"after={after}"] if after else []
         try:
             data = json.loads(subprocess.run(cmd, capture_output=True, timeout=60, check=True).stdout)["data"]
         except Exception as err:  # gh missing, not logged in, network
@@ -124,6 +125,7 @@ def commit_pulls(repo_dir, start, end):
             pulls = ((repo or {}).get(f"c{i}") or {}).get("associatedPullRequests", {}).get("nodes", [])
             if pulls:  # a commit with no pull request yet is asked again next time
                 cache[sha] = [f"{p['title']}\n{p['headRefName']}\n{p.get('body') or ''}" for p in pulls]
+        CACHE.parent.mkdir(parents=True, exist_ok=True)  # github.py commits may run before the first report
         CACHE.write_text(json.dumps(cache, indent=1))
     return list(dict.fromkeys(text for sha in shas for text in cache.get(sha, [])))
 

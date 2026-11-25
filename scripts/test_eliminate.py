@@ -24,13 +24,10 @@ class Eliminate(unittest.TestCase):
         self.addCleanup(folder.cleanup)
         tmp = Path(folder.name).resolve()  # macOS: /var is a link to /private/var
         claude, mine, private, cache = tmp / ".claude", tmp / "harness", tmp / "private", tmp / "cache"
-        for module, values in ((inventory, {}), (e, {"MINE": mine, "PRIVATE": private, "PROFILE": tmp / ".zshrc",
-                                                        "ROOTS": ((mine, "own"), (private, "private"))})):
-            patcher = mock.patch.multiple(module, SKILLS=claude / "skills", PROJECTS=claude / "projects", **values,
-                                          **({"SETTINGS": claude / "settings.json", "STATE": tmp / ".claude.json",
-                                              "PLUGINS": claude / "plugins"} if module is inventory else {}))
-            patcher.start()
-            self.addCleanup(patcher.stop)
+        self.patch(inventory, SKILLS=claude / "skills", PROJECTS=claude / "projects", SETTINGS=claude / "settings.json",
+                   STATE=tmp / ".claude.json", PLUGINS=claude / "plugins")
+        self.patch(e, SKILLS=claude / "skills", PROJECTS=claude / "projects", MINE=mine, PRIVATE=private,
+                   PROFILE=tmp / ".zshrc", ROOTS=((mine, "own"), (private, "private")))
         links = claude / "skills"
         links.mkdir(parents=True)
         for source in (skill(mine / "skills" / "deck", "x" * 400), skill(private / "skills" / "coach", "x" * 40),
@@ -65,7 +62,7 @@ class Eliminate(unittest.TestCase):
                       "WebSearch", "mcp__claude_ai_Context7__query-docs", "mcp__easel__chart"]}},
                   {"type": "attachment", "attachment": {"type": "mcp_instructions_delta",
                       "addedNames": ["claude.ai Context7"], "addedBlocks": ["x" * 100]}}]
-        session.write_text("\n".join(json.dumps(l) for l in lines) + "\nnot json\n")
+        session.write_text("\n".join(json.dumps(entry) for entry in lines) + "\nnot json\n")
         old = claude / "projects" / "-dev-site" / "old.jsonl"  # older than the period: not read
         old.write_text(json.dumps({"timestamp": "2020-01-01T00:00:00Z", "message": {"content": [
             {"type": "tool_use", "name": "Skill", "input": {"skill": "deck"}}]}}))
@@ -73,8 +70,14 @@ class Eliminate(unittest.TestCase):
         os.utime(old, (stamp, stamp))
         self.day, self.tmp, self.mine = day, tmp, mine
 
+    def patch(self, module, **values):
+        """Sets attributes of a module until the test ends."""
+        patcher = mock.patch.multiple(module, **values)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
     def test_every_item_with_its_kind_cost_and_uses_unused_first(self):
-        found = {r[0]: r[1:5] for r in e.rows(90)}
+        found = {r.name: [r.kind, r.tokens, r.uses, r.last] for r in e.rows(90)}
         self.assertEqual(found, {
             "deck": ["own", 101, 0, ""], "coach": ["private", 12, 0, ""], "notes": ["local", 7, 0, ""],
             "cloudflare": ["plugin, project /dev/lab", 52, 0, ""], "productivity": ["plugin, account", 22, 0, ""],
@@ -82,11 +85,10 @@ class Eliminate(unittest.TestCase):
             "pr": ["external", 8, 2, self.day], "pdf": ["account", 26, 1, self.day],
             "frontend-design": ["plugin", 54, 1, self.day], "context": ["mcp, user", None, 1, self.day],
             "claude.ai Context7": ["mcp, claude.ai", 34, 0, ""], "easel": ["mcp, other", 5, 0, ""]})
-        self.assertEqual([r[0] for r in e.rows(90)][:3], ["deck", "cloudflare", "claude.ai Context7"])
+        self.assertEqual([r.name for r in e.rows(90)][:3], ["deck", "cloudflare", "claude.ai Context7"])
 
     def test_a_folded_description_counts_whole(self):
-        file = Path(tempfile.mkdtemp()) / "SKILL.md"
-        self.addCleanup(file.unlink)
+        file = self.tmp / "SKILL.md"
         file.write_text("---\nname: abc\ndescription: >\n  " + "x" * 20 + "\n  " + "y" * 20 + "\n---\n")
         self.assertEqual(inventory.tokens(file), -(-(3 + 41) // 4))
 
@@ -109,13 +111,13 @@ class Eliminate(unittest.TestCase):
                          {"fd@official": False, "design@synced": False})
 
     def test_each_kind_has_its_way_out(self):
-        steps = {r[0]: e.plan(r) for r in e.rows(90)}
+        steps = {r.name: e.plan(r) for r in e.rows(90)}
         self.assertEqual(steps["deck"][0], "add to SKIP_SKILLS in ~/.zshrc")
         self.assertEqual(steps["cloudflare"][0], "claude plugin disable cloudflare@cloudflare --scope project (in /dev/lab)")
         self.assertEqual(steps["playwright"][0], "claude mcp remove playwright -s local (in /dev/site)")
         self.assertTrue(steps["claude.ai Context7"][0].startswith("by hand: disconnect it on claude.ai"))
         self.assertIsNone(steps["claude.ai Context7"][2])
-        e.plan([r for r in e.rows(90) if r[0] == "notes"][0])[2]()  # a real folder is moved aside
+        e.plan(next(r for r in e.rows(90) if r.name == "notes"))[2]()  # a real folder is moved aside
         self.assertTrue((self.tmp / ".claude" / "skills.off" / "notes" / "SKILL.md").is_file())
 
 

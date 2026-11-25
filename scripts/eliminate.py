@@ -30,6 +30,7 @@ import sys
 import time
 from collections import Counter
 from pathlib import Path
+from typing import NamedTuple, Optional
 
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE.parent / "skills" / "worklog"))
@@ -43,6 +44,19 @@ ROOTS = ((MINE, "own"), (PRIVATE, "private"))
 
 COMMAND = re.compile(r"<command-name>/([\w:.-]+)</command-name>")
 HINT = re.compile(r'"Skill"|"Agent"|"Task"|mcp__|<command-name>')  # lines worth parsing
+LINKED = ("own", "private", "external")  # skills update.sh links, so SKIP_SKILLS leaves them out
+SETTING = ("plugin", "plugin, account")  # plugins enabledPlugins turns off
+
+
+class Row(NamedTuple):
+    """One item of the checklist."""
+    name: str
+    kind: str
+    tokens: Optional[int]  # what it adds to every session; None when not measured
+    uses: int
+    last: str  # the last day it was used; "" for none
+    ref: str  # what removing it names: the skill, the plugin id, or the server
+    project: str  # the project it loads in; "" for every session
 
 
 def usage(days):
@@ -93,27 +107,25 @@ def tool_name(tool, args):
 
 
 def rows(days):
-    """[name, kind, tokens or None, uses, last day, ref, project path] per item, unused first, then by tokens. ref
-    is what removing it names: the skill, the plugin id, or the server."""
+    """A Row per item, unused first, then by tokens."""
     uses, last = usage(days)
     found = []
     for name, kind, cost, ref, project, names in inventory.items(ROOTS):
         hits = inventory.counts_for(names, uses)
-        found.append([name, kind, cost, sum(uses[h] for h in hits), max((last[h] for h in hits), default=""),
-                      ref, project])
-    return sorted(found, key=lambda r: (r[3] > 0, -(r[2] or 0), r[0]))
+        found.append(Row(name, kind, cost, sum(uses[h] for h in hits), max((last[h] for h in hits), default=""),
+                         ref, project))
+    return sorted(found, key=lambda r: (r.uses > 0, -(r.tokens or 0), r.name))
 
 
-def line(row, width=200):
-    name, kind, cost, n, day = row[:5]
-    text = f"{name:<30.30} {kind:<36.36} {'?' if cost is None else cost:>6} {n:>5}  {day or '-'}"
-    return text[:width]
+def line(row):
+    tokens = "?" if row.tokens is None else row.tokens
+    return f"{row.name:<30.30} {row.kind:<36.36} {tokens:>6} {row.uses:>5}  {row.last or '-'}"
 
 
 def summary(found, days):
-    unused = [r for r in found if not r[3]]
+    unused = [r for r in found if not r.uses]
     return (f"{len(unused)} of {len(found)} unused in the last {days} days; removing them saves about "
-            f"{sum(r[2] or 0 for r in unused)} tokens per session (? is not measured; /context shows it).")
+            f"{sum(r.tokens or 0 for r in unused)} tokens per session (? is not measured; /context shows it).")
 
 
 def table(found, days):
@@ -143,14 +155,14 @@ def draw(screen, found, days, state):
     shown = max(1, height - 4)
     chosen, at = state["chosen"], state["at"]
     state["top"] = top = min(max(state["top"], at - shown + 1), at)
-    saved = sum(found[i][2] or 0 for i in chosen)
+    saved = sum(found[i].tokens or 0 for i in chosen)
     screen.erase()
     screen.addnstr(0, 0, f"eliminate: {summary(found, days)}", width - 1, curses.A_BOLD)
     screen.addnstr(1, 0, f"      {'name':<30} {'kind':<36} {'tokens':>6} {'uses':>5}  last used  "
                          f"(selected {len(chosen)}, saves {saved})", width - 1, curses.A_UNDERLINE)
     for y, i in enumerate(range(top, min(len(found), top + shown)), 2):
         mark = "[x]" if i in chosen else "[ ]"
-        style = (curses.A_REVERSE if i == at else 0) | (curses.A_DIM if found[i][3] else 0)
+        style = (curses.A_REVERSE if i == at else 0) | (curses.A_DIM if found[i].uses else 0)
         screen.addnstr(y, 0, f"{'>' if i == at else ' '} {mark} {line(found[i])}", width - 1, style)
     screen.addnstr(height - 1, 0, KEYS, width - 1, curses.A_DIM)
     return shown
@@ -167,7 +179,7 @@ def press(key, found, state, shown):
         chosen ^= {state["at"]}
         state["at"] = min(last, state["at"] + 1)
     elif key == ord("a"):
-        chosen |= {i for i, r in enumerate(found) if not r[3]}
+        chosen |= {i for i, r in enumerate(found) if not r.uses}
     elif key == ord("n"):
         chosen.clear()
     elif key in (curses.KEY_ENTER, 10, 13):
@@ -191,12 +203,12 @@ MANUAL = {
 
 def plan(row):
     """(what removing a row does, the undo, a function that does it or None when it is manual)."""
-    name, kind, ref, project = row[0], row[1], row[5], row[6]
-    if kind in ("own", "private", "external"):
+    name, kind, ref, project = row.name, row.kind, row.ref, row.project
+    if kind in LINKED:
         return "add to SKIP_SKILLS in ~/.zshrc", "take it out of SKIP_SKILLS, run update.sh", None
     if kind == "local":
         return f"move to {SKILLS.parent / 'skills.off' / name}", "move it back", lambda: shelve(name)
-    if kind in ("plugin", "plugin, account"):
+    if kind in SETTING:
         return f'"{ref}": false in claude/settings.json', "set it to true, run update.sh", None
     if kind.startswith("plugin, project"):
         return (f"claude plugin disable {ref} --scope project (in {short(project)})", "claude plugin enable",
@@ -250,19 +262,19 @@ def disable_plugins(ids):
 
 def apply(chosen):
     """Removes the chosen rows; prints each step, the undo, and what is left to do by hand."""
-    skills_out = [r[0] for r in chosen if r[1] in ("own", "private", "external")]
-    plugins_out = [r[5] for r in chosen if r[1] in ("plugin", "plugin, account")]
+    skills_out = [r.name for r in chosen if r.kind in LINKED]
+    plugins_out = [r.ref for r in chosen if r.kind in SETTING]
     by_hand = []
     for row in chosen:
         does, undo, step = plan(row)
         if step:
             try:
                 step()
-                print(f"done   {row[0]}: {does} (undo: {undo})")
+                print(f"done   {row.name}: {does} (undo: {undo})")
             except (OSError, subprocess.CalledProcessError) as err:
-                print(f"FAILED {row[0]}: {does} ({err})")
+                print(f"FAILED {row.name}: {does} ({err})")
         elif does.startswith("by hand"):
-            by_hand.append(f"  {row[0]}: {does[len('by hand: '):]}")
+            by_hand.append(f"  {row.name}: {does[len('by hand: '):]}")
     env = dict(os.environ)
     if skills_out:
         env["SKIP_SKILLS"] = skip_skills(skills_out)
@@ -296,7 +308,7 @@ def main(args):
         return
     print("Remove from Claude's context:")
     for row in chosen:
-        print(f"  {row[0]:<30} {plan(row)[0]}")
+        print(f"  {row.name:<30} {plan(row)[0]}")
     if input(f"\nRemove these {len(chosen)}? [y/N] ").strip().lower() == "y":
         apply(chosen)
     else:

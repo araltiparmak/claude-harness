@@ -16,10 +16,10 @@ and reviews, with time, cost and tips. Everything stays on this computer.
   worklog.py record                            the SessionEnd hook: adds the session on stdin to the ledger
 
 Settings: ~/.config/worklog.json over the defaults in settings.json; models and prices: models.json; README.md
-describes both. Data: <DEV_DIR>/worklog, with sessions.jsonl (the
-ledger), jira.json (the issue cache), commits.json (the pull requests of your commits), mapped.json (the tickets chosen with map) and notes.json (the outcomes).
-ledger.py reads transcripts, page.py writes the HTML, github.py and jira.py fetch pull requests and issues,
-inventory.py finds what loads into every session.
+describes both. Data: <DEV_DIR>/worklog, with sessions.jsonl (the ledger), jira.json (the issue cache),
+commits.json (the pull requests of your commits), mapped.json (the tickets chosen with map) and notes.json (the
+outcomes). ledger.py reads transcripts, page.py writes the HTML, github.py and jira.py fetch pull requests and
+issues, inventory.py finds what loads into every session.
 """
 import json
 import os
@@ -39,21 +39,20 @@ import inventory
 import jira
 import ledger
 import page
-from ledger import BIG_CONTEXT, SENT, TOKENS, cost, models_of, repo_of
+from ledger import BACKGROUND, BIG_CONTEXT, SENT, TOKENS, cost, models_of, repo_of
 from settings import DATA, DEV, FILE, settings
 
 JIRA_PREFIXES, SUPPORT_PREFIXES, EXCLUDE_REPOS = (
     settings[k] for k in ("jira_prefixes", "support_prefixes", "exclude_repos"))
 MAPPED = DATA / "mapped.json"
 NOTES = DATA / "notes.json"
+JIRA_CACHE = DATA / "jira.json"
 CLAUDE_SETTINGS = Path.home() / ".claude" / "settings.json"  # where check looks for the hook
 PREFIXES = "|".join(re.escape(p) for p in JIRA_PREFIXES)
 KEY = re.compile(rf"\b(?:{PREFIXES})-\d+\b", re.I) if PREFIXES else re.compile(r"[^\s\S]")  # never matches
 SUPPORT = {p.upper() for p in SUPPORT_PREFIXES}
 TOP = 10  # the most expensive sessions listed
 MIN_SESSIONS = 5  # fewer sessions than this give no tips
-
-pull_requests, commit_pulls = github.pull_requests, github.commit_pulls  # tests swap them
 
 
 # ---- Jira
@@ -63,8 +62,8 @@ class Jira:
     Jira does not know (see fetch)."""
 
     def __init__(self):
-        file = DATA / "jira.json"
-        self.cache, self.down = json.loads(file.read_text()) if file.exists() else {}, not PREFIXES
+        self.cache = saved(JIRA_CACHE)
+        self.down = not PREFIXES
         self.unknown = set()  # keys Jira refused in this run
 
     def ask(self, call, *args):
@@ -112,7 +111,7 @@ class Jira:
 
     def save(self):
         if self.cache:
-            (DATA / "jira.json").write_text(json.dumps(self.cache, indent=1))
+            JIRA_CACHE.write_text(json.dumps(self.cache, indent=1))
 
 
 # ---- sorting the sessions
@@ -150,7 +149,8 @@ def ticket(row, by_branch, issues):
         if len(by_branch.get(b, ())) == 1:
             return next(iter(by_branch[b]))
     if PREFIXES and row.get("end") and Path(row["cwd"] or "/nowhere").is_dir():
-        found = [k.upper() for text in commit_pulls(row["cwd"], row["start"], row["end"]) for k in KEY.findall(text)]
+        found = [k.upper() for text in github.commit_pulls(row["cwd"], row["start"], row["end"])
+                 for k in KEY.findall(text)]
         if found:
             return issues.pick(list(dict.fromkeys(found)))
     return ""
@@ -222,7 +222,7 @@ def collect(since, until):
     if not rows:
         sys.exit(f"no sessions from {since} to {until}")
     prs = {kind: [pr for pr in found if pr["repo"] not in EXCLUDE_REPOS]
-           for kind, found in pull_requests(since, until).items()}
+           for kind, found in github.pull_requests(since, until).items()}
     issues, tickets, reviews, other, unmapped = Jira(), {}, Work(), defaultdict(Work), []  # other: {repo: Work}
 
     def on(key):
@@ -233,7 +233,7 @@ def collect(since, until):
 
     chosen = saved(MAPPED)
     by_branch = {}  # (repo, branch): ticket, and branch: {tickets of the pull requests from a branch of that name}
-    for pr in prs["opened"] + prs.get("earlier", []):
+    for pr in prs["opened"] + prs["earlier"]:
         pr["sub"] = issues.pick(list(dict.fromkeys(k.upper() for k in KEY.findall(pr["text"]))))
         pr["ticket"] = issues.top(pr["sub"])
         if pr["ticket"]:
@@ -241,12 +241,13 @@ def collect(since, until):
             by_branch.setdefault(pr["branch"], set()).add(pr["ticket"])
     for row in rows:
         rule = ticket(row, by_branch, issues)
-        named = rule or chosen.get(row["id"], "")
+        review = row["review"] and not row["edits"]
+        named = rule or ("" if review else chosen.get(row["id"], ""))  # map only places what would be Other work
         if named:
             t = on(named)
             t.part(named).add(row, mapped=not rule)
             t.repos[repo_of(row)] = None
-        elif row["review"] and not row["edits"]:
+        elif review:
             reviews.add(row)
         else:
             other[repo_of(row)].add(row)
@@ -298,6 +299,7 @@ def measures(rows):
     the sessions that recorded the field, and an average is over the rated sessions; None when none did."""
     tokens = token_totals(rows)
     sent = sum(t[k] for t in tokens.values() for k in SENT)
+    rated = [r for r in rows if "prompts" in r]  # rows recorded before these were kept have none
 
     def share(field, part):
         known = [r for r in rows if field in r]
@@ -306,9 +308,8 @@ def measures(rows):
 
     def per_session(field):
         return sum(field(r) for r in rated) / len(rated) if rated else None
-    rated = [r for r in rows if "prompts" in r]  # rows recorded before these were kept have none
     return {
-        "cost": sum(cost(r) for r in rows) or 0.0, "sessions": len(rows), "tokens": tokens,
+        "cost": sum(cost(r) for r in rows), "sessions": len(rows), "tokens": tokens,
         "cache_hit": sum(t["read"] for t in tokens.values()) / sent if sent else None,
         "big": share("context", lambda r: cost(r) if r["context"]["peak"] > BIG_CONTEXT else 0),
         "subagents": share("subagent_cost", lambda r: r["subagent_cost"]),
@@ -369,6 +370,7 @@ def skills_of(row, installed):
 
 
 RATES = {m["name"]: m["prices"] for m in ledger.MODELS.values()}  # model family: prices per million tokens
+DEFAULT_RATES = ledger.MODELS[ledger.PRICING["default_model"]]["prices"]
 KINDS = {"account": "claude.ai skill", "plugin, account": "claude.ai plugin", "mcp, claude.ai": "claude.ai connector"}
 
 
@@ -391,22 +393,23 @@ def loaded_cost(row, tokens):
     avg = (row.get("context") or {}).get("avg")
     if not avg or not tokens:
         return 0.0
-    default = ledger.MODELS[ledger.PRICING["default_model"]]["prices"]
-    paid = sum(t.get("read", 0) * RATES.get(m, default)["cache_read"] + t.get("write", 0) *
-               RATES.get(m, default)["cache_write_1h"] for m, t in row.get("tokens_by_model", {}).items()
-               if m != "Background")
+    paid = 0.0
+    for model, t in row.get("tokens_by_model", {}).items():
+        if model != BACKGROUND:
+            rates = RATES.get(model, DEFAULT_RATES)
+            paid += t.get("read", 0) * rates["cache_read"] + t.get("write", 0) * rates["cache_write_1h"]
     return min(tokens / avg, 1.0) * paid / 1e6
 
 
-def unused_of(rows, names):
+def unused_of(rows, uses):
     """The skills, plugins and MCP servers that load into sessions and that no session of the period used, as
     {name, kind, tokens, usd}, the most expensive first. usd covers the sessions the item loaded into: all of
     them, or those in its project for a project plugin or local server; None when the tokens are not known."""
     found = []
-    for name, kind, tokens, _, project, keys in inventory.items():
-        if inventory.counts_for(keys, names):
+    for name, kind, tokens, _, project, usage_names in inventory.items():
+        if inventory.counts_for(usage_names, uses):
             continue
-        sessions = [r for r in rows if not project or (r["cwd"] or "").startswith(project)]
+        sessions = [r for r in rows if not project or Path(r["cwd"] or "/").is_relative_to(project)]
         usd = None if tokens is None else sum(loaded_cost(r, tokens) for r in sessions)
         found.append({"name": name, "kind": kind_name(kind), "tokens": tokens, "usd": usd})
     return sorted(found, key=lambda u: (u["usd"] is None, -(u["usd"] or 0), -(u["tokens"] or 0), u["name"]))

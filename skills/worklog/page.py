@@ -17,7 +17,8 @@ JIRA_URL = settings["jira_url"]
 TEMPLATE = Path(__file__).resolve().parent / "report.html"
 SMALL = 2.0  # USD; tickets that cost less share one box
 MODEL_SLOTS = {m["name"]: m["colour"] for m in MODELS.values() if "colour" in m}  # from models.json; others grey
-STATUS = {"merged": "✓ Merged", "closed": "✕ Closed, not merged", "open": "○ Open", "draft": "○ Draft"}
+STATUS = {"merged": ("✓", "Merged"), "closed": ("✕", "Closed, not merged"), "open": ("○", "Open"),
+          "draft": ("○", "Draft")}  # a pull request's status: its mark, then its words
 REVIEW_ORDER = ["draft", "open", "closed", "merged"]  # code reviews: still moving first, done last
 
 
@@ -83,7 +84,7 @@ def dot(slot):
 
 
 def status_cell(name):
-    return [tag("span", STATUS[name], class_=f"status {name}")]
+    return [tag("span", " ".join(STATUS[name]), class_=f"status {name}")]
 
 
 def jira_link(key):
@@ -93,8 +94,8 @@ def jira_link(key):
 def pr_links(prs):
     """Each pull request as 'repo#123 status', one per line."""
     links = [tag("a", f"{pr['repo']}#{pr['url'].rsplit('/', 1)[-1]}", href=pr["url"], title=pr["title"])
-             + " " + tag("span", STATUS[pr["status"]].split()[0], class_=f"status {pr['status']}",
-                         title=STATUS[pr["status"]].split(" ", 1)[1]) for pr in prs]
+             + " " + tag("span", STATUS[pr["status"]][0], class_=f"status {pr['status']}",
+                         title=STATUS[pr["status"]][1]) for pr in prs]
     return ["<br>".join(links)] if links else "-"
 
 
@@ -246,8 +247,8 @@ class Page:
         found = {gid: {"name": name, "tickets": n, "repos": r, "cost": sum(p.cost for p in parts),
                        "minutes": sum(p.minutes for p in parts)}
                  for gid, name, n, r, parts in rows if parts}
-        for i, g in enumerate(found.values()):
-            g["slot"] = i + 1 if i < 8 else 0  # eight palette colours in a fixed order; past them, grey
+        for i, g in enumerate(found.values(), 1):
+            g["slot"] = i  # palette colours in a fixed order
         return found
 
     def headline(self):
@@ -264,7 +265,8 @@ class Page:
                  (reviewed, f"pull request{s(reviewed)} reviewed", reviewed)]
         tiles = [(number, label) for number, label, behind in tiles if behind]
         if d["minutes"]:
-            part = "" if d["timed"] == d["sessions"] else f", from the {d['timed']} of {d['sessions']} sessions that recorded it"
+            part = ("" if d["timed"] == d["sessions"]
+                    else f", from the {d['timed']} of {d['sessions']} sessions that recorded it")
             tiles.append((hours(d["minutes"]), "of active time in Claude Code" + part))
         if not self.share:
             tiles.append((money(d["total"]), "at API list prices"))
@@ -304,7 +306,7 @@ class Page:
         head = ["Ticket"] + (["Type"] if typed else []) + ["Worked on", "Pull requests", "Models", "Time", "Cost"]
         ranked = sorted(tickets, key=lambda t: -t.cost)
         small = [t for t in ranked if t.cost < SMALL]
-        boxes = [self.ticket_box(t, head, typed, slot) for t in ranked[:len(ranked) - len(small)]]
+        boxes = [self.ticket_box(t, head, typed, slot) for t in ranked if t.cost >= SMALL]
         if small:
             boxes.append(self.small_box(small, head, typed, slot, name))
         return boxes

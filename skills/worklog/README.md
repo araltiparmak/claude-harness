@@ -58,6 +58,7 @@ has no pull requests or ticket names.
    | `exclude_repos` | Repos (folder or GitHub name) the report leaves out |
    | `dev_dir` | The folder that holds your repos; the data goes to `<dev_dir>/worklog` |
    | `jira_in_progress` | The name of the status your Jira uses for work in progress |
+
 4. Log in: `gh auth login` for GitHub. For Jira, make an API token at
    https://id.atlassian.com/manage-profile/security/api-tokens and export it in your shell profile as
    `JIRA_API_TOKEN`, so Claude Code sees it.
@@ -128,14 +129,13 @@ session would show about half its cost. When a new model comes out, add its id a
 ## Data
 
 Everything stays in `<dev_dir>/worklog` on your computer: `sessions.jsonl` (one row per session, including the
-first 200 characters of your first prompt), `jira.json` (issue names), `commits.json` (the pull requests
-your commits belong to), `mapped.json` and `notes.json` (what Claude
-saved), and the pages. Nothing is sent anywhere unless you run `/worklog share` and publish the link.
+first 200 characters of your first prompt), `jira.json` (issue names), `commits.json` (the pull requests your
+commits belong to), `mapped.json` and `notes.json` (what Claude saved), and the pages. Nothing is sent anywhere
+unless you run `/worklog share` and publish the link.
 
 ## Files
 
 `worklog.py` (commands, sorting, measures and tips), `ledger.py` (reads and prices sessions), `page.py` and
-`report.html` (the page), `github.py` and `jira.py` (fetching; each runs on its own), `inventory.py` (the skills, plugins and MCP servers
-that load into a session, and their tokens), `settings.py` and
-`settings.json` (settings), `models.json` (models and prices), `test_worklog.py`
-(`python3 -m unittest test_worklog`).
+`report.html` (the page), `github.py` and `jira.py` (fetching; each runs on its own), `inventory.py` (the skills,
+plugins and MCP servers that load into a session, and their tokens), `settings.py` and `settings.json`
+(settings), `models.json` (models and prices), `test_worklog.py` (`python3 -m unittest test_worklog`).
