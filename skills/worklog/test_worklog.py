@@ -48,15 +48,17 @@ def quiet(call, *args):
 
 class Base(unittest.TestCase):
     def setUp(self):
-        """Every data file in a fresh folder; no real transcripts, GitHub or Jira. Tests change the modules only
-        through patch, so no change outlives its test."""
+        """Every data file in a fresh folder; none of your settings, transcripts or skills, and no GitHub or Jira.
+        Tests change the modules only through patch, so no change outlives its test."""
         folder = tempfile.TemporaryDirectory()
         self.addCleanup(folder.cleanup)
         tmp = self.tmp = Path(folder.name)
         self.patch(ledger, DATA=tmp, LEDGER=tmp / "sessions.jsonl", PROJECTS=tmp / "projects",
                    CLAUDE_STATE=tmp / "claude.json")
         self.patch(w, DATA=tmp, MAPPED=tmp / "mapped.json", NOTES=tmp / "notes.json",
-                   KEY=re.compile(r"\b(?:ABC)-\d+\b", re.I), PREFIXES="ABC", SUPPORT=set())
+                   KEY=re.compile(r"\b(?:ABC)-\d+\b", re.I), PREFIXES="ABC", SUPPORT=set(), EXCLUDE_REPOS=[],
+                   SKILLS=tmp / "skills")
+        self.patch(page, JIRA_URL="")
         self.patch(w.jira, issue=lambda key: ISSUES[key], search=lambda condition: [],
                    updated=lambda since, until: {k: {"summary": v["summary"], "type": v["type"]}
                                                  for k, v in ISSUES.items()},
@@ -160,11 +162,11 @@ class Sorting(Base):
             w.checked("XYZ-1")
 
     def test_check_runs_on_a_fresh_machine(self):
-        self.patch(w, FILE=self.tmp / "none.json", PREFIXES="", JIRA_PREFIXES=[])
+        self.patch(w, FILE=self.tmp / "none.json", PREFIXES="", JIRA_PREFIXES=[],
+                   CLAUDE_SETTINGS=self.tmp / "settings.json", runs=lambda cmd: False)  # no git, gh or hook set up
         out = quiet(w.check)
-        self.assertIn("warn  settings", out)
-        self.assertIn("warn  jira_prefixes", out)
-        self.assertIn("warn  ledger", out)
+        for part in ("settings", "jira_prefixes", "SessionEnd hook", "ledger", "git user.email", "gh"):
+            self.assertIn(f"warn  {part}", out)
 
     def test_period_takes_empty_last_month_or_a_day(self):
         self.assertEqual(w.period("2026-11-01")[0], "2026-11-01")
@@ -212,6 +214,16 @@ class Pages(Base):
 
     def test_hours(self):
         self.assertEqual((page.hours(0), page.hours(3), page.hours(90)), ("-", "<0.1h", "1.5h"))
+
+    def test_tools_list_the_installed_skills_no_session_used(self):
+        for name in ("deck", "todo", "explain"):
+            (w.SKILLS / name).mkdir(parents=True)
+            (w.SKILLS / name / "SKILL.md").touch()
+        (w.SKILLS / "synced").mkdir()  # a folder Claude Code keeps there, not a skill
+        rows = [session(1, used={"skill": {"deck": 2}}), session(2, used={"command": {"todo": 1, "clear": 1}})]
+        data = self.collect(rows)
+        self.assertEqual(data["usage"]["unused"], ["explain"])
+        self.assertIn("1 skill installed but not used in this period: explain.", page.Page(data).tools())
 
 
 class Measures(Base):

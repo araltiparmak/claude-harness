@@ -439,15 +439,20 @@ class Page:
             tag("h3", "Cost per day by model"), daily_chart(usage["daily"], d["since"], d["until"]))
 
     def tools(self):
-        """The skills, MCP servers and subagents the sessions used, most used first."""
+        """The skills, MCP servers and subagents the sessions used, most used first, then the installed skills no
+        session used."""
         usage = self.data["usage"]
-        tables = []
+        parts = []
         for kind, head in {"skill": "Skill", "mcp": "MCP server", "agent": "Subagent"}.items():
             if usage.get(kind):
                 rows = most_used(usage[kind])
-                tables.append(self.grid([head, "Uses", "Sessions"], [[name, bar_cell(n, n, rows[0][1][0]), sessions]
-                                                                      for name, (n, sessions) in rows]))
-        return self.section("Tools used", "Skills, MCP servers and subagents, most used first.", *tables) if tables else ""
+                parts.append(self.grid([head, "Uses", "Sessions"], [[name, bar_cell(n, n, rows[0][1][0]), sessions]
+                                                                     for name, (n, sessions) in rows]))
+        unused = usage.get("unused")
+        if unused:
+            parts.append(tag("p", f"{plural(len(unused), 'skill')} installed but not used in this period: "
+                                  f"{', '.join(unused)}.", class_="intro"))
+        return self.section("Tools used", "Skills, MCP servers and subagents, most used first.", *parts) if parts else ""
 
     def write(self, file):
         d = self.data

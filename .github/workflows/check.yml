@@ -14,10 +14,16 @@ concurrency:
 
 jobs:
   check:
-    runs-on: ubuntu-latest
+    # Not ubuntu-latest: setup-python has no Python 3.9 build for Ubuntu 26.04.
+    runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@v4
+      # The oldest Python the scripts support: macOS ships 3.9 as /usr/bin/python3, which runs the worklog hook
+      # on a Mac without Homebrew Python. Local runs of check.sh cover the newest.
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.9"
       - run: scripts/check.sh
       - name: Build the deck examples
         run: |

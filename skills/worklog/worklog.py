@@ -43,6 +43,8 @@ JIRA_PREFIXES, SUPPORT_PREFIXES, EXCLUDE_REPOS = (
     settings[k] for k in ("jira_prefixes", "support_prefixes", "exclude_repos"))
 MAPPED = DATA / "mapped.json"
 NOTES = DATA / "notes.json"
+SKILLS = Path.home() / ".claude" / "skills"  # the installed skills, a folder or a link each
+CLAUDE_SETTINGS = Path.home() / ".claude" / "settings.json"  # where check looks for the hook
 PREFIXES = "|".join(re.escape(p) for p in JIRA_PREFIXES)
 KEY = re.compile(rf"\b(?:{PREFIXES})-\d+\b", re.I) if PREFIXES else re.compile(r"[^\s\S]")  # never matches
 SUPPORT = {p.upper() for p in SUPPORT_PREFIXES}
@@ -380,9 +382,8 @@ def skills_of(row, installed):
 
 def usage_of(rows):
     """What the sessions used, as {kind: {name: [uses, sessions]}} for skills, MCP servers and subagents, cost per
-    day per model, and the peak context of each session."""
-    folder = Path.home() / ".claude" / "skills"
-    installed = {p.name for p in folder.iterdir()} if folder.is_dir() else set()
+    day per model, the peak context of each session, and the installed skills no session used."""
+    installed = {p.name for p in SKILLS.iterdir() if (p / "SKILL.md").is_file()} if SKILLS.is_dir() else set()
     found = defaultdict(lambda: defaultdict(lambda: [0, 0]))
     found["daily"] = defaultdict(lambda: defaultdict(float))  # day: {model: cost}
     for r in rows:
@@ -396,6 +397,7 @@ def usage_of(rows):
             found["daily"][r["day"]][model] += usd
     found["peaks"] = [(r["day"], r["context"]["peak"], r["title"] or r["prompt"][:60])
                       for r in rows if "context" in r]
+    found["unused"] = sorted(installed - set(found["skill"]))
     return found
 
 
@@ -495,12 +497,11 @@ def runs(cmd):
 
 def check_claude(line):
     """The SessionEnd hook and how long Claude Code keeps transcripts."""
-    live = Path.home() / ".claude" / "settings.json"
     try:
-        claude = json.loads(live.read_text()) if live.exists() else {}
+        claude = json.loads(CLAUDE_SETTINGS.read_text()) if CLAUDE_SETTINGS.exists() else {}
     except ValueError:
         claude = {}
-        line(False, str(live), "not valid JSON")
+        line(False, str(CLAUDE_SETTINGS), "not valid JSON")
     hooked = "worklog.py record" in json.dumps(claude.get("hooks", {}).get("SessionEnd", []))
     line(hooked or None, "SessionEnd hook", "missing; README.md shows the lines to add")
     keep = claude.get("cleanupPeriodDays", 30)

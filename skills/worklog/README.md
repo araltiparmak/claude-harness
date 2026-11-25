@@ -16,7 +16,7 @@ estimate from message times, so both vary with how a person works, not only with
 - **The work**: sessions sorted into Jira tickets (with sub-tasks), pull requests without a ticket, other work and
   code reviews, each with active time and cost; a one-line outcome per ticket.
 - **Tokens and context**: context sizes, the peak of each session, tokens per model and cost per day.
-- **Tools used**: skills, MCP servers and subagents.
+- **Tools used**: skills, MCP servers and subagents, and the installed skills no session used.
 
 `/worklog share` writes `share.html` for other readers (a manager, a review document): the work, outcomes and
 time, with no costs and none of the Using Claude sections. It can also publish it as a private Artifact link.
