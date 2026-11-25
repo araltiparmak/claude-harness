@@ -192,6 +192,7 @@ class Page:
 
     def __init__(self, data, share=False):
         self.data, self.share = data, share
+        self.health = {} if share else data.get("health", {})  # AgentsView's score per session (agentsview.sync)
         self.groups = self.grouped()
 
     # -- building blocks that depend on who reads the page
@@ -232,6 +233,20 @@ class Page:
             return "-"
         parts = sorted(((m, usd) for m, usd in models.items() if paid(usd)), key=lambda item: -item[1])
         return ", ".join(f"{m} {'' if self.share else money(usd) + ' '}({usd / total:.0%})" for m, usd in parts)
+
+    def health_cell(self, ids):
+        """AgentsView's health of these sessions: their average score, with how many got each grade and how many
+        were abandoned in the small print."""
+        found = [self.health[sid] for sid in ids if sid in self.health]
+        if not found:
+            return "-"
+        grades = defaultdict(int)
+        for h in found:
+            grades[h["grade"]] += 1
+        small = ", ".join(f"{n} {grade}" for grade, n in sorted(grades.items()))
+        gone = sum(h["outcome"] == "abandoned" for h in found)
+        small += f" · {gone} abandoned" if gone else ""
+        return [html.escape(str(round(sum(h["score"] for h in found) / len(found)))) + tag("small", small)]
 
     def sessions_link(self, key):
         """The ticket's latest session in AgentsView, beside the list of all its sessions, as HTML; none for a
@@ -312,20 +327,23 @@ class Page:
     def ticket_boxes(self, tickets, slot, name):
         """One box per ticket, the most expensive first, then one box for the tickets that cost less than SMALL."""
         typed = any(w.type for t in tickets for w in t.works)
-        head = ["Ticket"] + (["Type"] if typed else []) + ["Worked on", "Pull requests", "Models", "Time", "Cost"]
+        scored = any(sid in self.health for t in tickets for w in t.works for sid in w.ids)
+        head = (["Ticket"] + (["Type"] if typed else []) + ["Worked on", "Pull requests", "Models"]
+                + (["Health"] if scored else []) + ["Time", "Cost"])
         ranked = sorted(tickets, key=lambda t: -t.cost)
         small = [t for t in ranked if t.cost < SMALL]
-        boxes = [self.ticket_box(t, head, typed, slot) for t in ranked if t.cost >= SMALL]
+        boxes = [self.ticket_box(t, head, typed, scored, slot) for t in ranked if t.cost >= SMALL]
         if small:
-            boxes.append(self.small_box(small, head, typed, slot, name))
+            boxes.append(self.small_box(small, head, typed, scored, slot, name))
         return boxes
 
-    def ticket_box(self, t, head, typed, slot):
+    def ticket_box(self, t, head, typed, scored, slot):
         """A ticket's box: its note first in the intro, then a table with the ticket's own work and each sub-task,
-        indented, with its own time and cost."""
+        indented, with its own health, time and cost."""
         notes = self.data["notes"]
         rows = [[ticket_cell(w.key, w.summary, w.mapped)] + ([w.type or "-"] if typed else [])
-                + [worked_on(w.days), pr_links(w.prs), self.model_split(w.models), hours(w.minutes), money(w.cost)]
+                + [worked_on(w.days), pr_links(w.prs), self.model_split(w.models)]
+                + ([self.health_cell(w.ids)] if scored else []) + [hours(w.minutes), money(w.cost)]
                 for w in t.works]
         label = f"{t.key} {t.own.summary}".strip()
         title = [tag("a", label, href=jira_link(t.key))] if JIRA_URL else label
@@ -340,7 +358,7 @@ class Page:
         return self.section(title, intro, self.grid(head, rows, [""] + ["sub"] * len(t.subs)),
                             usd=t.cost, minutes=t.minutes, slot=slot)
 
-    def small_box(self, small, head, typed, slot, name):
+    def small_box(self, small, head, typed, scored, slot, name):
         """The tickets that cost less than SMALL in one box, a row each with its sub-tasks included and its note in
         the small print."""
         notes = self.data["notes"]
@@ -354,8 +372,9 @@ class Page:
             rows.append([ticket_cell(t.key, summary, sum(w.mapped for w in t.works), self.sessions_link(t.key))]
                         + ([t.own.type or "-"] if typed else [])
                         + [worked_on(set().union(*(w.days for w in t.works))),
-                           pr_links([pr for w in t.works for pr in w.prs]), self.model_split(models),
-                           hours(t.minutes), money(t.cost)])
+                           pr_links([pr for w in t.works for pr in w.prs]), self.model_split(models)]
+                        + ([self.health_cell([sid for w in t.works for sid in w.ids])] if scored else [])
+                        + [hours(t.minutes), money(t.cost)])
         intro = (f"{plural(len(small), name[:-1])} with little session time." if self.share else
                  f"{plural(len(small), name[:-1])} that cost less than {money(SMALL)} each, sub-tasks included.")
         return self.section(f"Smaller {name}", intro, self.grid(head, rows), usd=sum(t.cost for t in small),

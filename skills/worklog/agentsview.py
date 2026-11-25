@@ -3,10 +3,11 @@
 in its desktop app, and a ticket opens its latest session beside the list of its sessions, which the report labels
 ticket=KEY. A label filters only that list, not the dashboard of /sessions, so the link names a session.
 
-  python3 agentsview.py SINCE     prints {session id: its ticket= label} for the sessions active since that day
+  python3 agentsview.py SINCE     prints {session id: AgentsView's session} for the sessions active since that day
 
-The report labels only when the agentsview CLI is installed, and changes no label but its own ticket= one. A
-ticket's link is the local server that the CLI and the desktop app share, so it opens while either one runs.
+The report labels only when the agentsview CLI is installed, and changes no label but its own ticket= one. The
+same call gives each session's health (AgentsView's own score), which the page adds up per ticket. A ticket's link
+is the local server that the CLI and the desktop app share, so it opens while either one runs.
 """
 import json
 import shutil
@@ -34,31 +35,36 @@ def run(*args):
 
 
 def held(since):
-    """{session id: its ticket= label, or ''} for the sessions active since that day, one page at a time."""
+    """{session id: AgentsView's session} for the sessions active since that day, one page at a time."""
     found, cursor = {}, []
     while True:
         page = json.loads(run("session", "list", "--date-from", since, "--include-one-shot", "--include-automated",
                               "--limit", "500", "--json", *cursor))
-        for s in page["sessions"]:
-            found[s["id"]] = next((label for label in s["labels"] if label.startswith(LABEL)), "")
+        found.update((s["id"], s) for s in page["sessions"])
         if not page.get("next_cursor"):
             return found
         cursor = ["--cursor", page["next_cursor"]]
 
 
-def label(tickets, since):
+def sync(tickets, since):
     """Gives each session in {session id: ticket key or ''} the label ticket=KEY, and takes it off a session whose
-    ticket changed or went; only the sessions that differ are written. Says so when AgentsView fails."""
+    ticket changed or went; only the sessions that differ are written. Returns AgentsView's health of each session
+    it holds, {session id: {score (0-100), grade (A-F), outcome}}; {} without AgentsView, and when it fails, which
+    it says."""
     if not CLI:
-        return
+        return {}
     try:
         have = held(since)
         for sid, key in tickets.items():
-            want, old = LABEL + key if key else "", have.get(sid, "")
+            old = next((x for x in have.get(sid, {}).get("labels", []) if x.startswith(LABEL)), "")
+            want = LABEL + key if key else ""
             if want != old:
                 run("session", "label", sid, *([want] if want else []), *(["--remove", old] if old else []))
     except (OSError, ValueError, KeyError, subprocess.SubprocessError) as err:
-        print(f"AgentsView labels not updated: {err}")
+        print(f"AgentsView not updated: {err}")
+        return {}
+    return {sid: {"score": s["health_score"], "grade": s.get("health_grade") or "-", "outcome": s.get("outcome")}
+            for sid, s in have.items() if isinstance(s.get("health_score"), int)}
 
 
 if __name__ == "__main__":

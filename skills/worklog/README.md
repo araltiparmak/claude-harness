@@ -22,7 +22,10 @@ estimate from message times, so both vary with how a person works, not only with
 
 With [AgentsView](https://www.agentsview.io/) installed (`brew install --cask agentsview`), the page links into it:
 each of the 10 most expensive sessions opens its transcript in the app, and each ticket has a link that opens its
-latest session there, with the list beside it showing only the ticket's sessions. For that, the report gives every session of a ticket the AgentsView label `ticket=<KEY>` (a sub-task's
+latest session there, with the list beside it showing only the ticket's sessions. The ticket tables get a Health
+column: the average of AgentsView's health score (0 to 100) over the sessions of that row, with how many got each
+grade (A to F) and how many AgentsView marked abandoned. AgentsView computes the score from its own signals (tool
+failures, retries, edit churn, compactions), so it does not follow the measures below. The shared page leaves it out. For that, the report gives every session of a ticket the AgentsView label `ticket=<KEY>` (a sub-task's
 sessions take the parent's key) and changes no other label. The ticket links open while the AgentsView app or its
 local server runs.
 

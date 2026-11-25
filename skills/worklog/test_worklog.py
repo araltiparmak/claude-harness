@@ -299,30 +299,50 @@ class Measures(Base):
 
 
 class AgentsView(Base):
-    def test_sessions_carry_their_tickets_label_and_only_changes_are_written(self):
+    def test_sessions_carry_their_tickets_label_only_changes_are_written_and_health_comes_back(self):
         data = self.collect([session(1, ["ABC-2"]), session(2), session(3, ["ABC-3"]), session(4, ["ABC-4"])])
         self.assertEqual(data["ticket_of"], {"s1": "ABC-1", "s2": "", "s3": "ABC-3", "s4": "ABC-4"})  # sub-task: parent
         held = {"s2": ["ticket=ABC-3", "mine"], "s3": ["ticket=ABC-3"], "s4": ["ticket=ABC-1"]}  # s1 not synced yet
-        pages = [{"sessions": [{"id": "s2", "labels": held["s2"]}], "next_cursor": "c"},
-                 {"sessions": [{"id": s, "labels": held[s]} for s in ("s3", "s4")]}]
+
+        def found(sid, score):
+            return {"id": sid, "labels": held[sid], "health_score": score, "health_grade": "B", "outcome": "completed"}
+        pages = [{"sessions": [found("s2", 80)], "next_cursor": "c"},
+                 {"sessions": [found("s3", 90), found("s4", None)]}]  # s4 not scored yet
         calls = []
 
         def run(*args):
             calls.append(args)
             return json.dumps(pages.pop(0)) if args[1] == "list" else ""
         self.patch(agentsview, CLI="agentsview", run=run)
-        agentsview.label(data["ticket_of"], data["since"])
+        health = agentsview.sync(data["ticket_of"], data["since"])
         self.assertEqual(calls[1][-2:], ("--cursor", "c"))
         self.assertEqual([c for c in calls if c[1] == "label"],
                          [("session", "label", "s1", "ticket=ABC-1"),
                           ("session", "label", "s2", "--remove", "ticket=ABC-3"),  # 'mine' stays
                           ("session", "label", "s4", "ticket=ABC-4", "--remove", "ticket=ABC-1")])
+        self.assertEqual(health, {"s2": {"score": 80, "grade": "B", "outcome": "completed"},
+                                  "s3": {"score": 90, "grade": "B", "outcome": "completed"}})
 
     def test_a_failing_agentsview_leaves_the_report_running(self):
         def run(*args):
             raise agentsview.subprocess.CalledProcessError(1, "agentsview")
         self.patch(agentsview, CLI="agentsview", run=run)
-        self.assertIn("AgentsView labels not updated", quiet(agentsview.label, {"s1": "ABC-1"}, "2026-11-01"))
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            self.assertEqual(agentsview.sync({"s1": "ABC-1"}, "2026-11-01"), {})
+        self.assertIn("AgentsView not updated", out.getvalue())
+
+    def test_tickets_show_the_health_of_their_sessions_on_your_page_only(self):
+        data = self.collect([session(1, ["ABC-1"], 2.0), session(2, ["ABC-2"], 1.0), session(3, ["ABC-3"], 0.5)])
+        self.assertNotIn("<th>Health</th>", "".join(page.Page(data).work()))  # without AgentsView
+        data["health"] = {"s1": {"score": 100, "grade": "A", "outcome": "completed"},
+                          "s2": {"score": 71, "grade": "C", "outcome": "abandoned"}}
+        boxes = page.Page(data).ticket_boxes(data["tickets"], 1, "tickets")
+        self.assertIn("<th>Health</th>", boxes[0])
+        self.assertIn("<td>100<small>1 A</small></td>", boxes[0])  # ABC-1's own row
+        self.assertIn("<td>71<small>1 C · 1 abandoned</small></td>", boxes[0])  # its sub-task's row
+        self.assertIn("<td>-</td>", boxes[1])  # ABC-3 has no score
+        self.assertNotIn("Health", "".join(page.Page(data, share=True).work()))
 
 
 class JiraApi(unittest.TestCase):

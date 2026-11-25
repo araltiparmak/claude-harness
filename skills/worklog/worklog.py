@@ -20,7 +20,7 @@ describes both. Data: <DEV_DIR>/worklog, with sessions.jsonl (the ledger), jira.
 commits.json (the pull requests of your commits), mapped.json (the tickets chosen with map) and notes.json (the
 outcomes). ledger.py reads transcripts, page.py writes the HTML, github.py and jira.py fetch pull requests and
 issues, inventory.py finds what loads into every session, agentsview.py labels sessions with their ticket in
-AgentsView.
+AgentsView and reads its health score of each session.
 """
 import json
 import os
@@ -159,7 +159,7 @@ def ticket(row, by_branch, issues):
 
 
 class Work:
-    """The days, cost, cost per model, active minutes, session titles and pull requests of some sessions: one
+    """The ids, days, cost, cost per model, active minutes, session titles and pull requests of some sessions: one
     ticket or sub-task (its key and Jira issue), the code reviews, or the other work in one repo. mapped counts the
     sessions that came from map."""
 
@@ -167,9 +167,10 @@ class Work:
         issue = issue or {}
         self.key, self.summary, self.type = key, issue.get("summary", ""), issue.get("type", "")
         self.days, self.cost, self.models, self.prs = set(), 0.0, defaultdict(float), []
-        self.minutes, self.titles, self.mapped = 0.0, [], 0
+        self.minutes, self.titles, self.mapped, self.ids = 0.0, [], 0, []
 
     def add(self, row, mapped=False):
+        self.ids.append(row["id"])
         self.days.add(row["day"])
         self.cost += cost(row)
         self.minutes += row.get("active", 0)
@@ -463,11 +464,11 @@ def period(arg):
 def report(args):
     share = "--share" in args
     data = collect(*period(next((a for a in args if not a.startswith("--")), "")))
+    data["health"] = agentsview.sync(data["ticket_of"], data["since"])  # labels first, so ticket links find them
     view = page.Page(data, share)
     shown = sum(g["cost"] for g in view.groups.values())
     if abs(shown - data["total"]) > 0.01:  # a session left off the page is a bug
         sys.exit(f"the page shows ${shown:.2f} but the sessions cost ${data['total']:.2f}")
-    agentsview.label(data["ticket_of"], data["since"])  # before the page, so its ticket links find the sessions
     file = view.write(DATA / ("share.html" if share else "report.html"))
     print(f"{data['since']} to {data['until']}: " + ", ".join(f"{n} {label}" for n, label in view.headline()))
     print(f"All {data['sessions']} sessions are on the page"
