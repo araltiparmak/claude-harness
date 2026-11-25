@@ -451,7 +451,7 @@ class Page:
         unused = usage.get("unused")
         if unused:
             parts.append(tag("p", f"{plural(len(unused), 'skill')} installed but not used in this period: "
-                                  f"{', '.join(unused)}.", class_="intro"))
+                                  f"{', '.join(unused)}.", class_="intro unused"))
         return self.section("Tools used", "Skills, MCP servers and subagents, most used first.", *parts) if parts else ""
 
     def write(self, file):
