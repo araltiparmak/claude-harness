@@ -18,6 +18,7 @@ TEMPLATE = Path(__file__).resolve().parent / "report.html"
 SMALL = 1.0  # USD; tickets that cost less share one box
 MODEL_SLOTS = {m["name"]: m["colour"] for m in MODELS.values() if "colour" in m}  # from models.json; others grey
 STATUS = {"merged": "✓ Merged", "closed": "✕ Closed, not merged", "open": "○ Open", "draft": "○ Draft"}
+REVIEW_ORDER = ["draft", "open", "closed", "merged"]  # code reviews: still moving first, done last
 
 
 # ---- plain helpers
@@ -378,7 +379,8 @@ class Page:
             body.append(boxed("reviews", "Code reviews", intro, *([self.grid(
                 ["Reviewed", "Pull request", "Status"],
                 [[day(pr["date"]), (pr["title"], pr["url"], f"{pr['repo']} · {pr['author']}"), status_cell(pr["status"])]
-                 for pr in prs["reviewed"]])] if prs["reviewed"] else [])))
+                 for pr in sorted(prs["reviewed"], key=lambda pr: REVIEW_ORDER.index(pr["status"]))])]
+                if prs["reviewed"] else [])))
         return body
 
     # -- how you use Claude (your page only)

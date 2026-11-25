@@ -216,6 +216,14 @@ class Pages(Base):
         data.update(minutes=30, timed=1)
         self.assertIn("from the 1 of 2 sessions that recorded it", page.Page(data).write(self.tmp / "r.html").read_text())
 
+    def test_code_reviews_list_draft_open_closed_then_merged(self):
+        statuses = ["merged", "open", "closed", "draft", "open"]
+        reviewed = [pr(n, "", f"b{n}", author="teammate", status=st) for n, st in enumerate(statuses, 1)]
+        data = self.collect([session(1)], reviewed=reviewed)
+        html = "".join(page.Page(data).work())
+        shown = re.findall(r"pull/(\d+)", html[html.index("Code reviews"):])
+        self.assertEqual(list(dict.fromkeys(shown)), ["4", "2", "5", "3", "1"])  # an open pair keeps its order
+
     def test_hours(self):
         self.assertEqual((page.hours(0), page.hours(3), page.hours(90)), ("-", "<0.1h", "1.5h"))
 
