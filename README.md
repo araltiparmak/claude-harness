@@ -17,6 +17,17 @@ flowchart LR
   P --> U
   S --> U
   U --> C
+  classDef repo fill:#dbeafe,stroke:#2563eb,stroke-width:2px,color:#1e3a8a
+  classDef private fill:#ede9fe,stroke:#7c3aed,stroke-width:2px,color:#4c1d95
+  classDef external fill:#fef3c7,stroke:#d97706,stroke-width:2px,color:#78350f
+  classDef script fill:#dcfce7,stroke:#16a34a,stroke-width:2px,color:#14532d
+  classDef target fill:#ffe4e6,stroke:#e11d48,stroke-width:2px,color:#881337
+  class H repo
+  class P private
+  class S external
+  class U script
+  class C target
+  linkStyle default stroke:#64748b,stroke-width:2px
 ```
 
 `update.sh` pulls this repo and the optional second one, then:
