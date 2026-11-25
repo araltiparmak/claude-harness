@@ -33,7 +33,8 @@ from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE.parent / "skills" / "worklog"))
-import inventory  # noqa: E402  (worklog's inventory.py: skills, plugins and MCP servers, and their tokens)
+# worklog's inventory.py: the skills, plugins and MCP servers that load into a session, and their tokens
+import inventory  # noqa: E402
 from inventory import HOME, PROJECTS, SKILLS, load, short  # noqa: E402
 
 MINE = HERE.parent  # this repo
@@ -47,38 +48,48 @@ HINT = re.compile(r'"Skill"|"Agent"|"Task"|mcp__|<command-name>')  # lines worth
 def usage(days):
     """(uses, last day) per name, from the transcripts of the last days: skills by Skill call or slash command,
     agents by subagent type, MCP servers by their tools. A plugin's items count under plugin:item."""
-    since = time.time() - days * 86400
     uses, last = Counter(), {}
+    for entry in entries(time.time() - days * 86400):
+        day = entry.get("timestamp", "")[:10]
+        for name in names_in(entry):
+            uses[name] += 1
+            last[name] = max(last.get(name, ""), day)
+    return uses, last
+
+
+def entries(since):
+    """The transcript entries, from files changed since that time, that may name a skill, agent or MCP tool."""
     for file in PROJECTS.rglob("*.jsonl") if PROJECTS.is_dir() else []:
         if file.stat().st_mtime < since:
             continue
         for line in file.read_text(errors="replace").splitlines():
-            if not HINT.search(line):
-                continue
-            try:
-                entry = json.loads(line)
-            except ValueError:
-                continue
-            day = entry.get("timestamp", "")[:10]
-            content = (entry.get("message") or {}).get("content")
-            names = []
-            for block in content if isinstance(content, list) else [{"type": "text", "text": content or ""}]:
-                if not isinstance(block, dict):
+            if HINT.search(line):
+                try:
+                    yield json.loads(line)
+                except ValueError:
                     continue
-                if block.get("type") == "tool_use":
-                    tool, args = block.get("name", ""), block.get("input") or {}
-                    if tool == "Skill":
-                        names.append(args.get("skill", ""))
-                    elif tool in ("Agent", "Task"):
-                        names.append(args.get("subagent_type", ""))
-                    elif tool.startswith("mcp__"):
-                        names.append("mcp:" + tool.split("__")[1])
-                elif block.get("type") == "text":
-                    names += COMMAND.findall(block.get("text", ""))
-            for name in filter(None, names):
-                uses[name] += 1
-                last[name] = max(last.get(name, ""), day)
-    return uses, last
+
+
+def names_in(entry):
+    """The names one entry uses: Skill calls, subagents, MCP servers (mcp:<server>) and slash commands."""
+    content = (entry.get("message") or {}).get("content")
+    blocks = content if isinstance(content, list) else [{"type": "text", "text": content or ""}]
+    names = []
+    for block in (b for b in blocks if isinstance(b, dict)):
+        if block.get("type") == "tool_use":
+            names.append(tool_name(block.get("name", ""), block.get("input") or {}))
+        elif block.get("type") == "text":
+            names += COMMAND.findall(block.get("text", ""))
+    return [n for n in names if n]
+
+
+def tool_name(tool, args):
+    """The name a tool call uses, or "" for a tool that names none."""
+    if tool == "Skill":
+        return args.get("skill", "")
+    if tool in ("Agent", "Task"):
+        return args.get("subagent_type", "")
+    return "mcp:" + tool.split("__")[1] if tool.startswith("mcp__") else ""
 
 
 def rows(days):
@@ -110,47 +121,60 @@ def table(found, days):
     return "\n".join([head] + [f"{i:>3}  {line(r)}" for i, r in enumerate(found, 1)] + ["", summary(found, days)])
 
 
+KEYS = "up/down move  space select  a all unused  n none  enter apply  q quit"
+
+
 def pick(found, days):
     """The rows chosen in a full-screen checklist; [] when the user quits."""
     def run(screen):
         curses.curs_set(0)
-        chosen, at, top = set(), 0, 0
+        state = {"chosen": set(), "at": 0, "top": 0}
         while True:
-            height, width = screen.getmaxyx()
-            rows_shown = max(1, height - 4)
-            top = min(max(top, at - rows_shown + 1), at)
-            saved = sum(found[i][2] or 0 for i in chosen)
-            screen.erase()
-            screen.addnstr(0, 0, f"eliminate: {summary(found, days)}", width - 1, curses.A_BOLD)
-            screen.addnstr(1, 0, f"      {'name':<30} {'kind':<36} {'tokens':>6} {'uses':>5}  last used  "
-                                 f"(selected {len(chosen)}, saves {saved})", width - 1, curses.A_UNDERLINE)
-            for y, i in enumerate(range(top, min(len(found), top + rows_shown)), 2):
-                mark = "[x]" if i in chosen else "[ ]"
-                style = (curses.A_REVERSE if i == at else 0) | (curses.A_DIM if found[i][3] else 0)
-                screen.addnstr(y, 0, f"{'>' if i == at else ' '} {mark} {line(found[i])}", width - 1, style)
-            screen.addnstr(height - 1, 0, "up/down move  space select  a all unused  n none  enter apply  q quit",
-                           width - 1, curses.A_DIM)
-            key = screen.getch()
-            if key in (curses.KEY_UP, ord("k")):
-                at = max(0, at - 1)
-            elif key in (curses.KEY_DOWN, ord("j")):
-                at = min(len(found) - 1, at + 1)
-            elif key == curses.KEY_PPAGE:
-                at = max(0, at - rows_shown)
-            elif key == curses.KEY_NPAGE:
-                at = min(len(found) - 1, at + rows_shown)
-            elif key == ord(" "):
-                chosen ^= {at}
-                at = min(len(found) - 1, at + 1)
-            elif key == ord("a"):
-                chosen |= {i for i, r in enumerate(found) if not r[3]}
-            elif key == ord("n"):
-                chosen.clear()
-            elif key in (curses.KEY_ENTER, 10, 13):
-                return [found[i] for i in sorted(chosen)]
-            elif key in (ord("q"), 27):
-                return []
+            shown = draw(screen, found, days, state)
+            done = press(screen.getch(), found, state, shown)
+            if done is not None:
+                return done
     return curses.wrapper(run)
+
+
+def draw(screen, found, days, state):
+    """Draws the checklist; how many rows fit."""
+    height, width = screen.getmaxyx()
+    shown = max(1, height - 4)
+    chosen, at = state["chosen"], state["at"]
+    state["top"] = top = min(max(state["top"], at - shown + 1), at)
+    saved = sum(found[i][2] or 0 for i in chosen)
+    screen.erase()
+    screen.addnstr(0, 0, f"eliminate: {summary(found, days)}", width - 1, curses.A_BOLD)
+    screen.addnstr(1, 0, f"      {'name':<30} {'kind':<36} {'tokens':>6} {'uses':>5}  last used  "
+                         f"(selected {len(chosen)}, saves {saved})", width - 1, curses.A_UNDERLINE)
+    for y, i in enumerate(range(top, min(len(found), top + shown)), 2):
+        mark = "[x]" if i in chosen else "[ ]"
+        style = (curses.A_REVERSE if i == at else 0) | (curses.A_DIM if found[i][3] else 0)
+        screen.addnstr(y, 0, f"{'>' if i == at else ' '} {mark} {line(found[i])}", width - 1, style)
+    screen.addnstr(height - 1, 0, KEYS, width - 1, curses.A_DIM)
+    return shown
+
+
+def press(key, found, state, shown):
+    """Applies one key to the checklist state; the chosen rows on enter, [] on quit, else None."""
+    last, chosen = len(found) - 1, state["chosen"]
+    moves = {curses.KEY_UP: -1, ord("k"): -1, curses.KEY_DOWN: 1, ord("j"): 1,
+             curses.KEY_PPAGE: -shown, curses.KEY_NPAGE: shown}
+    if key in moves:
+        state["at"] = min(last, max(0, state["at"] + moves[key]))
+    elif key == ord(" "):
+        chosen ^= {state["at"]}
+        state["at"] = min(last, state["at"] + 1)
+    elif key == ord("a"):
+        chosen |= {i for i, r in enumerate(found) if not r[3]}
+    elif key == ord("n"):
+        chosen.clear()
+    elif key in (curses.KEY_ENTER, 10, 13):
+        return [found[i] for i in sorted(chosen)]
+    elif key in (ord("q"), 27):
+        return []
+    return None
 
 
 PROFILE = HOME / ".zshrc"
@@ -219,7 +243,7 @@ def settings_file():
 def disable_plugins(ids):
     file = settings_file()
     data = json.loads(file.read_text())
-    data.setdefault("enabledPlugins", {}).update({i: False for i in ids})
+    data.setdefault("enabledPlugins", {}).update(dict.fromkeys(ids, False))
     file.write_text(json.dumps(data, indent=2, ensure_ascii=False) + "\n")
     return file
 

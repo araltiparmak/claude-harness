@@ -397,7 +397,9 @@ def kind_name(kind):
         return "plugin, in " + kind[len("plugin, project "):]
     if kind.startswith("mcp, local, "):
         return "MCP server, in " + kind[len("mcp, local, "):]
-    return "plugin" if kind == "plugin" else "MCP server" if kind.startswith("mcp") else "skill"
+    if kind == "plugin":
+        return "plugin"
+    return "MCP server" if kind.startswith("mcp") else "skill"
 
 
 def loaded_cost(row, tokens):

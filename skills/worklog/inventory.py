@@ -77,9 +77,19 @@ def plugin_tokens(root):
 
 
 def plugins():
-    """{name: (kind, tokens, id, project path or "")} of the enabled plugins: installed ones (project ones count as enabled in their
-    project) and the ones synced from claude.ai, unless enabledPlugins turns them off."""
+    """{name: (kind, tokens, id, project path or "")} of the enabled plugins: installed ones (project ones count as
+    enabled in their project) and the ones synced from claude.ai, unless enabledPlugins turns them off."""
     enabled = load(SETTINGS).get("enabledPlugins", {})
+    found = installed_plugins(enabled)
+    for root in sorted(p for p in PLUGINS.glob("synced/*/*") if p.is_dir()):
+        name = root.name.split("~")[0]
+        if enabled.get(f"{name}@synced", True) and name not in found:
+            found[name] = ("plugin, account", plugin_tokens(root), f"{name}@synced", "")
+    return found
+
+
+def installed_plugins(enabled):
+    """plugins() for the plugins in installed_plugins.json."""
     found = {}
     for plugin_id, installs in load(PLUGINS / "installed_plugins.json").get("plugins", {}).items():
         for install in installs:
@@ -88,16 +98,12 @@ def plugins():
                 where = f"plugin, project {short(project)}" if project else "plugin"
                 found[plugin_id.split("@")[0]] = (where, plugin_tokens(Path(install["installPath"])), plugin_id,
                                                   project or "")
-    for root in sorted(p for p in PLUGINS.glob("synced/*/*") if p.is_dir()):
-        name = root.name.split("~")[0]
-        if enabled.get(f"{name}@synced", True) and name not in found:
-            found[name] = ("plugin, account", plugin_tokens(root), f"{name}@synced", "")
     return found
 
 
 def servers():
-    """{name: (scope, tokens or None, project path or "")} of the MCP servers: the user and local ones in ~/.claude.json, and every
-    server the newest session loaded (claude.ai connectors and servers of plugins and mods), with what it added."""
+    """{name: (scope, tokens or None, project path or "")} of the MCP servers: the user and local ones in
+    ~/.claude.json, and every server the newest session loaded (claude.ai connectors and servers of plugins and mods), with what it added."""
     state = load(STATE)
     found = {name: ("user", "") for name in state.get("mcpServers", {})}
     for project, config in state.get("projects", {}).items():
@@ -113,25 +119,38 @@ def loaded():
     """{server: tokens} of the newest session that loaded MCP servers: its deferred tool names (mcp__<server>__<tool>)
     and its instructions block. A server shows by name in tools and by title in instructions ("claude.ai Context7"
     for claude_ai_Context7)."""
-    sessions = sorted(PROJECTS.glob("*/*.jsonl"), key=lambda f: f.stat().st_mtime, reverse=True) if PROJECTS.is_dir() else []
+    sessions = sorted(PROJECTS.glob("*/*.jsonl"), key=lambda f: f.stat().st_mtime, reverse=True) \
+        if PROJECTS.is_dir() else []
     for file in sessions:
         chars = Counter()
-        for line in file.read_text(errors="replace").splitlines():
-            if '"deferred_tools_delta"' not in line and '"mcp_instructions_delta"' not in line:
-                continue
-            try:
-                added = json.loads(line).get("attachment") or {}
-            except ValueError:
-                continue
-            for name in added.get("addedNames", []) if added.get("type") == "deferred_tools_delta" else []:
-                if name.startswith("mcp__"):
-                    chars[name.split("__")[1]] += len(name) + 1
-            if added.get("type") == "mcp_instructions_delta":
-                for title, block in zip(added.get("addedNames", []), added.get("addedBlocks", [])):
-                    chars[re.sub(r"\W", "_", title)] += len(block)
+        for added in attachments(file):
+            chars.update(server_chars(added))
         if chars:
             return {name: -(-n // 4) for name, n in chars.items()}
     return {}
+
+
+def attachments(file):
+    """The deferred-tool and MCP-instruction attachments of one transcript."""
+    for line in file.read_text(errors="replace").splitlines():
+        if '"deferred_tools_delta"' in line or '"mcp_instructions_delta"' in line:
+            try:
+                yield json.loads(line).get("attachment") or {}
+            except ValueError:
+                continue
+
+
+def server_chars(added):
+    """{server: characters} one attachment adds to the context."""
+    chars = Counter()
+    if added.get("type") == "deferred_tools_delta":
+        for name in added.get("addedNames", []):
+            if name.startswith("mcp__"):
+                chars[name.split("__")[1]] += len(name) + 1
+    elif added.get("type") == "mcp_instructions_delta":
+        for title, block in zip(added.get("addedNames", []), added.get("addedBlocks", [])):
+            chars[re.sub(r"\W", "_", title)] += len(block)
+    return chars
 
 
 def short(path):
