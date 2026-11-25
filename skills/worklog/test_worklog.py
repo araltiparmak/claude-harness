@@ -195,12 +195,13 @@ class Prepare(Base):
 
 
 class Pages(Base):
-    def test_tickets_under_a_dollar_share_one_box_with_their_sum(self):
-        data = self.collect([session(1, ["ABC-1"], 2.0), session(2, ["ABC-3"], 0.4), session(3, ["ABC-4"], 0.3)])
+    def test_tickets_under_two_dollars_share_one_box_with_their_sum(self):
+        data = self.collect([session(1, ["ABC-1"], 2.0), session(2, ["ABC-3"], 1.5), session(3, ["ABC-4"], 0.3)])
         boxes = page.Page(data).ticket_boxes(data["tickets"], 1, "tickets")
-        self.assertEqual(len(boxes), 2)
+        self.assertEqual(len(boxes), 2)  # ABC-1 at $2.00 keeps its own box
         self.assertIn("Smaller tickets", boxes[1])
-        self.assertTrue(all(usd in boxes[1] for usd in ("$0.70", "$0.40", "$0.30")))
+        self.assertIn("that cost less than $2.00 each", boxes[1])
+        self.assertTrue(all(usd in boxes[1] for usd in ("$1.80", "$1.50", "$0.30")))
 
     def test_shared_page_shows_time_and_no_cost_or_usage(self):
         data = self.collect([session(1, ["ABC-1"], 2.0), session(2, edits=False, repo="tools")])

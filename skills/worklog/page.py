@@ -15,7 +15,7 @@ from settings import settings
 
 JIRA_URL = settings["jira_url"]
 TEMPLATE = Path(__file__).resolve().parent / "report.html"
-SMALL = 1.0  # USD; tickets that cost less share one box
+SMALL = 2.0  # USD; tickets that cost less share one box
 MODEL_SLOTS = {m["name"]: m["colour"] for m in MODELS.values() if "colour" in m}  # from models.json; others grey
 STATUS = {"merged": "✓ Merged", "closed": "✕ Closed, not merged", "open": "○ Open", "draft": "○ Draft"}
 REVIEW_ORDER = ["draft", "open", "closed", "merged"]  # code reviews: still moving first, done last
