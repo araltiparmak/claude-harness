@@ -98,7 +98,11 @@ Plugins are installed by hand: `claude plugin install frontend-design@claude-plu
 
 A second skills repo is optional: point `PRIVATE_DIR` at a checkout (default `~/dev/private-skills`), and set `PRIVATE_URL` to clone it when the folder is missing. Without either, the second repo is skipped; this repo and the skills in `external-skills.yaml` are still installed.
 
-To leave skills off a machine, set `SKIP_SKILLS` to group or skill names separated by spaces, for example `export SKIP_SKILLS="dev mindmap"` in `~/.zshrc`. `update.sh` then links none of them, removes their old links, and prints a `skipped` line for each. `scripts/check.sh` checks the repo's consistency and runs in CI on every push, where the deck examples are also built.
+To leave skills off a machine, set `SKIP_SKILLS` to group or skill names separated by spaces, for example `export SKIP_SKILLS="dev mindmap"` in `~/.zshrc`. `update.sh` then links none of them, removes their old links, and prints a `skipped` line for each.
+
+To keep the context small, run [`scripts/eliminate.py`](scripts/eliminate.py). It lists every skill, plugin and MCP server that loads into each session, with its token cost and how often your sessions used it in the last 90 days (`eliminate.py 30` for 30). Unused items come first. Tick the ones to remove in the checklist, confirm, and it takes them out of Claude's context: skills through `SKIP_SKILLS`, plugins through `enabledPlugins`, MCP servers through `claude mcp remove`. It prints the undo for each, and the steps for claude.ai skills and connectors, which only claude.ai or `/mcp` can switch off one by one. `eliminate.py --list` prints the table and changes nothing. The worklog page's Misc box shows what the same unused items cost in a month.
+
+`scripts/check.sh` checks the repo's consistency and runs in CI on every push, where the deck examples are also built.
 
 ## License
 
