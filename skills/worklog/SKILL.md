@@ -1,6 +1,6 @@
 ---
 name: worklog
-description: Writes a plain one-page work report from the Claude Code sessions, pull requests and Jira - the tickets worked on, support tickets, incidents, code reviews given and pull requests opened - with what each ticket cost, for a performance review or a brag document. Runs only when typed as /worklog.
+description: Writes a one-page report of how the user works with Claude Code and what the work was - tips and measures on tokens, context and session quality, the most expensive sessions, then the Jira tickets, support tickets, pull requests and code reviews with a one-line outcome, active time and cost per ticket - or a page without costs to share. Runs only when typed as /worklog.
 disable-model-invocation: true
 ---
 
@@ -8,20 +8,18 @@ disable-model-invocation: true
 
 Arguments passed: $ARGUMENTS
 
-A `SessionEnd` hook runs `worklog.py record` (this skill's folder), which adds one row per session to `<dev_dir>/worklog/sessions.jsonl`. Settings are in `config.json` next to the script; copy `config.example.json` when it is missing. All keys are optional:
+Run these from this skill's folder.
 
-- `dev_dir`: the folder that holds the repos. The data folder is `<dev_dir>/worklog`.
-- `jira_prefixes`: Jira project prefixes, such as `ABC` for `ABC-123`. Empty on a machine without Jira; sessions are then grouped by repo.
-- `support_prefixes`: the prefixes whose tickets are support investigations.
-- `jira_url`: the Jira site, such as `https://example.atlassian.net`. When set, ticket keys link to their issue.
-- `jira_cmd`: the command that prints one issue as Jira REST JSON; `{key}` is the issue key.
-- `jira_search_cmd`: the command that prints the issues a JQL query finds as JSON; `{jql}` is the query.
-- `exclude_repos`: repos (folder or GitHub name) whose sessions and pull requests the report leaves out, such as personal projects on a work machine.
+1. Run `python3 worklog.py prepare [period]`. It prints JSON: `sessions`, the sessions the rules gave no ticket (date, repo, branches, title, first prompt, cost, and `in_progress`: the Jira issues the user had in progress that day); `tickets`, the period's tickets with their sub-tasks, pull request titles, session titles, hours, cost and current note; and `assigned`, the other Jira issues assigned to the user and updated in the period.
+2. Map: for each session, choose a key from `tickets` (or a sub-task) or `assigned` only when its title, prompt, repo or branch clearly matches. A single `in_progress` issue is a strong hint, not proof: take it when nothing in the session points elsewhere. Leave a session unmapped when it is personal, general or unclear; it stays in Other work. Do not invent keys. Save the choices in one call: `python3 worklog.py map SESSION KEY [SESSION KEY...]`. They go to `<DEV_DIR>/worklog/mapped.json`, and the page marks those sessions as mapped. To undo one, remove its line from that file.
+3. Notes: for each ticket in `tickets` that cost $1 or more, plus each ticket you just mapped sessions to, write one sentence on what was done, from its pull request and session titles: past tense, plain words, the outcome first, at most 20 words, no cost, no guesses beyond those titles. Keep a current note that still fits. Save them in one call: `python3 worklog.py note KEY "sentence" [KEY "sentence"...]`. They go to `<DEV_DIR>/worklog/notes.json` and show at the top of the ticket's box.
+4. Run `python3 worklog.py report [period]`, adding `--share` when the arguments include `share`.
 
-## Report
+- period: empty for this month, `last-month` when the arguments ask for last month (in any language), or a first day such as `2026-07-01`.
+- Skip step 2 when `sessions` is empty or Jira gave no `tickets` and no `assigned`, and step 3 when `tickets` is empty.
 
-Run `python3 worklog.py report [period] [--no-cost]` from this skill's folder. With no period it reports the current month; pass `last-month` when the arguments ask for last month (in any language), or a first day such as `2026-07-01` to report from that day to today. Pass `--no-cost` when the arguments ask to leave costs out (for example, for a page to share); it removes every cost from the page. It writes the page, opens it in the browser and prints the counts and `Page: <path>`. Do not read the page; pass the counts on to the user.
+The report writes the page, opens it and prints a few lines, the top tip among them. Pass those lines on with how many sessions you mapped and to which tickets, and how many notes you wrote; do not read the page.
 
-The page shows, in order: the outcome numbers (tickets worked on first; reviews for others do not count), an overview of where the cost went, the tickets with their Jira type, support tickets, incidents, pull requests without a ticket, other work (sessions that changed code with no ticket, incident or review behind them), and the code reviews, each linked to its pull request.
+Only when the arguments include `share`: the report writes `share.html`, the page for other readers (work, outcomes and time; no costs, no Using Claude sections). Read the page printed after `Page:` and publish it with the Artifact tool (icon `chart`), then give the link. Keep one link: `<DEV_DIR>/worklog/share.json` holds its artifact URL; when it has one, read that artifact and publish to its URL, otherwise publish a new one and write its URL there. It is private until the user shares it. Without `share`, only what `prepare` prints goes to the model; `worklog.py report` in a shell runs with no model and reuses the mappings and notes saved before.
 
-When the user asks why a session or pull request landed where it did, read `collect` and the docstrings of `keys_of`, `ticket`, `Jira.pick`, `reviewed_pr` and `cost` in the script; they hold the rules.
+When the user asks about setup, or the page misses pull requests, tickets or sessions, run `python3 worklog.py check` and pass on its lines; `README.md` has the setup steps. When the user asks why a session landed where it did, read the docstrings of `collect`, `ticket` and `Jira.pick` in `worklog.py`; for what a measure or tip means, read `measures` and `TIPS` there.

@@ -4,7 +4,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>$title</title>
 <style>
-  /* worklog.py fills in the title and the body. Colours: light values first, dark below.
+  /* page.py fills in the title and the body. Colours: light values first, dark below.
      --c1 to --c8 give each overview group its colour (a validated categorical palette, in a fixed order);
      green, blue and red are pull request states. */
   :root {
@@ -55,6 +55,8 @@
   th { color: var(--muted); font-weight: 500; font-size: 13px; }
   td:first-child, td:last-child { white-space: nowrap; }
   td small { white-space: normal; }
+  tr.sub td:first-child { padding-left: 28px; }
+  tr.sub td { font-size: 14px; }
 
   /* Group colours: a dot by each name, the bars and the split of the spend */
   .c0 { --c: var(--c0); } .c1 { --c: var(--c1); } .c2 { --c: var(--c2); } .c3 { --c: var(--c3); }
@@ -70,10 +72,22 @@
   .split span:first-child { border-radius: 4px 0 0 4px; } .split span:last-child { border-radius: 0 4px 4px 0; }
   .bar { height: 6px; width: 240px; max-width: 100%; margin-top: 6px; background: var(--track); border-radius: 3px; }
   .bar span { display: block; height: 100%; background: var(--c); border-radius: 3px; }
+  /* Charts: inline SVG; marks take the group colour, text and lines the page's ink */
+  h3 { margin: 22px 0 8px; font-size: 14px; font-weight: 600; color: var(--ink-2); }
+  .chart svg { display: block; width: 100%; height: auto; overflow: visible; }
+  .chart rect, .chart circle { fill: var(--c); }
+  .chart circle { stroke: var(--box); stroke-width: 2px; }
+  .chart text { fill: var(--muted); font-size: 11px; font-family: inherit; }
+  .chart .axis { stroke: var(--line); }
+  .chart .grid { stroke: var(--line); stroke-dasharray: 2 4; }
+  .chart .limit { stroke: var(--ink-2); stroke-dasharray: 4 4; }
+
+  /* Tips: what was found in bold, then what to try */
+  .tips { margin: 8px 0 4px; padding-left: 20px; max-width: 75ch; }
+  .tips li { margin: 0 0 10px; color: var(--ink-2); }
+  .tips strong { color: var(--ink); font-weight: 600; }
 
   .status { font-weight: 500; white-space: nowrap; }
-  .state { color: var(--muted); white-space: nowrap; }
-  .state.done { color: var(--merged); font-weight: 500; }
   h2 a { text-decoration-color: var(--line); }
   .status.merged { color: var(--merged); }
   .status.open, .status.draft { color: var(--open); }

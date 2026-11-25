@@ -57,7 +57,7 @@ Skills sit in group folders; `update.sh` links each one into `~/.claude/skills/`
 
 | Skill | What it does |
 |---|---|
-| [worklog](skills/worklog/SKILL.md) | Keeps a ledger of Claude Code sessions (a `SessionEnd` hook, no model) and writes a plain work report: Jira tickets with their pull requests and cost, support tickets, incidents, reviews given and pull requests (user-invoked: `/worklog`) |
+| [worklog](skills/worklog/SKILL.md) | Measures how you use Claude Code (tips, tokens, context, session quality, the most expensive sessions) and what the work was (Jira tickets with outcomes, time and cost, pull requests, reviews), from a `SessionEnd` ledger; `share` writes a page without costs (user-invoked: `/worklog`) |
 
 ### Todo
 

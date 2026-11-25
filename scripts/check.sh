@@ -52,6 +52,13 @@ while IFS= read -r f; do scripts_sh+=("$f"); done < <(find scripts skills -name 
 for script in ${scripts_sh[@]+"${scripts_sh[@]}"}; do bash -n "$script" || problem "$script: syntax error"; done
 for py in scripts/*.py; do python3 -m py_compile "$py" || problem "$py: syntax error"; done
 while IFS= read -r mjs; do node --check "$mjs" || problem "$mjs: syntax error"; done < <(find skills -name '*.mjs' | sort)
+# A skill's Python tests (test_*.py) run from the skill's folder.
+while IFS= read -r t; do
+  if ! out="$(cd "$(dirname "$t")" && python3 -m unittest -q "$(basename "$t" .py)" 2>&1)"; then
+    problem "$t: tests failed"
+    echo "$out" | tail -40
+  fi
+done < <(find skills -name 'test_*.py' | sort)
 if command -v shellcheck >/dev/null; then
   shellcheck "${scripts_sh[@]}" || problem "shellcheck found issues"
 else
