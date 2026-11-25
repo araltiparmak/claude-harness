@@ -16,7 +16,9 @@ estimate from message times, so both vary with how a person works, not only with
 - **The work**: sessions sorted into Jira tickets (with sub-tasks), pull requests without a ticket, other work and
   code reviews, each with active time and cost; a one-line outcome per ticket.
 - **Tokens and context**: context sizes, the peak of each session, tokens per model and cost per day.
-- **Tools used**: skills, MCP servers and subagents, and the installed skills no session used.
+- **Misc**: the skills, MCP servers and subagents the sessions used, and what loaded into every session without
+  being used (skills, plugins, MCP servers), with its tokens per session and its estimated cost in the period:
+  its share of each session's average context, times what the session paid to read and write cached context.
 
 `/worklog share` writes `share.html` for other readers (a manager, a review document): the work, outcomes and
 time, with no costs and none of the Using Claude sections. It can also publish it as a private Artifact link.
@@ -136,6 +138,7 @@ saved), and the pages. Nothing is sent anywhere unless you run `/worklog share` 
 ## Files
 
 `worklog.py` (commands, sorting, measures and tips), `ledger.py` (reads and prices sessions), `page.py` and
-`report.html` (the page), `github.py` and `jira.py` (fetching; each runs on its own), `settings.py` and
+`report.html` (the page), `github.py` and `jira.py` (fetching; each runs on its own), `inventory.py` (the skills, plugins and MCP servers
+that load into a session, and their tokens), `settings.py` and
 `settings.json` (settings), `models.json` (models and prices), `test_worklog.py`
 (`python3 -m unittest test_worklog`).

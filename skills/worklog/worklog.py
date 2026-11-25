@@ -18,7 +18,8 @@ and reviews, with time, cost and tips. Everything stays on this computer.
 Settings: ~/.config/worklog.json over the defaults in settings.json; models and prices: models.json; README.md
 describes both. Data: <DEV_DIR>/worklog, with sessions.jsonl (the
 ledger), jira.json (the issue cache), commits.json (the pull requests of your commits), mapped.json (the tickets chosen with map) and notes.json (the outcomes).
-ledger.py reads transcripts, page.py writes the HTML, github.py and jira.py fetch pull requests and issues.
+ledger.py reads transcripts, page.py writes the HTML, github.py and jira.py fetch pull requests and issues,
+inventory.py finds what loads into every session.
 """
 import json
 import os
@@ -28,12 +29,13 @@ import subprocess
 import sys
 import urllib.error
 import webbrowser
-from collections import defaultdict
+from collections import Counter, defaultdict
 from datetime import date, timedelta
 from operator import ge, gt, lt
 from pathlib import Path
 
 import github
+import inventory
 import jira
 import ledger
 import page
@@ -44,7 +46,6 @@ JIRA_PREFIXES, SUPPORT_PREFIXES, EXCLUDE_REPOS = (
     settings[k] for k in ("jira_prefixes", "support_prefixes", "exclude_repos"))
 MAPPED = DATA / "mapped.json"
 NOTES = DATA / "notes.json"
-SKILLS = Path.home() / ".claude" / "skills"  # the installed skills, a folder or a link each
 CLAUDE_SETTINGS = Path.home() / ".claude" / "settings.json"  # where check looks for the hook
 PREFIXES = "|".join(re.escape(p) for p in JIRA_PREFIXES)
 KEY = re.compile(rf"\b(?:{PREFIXES})-\d+\b", re.I) if PREFIXES else re.compile(r"[^\s\S]")  # never matches
@@ -89,6 +90,7 @@ class Jira:
         try:
             return jira.issue(key)
         except urllib.error.HTTPError as err:
+            err.close()  # the answer's body, unread
             if err.code != 404:
                 raise
             jira.search("updated >= -1d")  # raises when Jira itself is not answering
@@ -383,12 +385,56 @@ def skills_of(row, installed):
     return skills
 
 
+RATES = {m["name"]: m["prices"] for m in ledger.MODELS.values()}  # model family: prices per million tokens
+KINDS = {"account": "claude.ai skill", "plugin, account": "claude.ai plugin", "mcp, claude.ai": "claude.ai connector"}
+
+
+def kind_name(kind):
+    """An inventory kind as the page names it: skill, plugin, MCP server, or its claude.ai variant."""
+    if kind in KINDS:
+        return KINDS[kind]
+    if kind.startswith("plugin, project "):
+        return "plugin, in " + kind[len("plugin, project "):]
+    if kind.startswith("mcp, local, "):
+        return "MCP server, in " + kind[len("mcp, local, "):]
+    return "plugin" if kind == "plugin" else "MCP server" if kind.startswith("mcp") else "skill"
+
+
+def loaded_cost(row, tokens):
+    """About what tokens loaded into every reply cost in one session: their share of its average context, times
+    what the session paid to read and write its cached context. Background calls carry no such context."""
+    avg = (row.get("context") or {}).get("avg")
+    if not avg or not tokens:
+        return 0.0
+    default = ledger.MODELS[ledger.PRICING["default_model"]]["prices"]
+    paid = sum(t.get("read", 0) * RATES.get(m, default)["cache_read"] + t.get("write", 0) *
+               RATES.get(m, default)["cache_write_1h"] for m, t in row.get("tokens_by_model", {}).items()
+               if m != "Background")
+    return min(tokens / avg, 1.0) * paid / 1e6
+
+
+def unused_of(rows, names):
+    """The skills, plugins and MCP servers that load into sessions and that no session of the period used, as
+    {name, kind, tokens, usd}, the most expensive first. usd covers the sessions the item loaded into: all of
+    them, or those in its project for a project plugin or local server; None when the tokens are not known."""
+    found = []
+    for name, kind, tokens, _, project, keys in inventory.items():
+        if inventory.counts_for(keys, names):
+            continue
+        sessions = [r for r in rows if not project or (r["cwd"] or "").startswith(project)]
+        usd = None if tokens is None else sum(loaded_cost(r, tokens) for r in sessions)
+        found.append({"name": name, "kind": kind_name(kind), "tokens": tokens, "usd": usd})
+    return sorted(found, key=lambda u: (u["usd"] is None, -(u["usd"] or 0), -(u["tokens"] or 0), u["name"]))
+
+
 def usage_of(rows):
     """What the sessions used, as {kind: {name: [uses, sessions]}} for skills, MCP servers and subagents, cost per
-    day per model, the peak context of each session, and the installed skills no session used."""
-    installed = {p.name for p in SKILLS.iterdir() if (p / "SKILL.md").is_file()} if SKILLS.is_dir() else set()
+    day per model, the peak context of each session, and what loaded into the sessions unused (unused_of)."""
+    installed = {p.name for p in inventory.SKILLS.iterdir() if (p / "SKILL.md").is_file()} \
+        if inventory.SKILLS.is_dir() else set()
     found = defaultdict(lambda: defaultdict(lambda: [0, 0]))
     found["daily"] = defaultdict(lambda: defaultdict(float))  # day: {model: cost}
+    names = Counter()  # every use under the names inventory counts it by
     for r in rows:
         used = r.get("used", {})
         for kind, counts in (("skill", skills_of(r, installed)), ("mcp", used.get("mcp", {})),
@@ -396,11 +442,12 @@ def usage_of(rows):
             for item, n in counts.items():
                 found[kind][item][0] += n
                 found[kind][item][1] += 1
+                names["mcp:" + item if kind == "mcp" else item] += n
         for model, usd in models_of(r).items():
             found["daily"][r["day"]][model] += usd
     found["peaks"] = [(r["day"], r["context"]["peak"], r["title"] or r["prompt"][:60])
                       for r in rows if "context" in r]
-    found["unused"] = sorted(installed - set(found["skill"]))
+    found["unused"] = unused_of(rows, names)
     return found
 
 

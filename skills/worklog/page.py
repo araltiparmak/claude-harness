@@ -1,7 +1,7 @@
 """The HTML page of a report, from the data worklog.collect returns.
 
 Page(data) is the page for you: the work with time and cost, then what the sessions say about how you use
-Claude (tips, measures, the most expensive sessions, tokens, context, tools). Page(data, share=True) is the page
+Claude (tips, measures, the most expensive sessions, tokens, context, misc). Page(data, share=True) is the page
 for other readers: the work, outcomes and time, with no costs and none of the Using Claude sections.
 """
 import html
@@ -438,9 +438,9 @@ class Page:
                        for name, t in models]),
             tag("h3", "Cost per day by model"), daily_chart(usage["daily"], d["since"], d["until"]))
 
-    def tools(self):
-        """The skills, MCP servers and subagents the sessions used, most used first, then the installed skills no
-        session used."""
+    def misc(self):
+        """The skills, MCP servers and subagents the sessions used, most used first; then what loaded into every
+        session without being used, with what it cost, the total at the right of the title."""
         usage = self.data["usage"]
         parts = []
         for kind, head in {"skill": "Skill", "mcp": "MCP server", "agent": "Subagent"}.items():
@@ -448,11 +448,20 @@ class Page:
                 rows = most_used(usage[kind])
                 parts.append(self.grid([head, "Uses", "Sessions"], [[name, bar_cell(n, n, rows[0][1][0]), sessions]
                                                                      for name, (n, sessions) in rows]))
-        unused = usage.get("unused")
+        unused = usage.get("unused") or []
+        total = sum(u["usd"] or 0 for u in unused)
         if unused:
-            parts.append(tag("p", f"{plural(len(unused), 'skill')} installed but not used in this period: "
-                                  f"{', '.join(unused)}.", class_="intro unused"))
-        return self.section("Tools used", "Skills, MCP servers and subagents, most used first.", *parts) if parts else ""
+            parts += [tag("h3", "Loaded but not used"),
+                      tag("p", f"{plural(len(unused), 'item')} sat in the context of every session without being "
+                               f"used, about {money(total)} in this period. Each reply re-reads them, so this is "
+                               "their share of what the sessions paid for cached context. Remove skills from "
+                               "~/.claude/skills, plugins with /plugin and MCP servers with /mcp.",
+                          class_="intro unused"),
+                      self.grid(["Item", "Kind", "Tokens per session", "Cost"],
+                                [[u["name"], u["kind"], "?" if u["tokens"] is None else amount(u["tokens"]),
+                                  "?" if u["usd"] is None else money(u["usd"])] for u in unused])]
+        intro = "Skills, MCP servers and subagents the sessions used, most used first, and what loaded unused."
+        return self.section("Misc", intro, *parts, usd=total) if parts else ""
 
     def write(self, file):
         d = self.data
@@ -464,7 +473,7 @@ class Page:
             body.append(self.using_claude())
         body += self.work()
         if not self.share:
-            body += [self.tokens_and_context(), self.tools()]
+            body += [self.tokens_and_context(), self.misc()]
         body.append(tag("footer", "Sources: Jira, GitHub and the records Claude Code keeps on this computer. "
                         f"Time is active time in sessions: a gap over {IDLE} minutes counts as a break, and sessions "
                         "that ran side by side add up. "

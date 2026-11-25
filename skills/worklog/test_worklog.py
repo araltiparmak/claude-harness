@@ -13,6 +13,7 @@ from pathlib import Path
 from unittest import mock
 
 import github
+import inventory
 import jira
 import ledger
 import page
@@ -57,8 +58,9 @@ class Base(unittest.TestCase):
         self.patch(ledger, DATA=tmp, LEDGER=tmp / "sessions.jsonl", PROJECTS=tmp / "projects",
                    CLAUDE_STATE=tmp / "claude.json")
         self.patch(w, DATA=tmp, MAPPED=tmp / "mapped.json", NOTES=tmp / "notes.json",
-                   KEY=re.compile(r"\b(?:ABC)-\d+\b", re.I), PREFIXES="ABC", SUPPORT=set(), EXCLUDE_REPOS=[],
-                   SKILLS=tmp / "skills")
+                   KEY=re.compile(r"\b(?:ABC)-\d+\b", re.I), PREFIXES="ABC", SUPPORT=set(), EXCLUDE_REPOS=[])
+        self.patch(inventory, SKILLS=tmp / "skills", PROJECTS=tmp / "projects", SETTINGS=tmp / "settings.json",
+                   STATE=tmp / "claude-state.json", PLUGINS=tmp / "plugins")
         self.patch(page, JIRA_URL="")
         self.patch(github, CACHE=tmp / "commits.json")
         self.patch(w.jira, issue=lambda key: ISSUES[key], search=lambda condition: [],
@@ -217,15 +219,26 @@ class Pages(Base):
     def test_hours(self):
         self.assertEqual((page.hours(0), page.hours(3), page.hours(90)), ("-", "<0.1h", "1.5h"))
 
-    def test_tools_list_the_installed_skills_no_session_used(self):
-        for name in ("deck", "todo", "explain"):
-            (w.SKILLS / name).mkdir(parents=True)
-            (w.SKILLS / name / "SKILL.md").touch()
-        (w.SKILLS / "synced").mkdir()  # a folder Claude Code keeps there, not a skill
-        rows = [session(1, used={"skill": {"deck": 2}}), session(2, used={"command": {"todo": 1, "clear": 1}})]
+    def test_misc_lists_what_loaded_unused_with_its_share_of_the_cached_context(self):
+        for name, description in (("deck", "x" * 30), ("todo", "x" * 30), ("explain", "x" * 393)):
+            (inventory.SKILLS / name).mkdir(parents=True)
+            (inventory.SKILLS / name / "SKILL.md").write_text(f"---\nname: {name}\ndescription: {description}\n---\n")
+        (inventory.SKILLS / "synced").mkdir()  # a folder Claude Code keeps there, not a skill
+        inventory.STATE.write_text(json.dumps({"projects": {"/dev/site": {"mcpServers": {"playwright": {}}}}}))
+        cached = {"Opus": {"in": 0, "out": 0, "read": 1_000_000, "write": 0}}  # $0.20 of cache reads
+        rows = [{**session(1, used={"skill": {"deck": 2}}), "context": {"peak": 20_000, "avg": 10_000, "compactions": 0},
+                 "tokens_by_model": cached},
+                {**session(2, used={"command": {"todo": 1, "clear": 1}}), "context": {"peak": 20_000, "avg": 10_000, "compactions": 0},
+                 "tokens_by_model": cached}]
         data = self.collect(rows)
-        self.assertEqual(data["usage"]["unused"], ["explain"])
-        self.assertIn("1 skill installed but not used in this period: explain.", page.Page(data).tools())
+        unused = data["usage"]["unused"]
+        self.assertEqual([(u["name"], u["kind"], u["tokens"]) for u in unused],
+                         [("explain", "skill", 100), ("playwright", "MCP server, in /dev/site", None)])
+        self.assertAlmostEqual(unused[0]["usd"], 2 * 100 / 10_000 * 0.20)  # 1% of the context in 2 sessions
+        self.assertIsNone(unused[1]["usd"])
+        misc = page.Page(data).misc()
+        self.assertIn("2 items sat in the context of every session without being used", misc)
+        self.assertIn("<h2>Misc", misc)
 
 
 class Measures(Base):
