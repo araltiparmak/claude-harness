@@ -6,7 +6,7 @@ the ones that hold your commits.
                                     YYYY-MM-DD); earlier: yours, opened before SINCE and updated since
   python3 github.py commits DIR FROM TO
                                     prints the texts of the pull requests that hold your commits made in the repo
-                                    at DIR between two times (ISO)
+                                    at DIR between two times (ISO); cached in commits.json
 
 Each pull request: date, repo, title, url, status (open, draft, merged, closed), author, branch, and text (its
 title, branch, description and commit messages, where the report looks for ticket keys).
@@ -18,6 +18,7 @@ import sys
 from datetime import date, timedelta
 
 from ledger import local_day, moment
+from settings import DATA
 
 QUERY = """query($q: String!, $after: String) {
   viewer { login }
@@ -90,26 +91,41 @@ def output(cmd, cwd=None):
     return subprocess.run(cmd, capture_output=True, text=True, timeout=60, check=True, cwd=cwd).stdout.strip()
 
 
+CACHE = DATA / "commits.json"  # {sha: [texts of its pull requests]}; a commit in a pull request stays there
+
+
 def commit_pulls(repo_dir, start, end):
     """The texts (title, branch, description) of the pull requests that hold the commits you made in the repo at
-    repo_dir between start and end, read with git and gh. [] when that is not a GitHub repo or gh fails."""
+    repo_dir between start and end, read with git and one gh request for all the commits that commits.json does
+    not hold yet. [] when that is not a GitHub repo or gh fails."""
     try:
         start, end = (moment(t).isoformat() for t in (start, end))
-        found = re.search(r"github\.com[:/]([\w.-]+/[\w.-]+?)(?:\.git)?$",
+        found = re.search(r"github\.com[:/]([\w.-]+)/([\w.-]+?)(?:\.git)?$",
                           output(["git", "remote", "get-url", "origin"], repo_dir))
         email = output(["git", "config", "user.email"], repo_dir)
         shas = output(["git", "log", "--all", f"--author={email}", f"--since={start}", f"--until={end}", "--format=%H"],
                       repo_dir).split()
     except Exception:  # no repo there any more, no origin, no email, a time that is not ISO
         return []
-    texts = []
-    for sha in shas[:10] if found else []:
+    if not found or not shas:
+        return []
+    cache = json.loads(CACHE.read_text()) if CACHE.exists() else {}
+    ask = [sha for sha in shas if sha not in cache]
+    if ask:
+        fields = "".join(f'c{i}: object(oid: "{sha}") {{ ... on Commit {{ associatedPullRequests(first: 5) '
+                         f"{{ nodes {{ title headRefName body }} }} }} }} " for i, sha in enumerate(ask))
+        query = f"query($owner: String!, $name: String!) {{ repository(owner: $owner, name: $name) {{ {fields}}} }}"
         try:
-            pulls = json.loads(output(["gh", "api", f"repos/{found[1]}/commits/{sha}/pulls"]))
-        except Exception:  # gh missing, not logged in, commit never pushed
-            continue
-        texts += [f"{p['title']}\n{p['head']['ref']}\n{p.get('body') or ''}" for p in pulls]
-    return list(dict.fromkeys(texts))
+            repo = json.loads(output(["gh", "api", "graphql", "-f", f"query={query}", "-f", f"owner={found[1]}",
+                                      "-f", f"name={found[2]}"]))["data"]["repository"]
+        except Exception:  # gh missing, not logged in, network, repo gone
+            return []
+        for i, sha in enumerate(ask):
+            pulls = ((repo or {}).get(f"c{i}") or {}).get("associatedPullRequests", {}).get("nodes", [])
+            if pulls:  # a commit with no pull request yet is asked again next time
+                cache[sha] = [f"{p['title']}\n{p['headRefName']}\n{p.get('body') or ''}" for p in pulls]
+        CACHE.write_text(json.dumps(cache, indent=1))
+    return list(dict.fromkeys(text for sha in shas for text in cache.get(sha, [])))
 
 
 if __name__ == "__main__":

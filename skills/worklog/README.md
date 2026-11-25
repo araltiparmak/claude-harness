@@ -129,7 +129,8 @@ session would show about half its cost. When a new model comes out, add its id a
 ## Data
 
 Everything stays in `<dev_dir>/worklog` on your computer: `sessions.jsonl` (one row per session, including the
-first 200 characters of your first prompt), `jira.json` (issue names), `mapped.json` and `notes.json` (what Claude
+first 200 characters of your first prompt), `jira.json` (issue names), `commits.json` (the pull requests
+your commits belong to), `mapped.json` and `notes.json` (what Claude
 saved), and the pages. Nothing is sent anywhere unless you run `/worklog share` and publish the link.
 
 ## Files

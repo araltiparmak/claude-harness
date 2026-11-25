@@ -17,7 +17,7 @@ and reviews, with time, cost and tips. Everything stays on this computer.
 
 Settings: ~/.config/worklog.json over the defaults in settings.json; models and prices: models.json; README.md
 describes both. Data: <DEV_DIR>/worklog, with sessions.jsonl (the
-ledger), jira.json (the issue cache), mapped.json (the tickets chosen with map) and notes.json (the outcomes).
+ledger), jira.json (the issue cache), commits.json (the pull requests of your commits), mapped.json (the tickets chosen with map) and notes.json (the outcomes).
 ledger.py reads transcripts, page.py writes the HTML, github.py and jira.py fetch pull requests and issues.
 """
 import json

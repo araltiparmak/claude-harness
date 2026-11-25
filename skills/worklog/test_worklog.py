@@ -60,6 +60,7 @@ class Base(unittest.TestCase):
                    KEY=re.compile(r"\b(?:ABC)-\d+\b", re.I), PREFIXES="ABC", SUPPORT=set(), EXCLUDE_REPOS=[],
                    SKILLS=tmp / "skills")
         self.patch(page, JIRA_URL="")
+        self.patch(github, CACHE=tmp / "commits.json")
         self.patch(w.jira, issue=lambda key: ISSUES[key], search=lambda condition: [],
                    updated=lambda since, until: {k: {"summary": v["summary"], "type": v["type"]}
                                                  for k, v in ISSUES.items()},
@@ -367,6 +368,21 @@ class Ledger(Base):
                           "reviewed": [("PR 4", "2026-11-03")]})
 
 
+    def test_one_gh_request_per_session_for_the_commits_not_cached(self):
+        asked = []
+
+        def output(cmd, cwd=None):
+            if cmd[0] == "git":
+                return {"remote": "git@github.com:acme/api.git", "config": "me@acme.com"}.get(cmd[1], "aaa\nbbb")
+            asked.append(re.findall(r'oid: "(\w+)"', cmd[4]))
+            return json.dumps({"data": {"repository": {
+                "c0": {"associatedPullRequests": {"nodes": [{"title": "Export", "headRefName": "ABC-1", "body": None}]}},
+                "c1": None}}})  # c1: a commit GitHub does not have, never pushed
+        self.patch(github, output=output)
+        for _ in range(2):
+            self.assertEqual(github.commit_pulls(str(self.tmp), "2026-11-01T09:00:00Z", "2026-11-01T10:00:00Z"),
+                             ["Export\nABC-1\n"])
+        self.assertEqual(asked, [["aaa", "bbb"], ["bbb"]])  # aaa came from commits.json the second time
 
 if __name__ == "__main__":
     unittest.main()
