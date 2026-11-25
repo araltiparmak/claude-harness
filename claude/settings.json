@@ -3,6 +3,7 @@
     "commit": "",
     "pr": ""
   },
+  "cleanupPeriodDays": 90,
   "permissions": {
     "deny": [
       "Bash(terraform apply:*)",

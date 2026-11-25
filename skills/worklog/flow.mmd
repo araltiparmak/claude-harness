@@ -1,0 +1,42 @@
+%% How /worklog turns sessions, pull requests and Jira issues into one page. Render: diagrams/scripts/render.sh flow.mmd
+flowchart TB
+  subgraph fetch [2. Fetch]
+    direction LR
+    gh[GitHub] -- gh api graphql --> ghp[github.py] -- PRs opened,<br/>earlier, reviewed --> prs[PR list]
+    jc[Jira] -- jira CLI --> jp[jira.py] -- issue type,<br/>parent --> cache[(jira.json)]
+  end
+  subgraph rec [1. Record]
+    direction LR
+    tr[Transcripts<br/>~/.claude/projects] -- SessionEnd hook,<br/>and again on report --> rc[worklog.py record] -- one row per session --> led[(sessions.jsonl)]
+  end
+  subgraph sort [3. Sort every session into one place]
+    direction LR
+    s[Session] --> key{Ticket key?<br/>branch, prompt,<br/>commands, PR} -- yes --> tk[Ticket<br/>sub-task under parent]
+    key -- no --> cm{Your commits<br/>in a PR?<br/>git + gh} -- yes --> tk
+    cm -- no --> rv{Review?} -- yes --> rpr[Code reviews<br/>one total]
+    rv -- no --> mp{Chosen by<br/>/worklog?<br/>mapped.json} -- yes --> tk
+    mp -- no --> oth[Other work]
+  end
+  subgraph out [4. Page]
+    direction LR
+    chk{Page total =<br/>sessions' cost?} -- yes --> page[report.html<br/>or share.html]
+    chk -. no .-> stop[Exit with error]
+  end
+  fetch -- PRs and issues --> sort
+  rec -- ledger rows --> sort
+  sort -- costs per group --> out
+
+  classDef step fill:#dbeafe,stroke:#2563eb,color:#0b1b3a
+  classDef ext fill:#f3e8ff,stroke:#9333ea,color:#2e1065
+  classDef data fill:#fef9c3,stroke:#ca8a04,color:#422006
+  classDef fail fill:#fee2e2,stroke:#dc2626,color:#450a0a
+  classDef done fill:#dcfce7,stroke:#16a34a,color:#052e16
+  class rc,ghp,jp,s,key,cm,rv,mp,chk step
+  class tr,gh,jc ext
+  class led,prs,cache data
+  class stop fail
+  class tk,rpr,oth,page done
+  style rec fill:#94a3b81f,stroke:#94a3b8
+  style fetch fill:#94a3b81f,stroke:#94a3b8
+  style sort fill:#94a3b81f,stroke:#94a3b8
+  style out fill:#94a3b81f,stroke:#94a3b8
