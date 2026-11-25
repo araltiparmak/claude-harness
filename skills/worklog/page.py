@@ -234,8 +234,10 @@ class Page:
         return ", ".join(f"{m} {'' if self.share else money(usd) + ' '}({usd / total:.0%})" for m, usd in parts)
 
     def sessions_link(self, key):
-        """The ticket's sessions in AgentsView, as HTML; none on a shared page, whose readers cannot open it."""
-        url = "" if self.share else ticket_url(key)
+        """The ticket's latest session in AgentsView, beside the list of all its sessions, as HTML; none for a
+        ticket without sessions, or on a shared page, whose readers cannot open it."""
+        latest = {k: sid for sid, k in self.data["ticket_of"].items() if k}  # sessions run oldest first
+        url = "" if self.share or key not in latest else ticket_url(key, latest[key])
         return tag("a", "Sessions in AgentsView", href=url) if url else ""
 
     # -- the work

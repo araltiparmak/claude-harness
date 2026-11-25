@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Links into AgentsView (https://agentsview.io), which keeps the same session ids as Claude Code: a session opens
-in its desktop app, and a ticket opens the list of its sessions, which the report labels ticket=KEY.
+in its desktop app, and a ticket opens its latest session beside the list of its sessions, which the report labels
+ticket=KEY. A label filters only that list, not the dashboard of /sessions, so the link names a session.
 
   python3 agentsview.py SINCE     prints {session id: its ticket= label} for the sessions active since that day
 
@@ -24,8 +25,8 @@ def session_url(sid):
     return f"agentsview://sessions/{sid}" if APP else ""
 
 
-def ticket_url(key):
-    return f"{SERVER}/sessions?label={quote(LABEL + key)}" if CLI else ""
+def ticket_url(key, sid):
+    return f"{SERVER}/sessions/{sid}?label={quote(LABEL + key)}" if CLI else ""
 
 
 def run(*args):

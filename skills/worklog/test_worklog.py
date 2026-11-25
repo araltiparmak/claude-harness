@@ -242,13 +242,16 @@ class Pages(Base):
             self.assertNotIn(gone, claude)
 
     def test_sessions_and_tickets_link_to_agentsview_only_when_it_is_installed(self):
-        data = self.collect([session(1, ["ABC-1"], 2.0), session(2, ["ABC-3"], 1.0)])
+        data = self.collect([session(1, ["ABC-1"], 2.0), session(2, ["ABC-3"], 1.0), session(3, ["ABC-1"], 0.5)],
+                            opened=[pr(7, "ABC-4", "abc-4")])  # ABC-4 has a pull request and no session
         self.assertNotIn("agentsview", page.Page(data).write(self.tmp / "none.html").read_text().lower())
         self.patch(agentsview, CLI="agentsview", APP=True)
         mine = page.Page(data).write(self.tmp / "report.html").read_text()
         self.assertIn('href="agentsview://sessions/s1"', mine)
-        for key in ("ABC-1", "ABC-3"):  # its own box, and a row of the Smaller tickets box
-            self.assertIn(f'href="http://127.0.0.1:8080/sessions?label=ticket%3D{key}"', mine)
+        for sid, key in (("s3", "ABC-1"), ("s2", "ABC-3")):  # its own box, a row of Smaller tickets; latest session
+            self.assertIn(f'href="http://127.0.0.1:8080/sessions/{sid}?label=ticket%3D{key}"', mine)
+        self.assertIn("ABC-4", mine)
+        self.assertNotIn("ticket%3DABC-4", mine)
         shared = page.Page(data, share=True).write(self.tmp / "share.html").read_text()
         self.assertNotIn("AgentsView", shared)
 

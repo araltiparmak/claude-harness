@@ -21,8 +21,8 @@ estimate from message times, so both vary with how a person works, not only with
   its share of each session's average context, times what the session paid to read and write cached context.
 
 With [AgentsView](https://www.agentsview.io/) installed (`brew install --cask agentsview`), the page links into it:
-each of the 10 most expensive sessions opens its transcript in the app, and each ticket has a link to its sessions
-there. For that, the report gives every session of a ticket the AgentsView label `ticket=<KEY>` (a sub-task's
+each of the 10 most expensive sessions opens its transcript in the app, and each ticket has a link that opens its
+latest session there, with the list beside it showing only the ticket's sessions. For that, the report gives every session of a ticket the AgentsView label `ticket=<KEY>` (a sub-task's
 sessions take the parent's key) and changes no other label. The ticket links open while the AgentsView app or its
 local server runs.
 
