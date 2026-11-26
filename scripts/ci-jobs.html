@@ -1,0 +1,159 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>CI Jobs</title>
+<style>
+  :root {
+    --bg: #f6f6f4; --card: #ffffff; --text: #1d1d1b; --muted: #6b6b66; --line: #e3e3de;
+    --ok: #1f7a3d; --fail: #b42318; --run: #1d5fbf; --hold: #a15c00; --idle: #8a8a84;
+    --button: #1d1d1b; --button-text: #ffffff;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #151514; --card: #1e1e1c; --text: #ececea; --muted: #9a9a94; --line: #2f2f2c;
+      --ok: #4cc27a; --fail: #f0705f; --run: #6ea6f5; --hold: #e5a64a; --idle: #85857f;
+      --button: #ececea; --button-text: #151514;
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text);
+         font: 14px/1.45 ui-sans-serif, -apple-system, "Segoe UI", sans-serif; }
+  main { max-width: 900px; margin: 0 auto; padding: 24px 16px 48px; }
+  header { display: flex; align-items: baseline; gap: 12px; margin-bottom: 20px; flex-wrap: wrap; }
+  h1 { font-size: 20px; margin: 0; }
+  #stamp { color: var(--muted); flex: 1; }
+  button { font: inherit; border: 1px solid var(--line); background: var(--card); color: var(--text);
+           border-radius: 6px; padding: 4px 12px; cursor: pointer; }
+  button.approve { background: var(--button); color: var(--button-text); border-color: var(--button); }
+  button:disabled { opacity: .5; cursor: default; }
+  section { background: var(--card); border: 1px solid var(--line); border-radius: 8px;
+            padding: 14px 16px; margin-bottom: 12px; }
+  .pr { display: flex; gap: 8px; align-items: baseline; flex-wrap: wrap; }
+  .pr a { color: var(--text); font-weight: 600; text-decoration: none; }
+  .pr a:hover { text-decoration: underline; }
+  .branch { color: var(--muted); font-family: ui-monospace, Menlo, monospace; font-size: 12px; }
+  .note { color: var(--muted); margin-top: 6px; }
+  .wf { margin-top: 12px; }
+  .wf-head { display: flex; gap: 8px; align-items: baseline; }
+  .wf-head a { color: var(--muted); font-size: 13px; }
+  table { width: 100%; border-collapse: collapse; margin-top: 4px; }
+  td { padding: 5px 0; border-top: 1px solid var(--line); vertical-align: middle; }
+  td.name { font-family: ui-monospace, Menlo, monospace; font-size: 13px; overflow-wrap: anywhere; }
+  td.act { text-align: right; width: 1%; white-space: nowrap; padding-left: 12px; }
+  .status { font-size: 12px; font-weight: 600; white-space: nowrap; }
+  .status::before { content: ""; display: inline-block; width: 8px; height: 8px; border-radius: 50%;
+                    background: currentColor; margin-right: 6px; }
+  .s-success { color: var(--ok); }
+  .s-failed, .s-error, .s-infrastructure_fail, .s-timedout, .s-failing, .s-unauthorized { color: var(--fail); }
+  .s-running, .s-queued { color: var(--run); }
+  .s-on_hold { color: var(--hold); }
+  .s-blocked, .s-not_run, .s-canceled, .s-not_running { color: var(--idle); }
+  #error { color: var(--fail); margin-bottom: 12px; }
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <h1>CI jobs of my open PRs</h1>
+    <span id="stamp">loading...</span>
+    <button id="refresh">Refresh</button>
+  </header>
+  <div id="error"></div>
+  <div id="list"></div>
+</main>
+<script>
+const list = document.getElementById("list");
+const stamp = document.getElementById("stamp");
+const errorBox = document.getElementById("error");
+
+function el(tag, props = {}, ...children) {
+  const node = Object.assign(document.createElement(tag), props);
+  node.append(...children.filter(c => c !== null && c !== undefined));
+  return node;
+}
+
+function status(s) {
+  return el("span", { className: `status s-${s}`, textContent: s.replace(/_/g, " ") });
+}
+
+async function approve(button, workflow, job) {
+  button.disabled = true;
+  button.textContent = "Approving...";
+  const res = await fetch("/api/approve", {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ workflow, job }),
+  });
+  const body = await res.json();
+  if (!res.ok) {
+    errorBox.textContent = `Approve failed: ${body.error}`;
+    button.disabled = false;
+    button.textContent = "Approve";
+    return;
+  }
+  load();
+}
+
+function render(prs) {
+  if (!prs.length) {
+    list.replaceChildren(el("section", { textContent: "No open pull requests." }));
+    return;
+  }
+  list.replaceChildren(...prs.map(pr => {
+    const section = el("section", {},
+      el("div", { className: "pr" },
+        el("a", { href: pr.url, target: "_blank", textContent: `${pr.repo}#${pr.number}` }),
+        el("span", { textContent: pr.title }),
+        el("span", { className: "branch", textContent: pr.branch })));
+    if (pr.error || !pr.workflows.length) {
+      section.append(el("div", { className: "note", textContent: pr.error || "No pipeline for this branch." }));
+    }
+    for (const wf of pr.workflows) {
+      const rows = wf.jobs.map(job => {
+        let action = null;
+        if (job.approvable) {
+          action = el("button", { className: "approve", textContent: "Approve" });
+          action.onclick = () => approve(action, wf.id, job.id);
+        }
+        return el("tr", {},
+          el("td", { className: "name", textContent: job.name }),
+          el("td", {}, status(job.status)),
+          el("td", { className: "act" }, action));
+      });
+      section.append(el("div", { className: "wf" },
+        el("div", { className: "wf-head" },
+          el("strong", { textContent: wf.name }), status(wf.status),
+          el("a", { href: wf.url, target: "_blank", textContent: "CircleCI" })),
+        el("table", {}, el("tbody", {}, ...rows))));
+    }
+    return section;
+  }));
+}
+
+let loading = false;
+async function load() {
+  if (loading) return;
+  loading = true;
+  stamp.textContent = "refreshing...";
+  try {
+    const res = await fetch("/api/prs");
+    const body = await res.json();
+    if (!res.ok) throw new Error(body.error);
+    errorBox.textContent = "";
+    render(body.prs);
+    stamp.textContent = `updated ${new Date().toLocaleTimeString()}`;
+  } catch (e) {
+    errorBox.textContent = `Could not load: ${e.message}`;
+    stamp.textContent = "";
+  } finally {
+    loading = false;
+  }
+}
+
+document.getElementById("refresh").onclick = load;
+load();
+setInterval(load, 30000);
+</script>
+</body>
+</html>
