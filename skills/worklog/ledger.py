@@ -41,6 +41,12 @@ BIG_CONTEXT = 100_000  # tokens; a session past this re-reads a large context on
 IDLE = 15  # minutes; a longer gap between two messages of a session is a break, not work
 
 
+def is_review_skill(name):
+    """Whether a skill or slash command reviews a pull request: one of REVIEW_SKILLS, with or without the prefix
+    of the plugin it comes from."""
+    return str(name).split(":")[-1] in REVIEW_SKILLS
+
+
 def records(path):
     """The parsed lines of a transcript and of its subagent transcripts."""
     for file in [path, *sorted(path.with_suffix("").glob("subagents/*.jsonl"))]:
@@ -219,7 +225,7 @@ class Session:
         elif name == "Bash":
             self.commands.append(args.get("command", ""))
         row["edits"] |= name in ("Edit", "Write", "NotebookEdit")
-        row["review"] |= (name == "Skill" and str(args.get("skill", "")).split(":")[-1] in REVIEW_SKILLS
+        row["review"] |= (name == "Skill" and is_review_skill(args.get("skill", ""))
                           or name == "Bash" and bool(REVIEW.search(args.get("command", ""))))
 
     def result(self):

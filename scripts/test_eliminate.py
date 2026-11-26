@@ -26,8 +26,7 @@ class Eliminate(unittest.TestCase):
         claude, mine, private, cache = tmp / ".claude", tmp / "harness", tmp / "private", tmp / "cache"
         self.patch(inventory, SKILLS=claude / "skills", PROJECTS=claude / "projects", SETTINGS=claude / "settings.json",
                    STATE=tmp / ".claude.json", PLUGINS=claude / "plugins")
-        self.patch(e, SKILLS=claude / "skills", PROJECTS=claude / "projects", MINE=mine, PRIVATE=private,
-                   PROFILE=tmp / ".zshrc", ROOTS=((mine, "own"), (private, "private")))
+        self.patch(e, MINE=mine, PRIVATE=private, PROFILE=tmp / ".zshrc", ROOTS=((mine, "own"), (private, "private")))
         links = claude / "skills"
         links.mkdir(parents=True)
         for source in (skill(mine / "skills" / "deck", "x" * 400), skill(private / "skills" / "coach", "x" * 40),
@@ -80,8 +79,8 @@ class Eliminate(unittest.TestCase):
         found = {r.name: [r.kind, r.tokens, r.uses, r.last] for r in e.rows(90) if not r.fixed}
         self.assertEqual(found, {
             "deck": ["own", 101, 0, ""], "coach": ["private", 12, 0, ""], "notes": ["local", 7, 0, ""],
-            "cloudflare": ["plugin, project /dev/lab", 52, 0, ""], "productivity": ["plugin, account", 22, 0, ""],
-            "playwright": ["mcp, local, /dev/site", None, 0, ""],
+            "cloudflare": ["plugin, project", 52, 0, ""], "productivity": ["plugin, account", 22, 0, ""],
+            "playwright": ["mcp, local", None, 0, ""],
             "pr": ["external", 8, 2, self.day], "pdf": ["account", 26, 1, self.day],
             "frontend-design": ["plugin", 54, 1, self.day], "context": ["mcp, user", None, 1, self.day],
             "claude.ai Context7": ["mcp, claude.ai", 34, 0, ""], "easel": ["mcp, other", 5, 0, ""]})
@@ -106,8 +105,8 @@ class Eliminate(unittest.TestCase):
         done = []
         self.patch(e, apply=done.extend)
         e.remove(e.rows(90), ["frontend-design", "playwright"])
-        self.assertEqual([(r.name, r.kind) for r in done], [("frontend-design", "plugin"),
-                                                            ("playwright", "mcp, local, /dev/site")])
+        self.assertEqual([(r.name, r.kind, r.project) for r in done], [("frontend-design", "plugin", ""),
+                                                                       ("playwright", "mcp, local", "/dev/site")])
 
     def test_each_row_says_whether_it_loads_everywhere_or_in_one_project(self):
         found = {r.name + (" via" if r.fixed else ""): (e.kind_label(r), e.scope(r)) for r in e.rows(90)}

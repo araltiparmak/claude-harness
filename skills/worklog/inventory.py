@@ -5,12 +5,18 @@ plugin's skills, agents and commands, an MCP server's tool names and instruction
 them. A skill with disable-model-invocation: true adds nothing and is left out. A server the newest transcript did
 not load (a local one of another project) has no cost (None).
 
+Kinds: a skill is "own", "private" or "external" (by the roots items() is given), "local" or "account"; a plugin
+is "plugin", "plugin, project" or "plugin, account"; an MCP server is "mcp, user", "mcp, local", "mcp, claude.ai"
+or "mcp, other"; a skill a plugin brings is VIA + its plugin's name. A project plugin, a local server and a
+project plugin's skills name their folder in Item.project.
+
 worklog.py reads it for the Misc box; claude-harness's scripts/eliminate.py reads it to remove items.
 """
 import json
 import re
 from collections import Counter
 from pathlib import Path
+from typing import NamedTuple, Optional
 
 HOME = Path.home()
 CLAUDE = HOME / ".claude"
@@ -19,6 +25,26 @@ PROJECTS = CLAUDE / "projects"
 SETTINGS = CLAUDE / "settings.json"
 STATE = HOME / ".claude.json"  # MCP servers of the user and local scopes
 PLUGINS = CLAUDE / "plugins"
+VIA = "via plugin "  # the kind of a skill a plugin brings, before the plugin's name
+
+
+class Item(NamedTuple):
+    """One thing that adds to the context."""
+    name: str
+    kind: str
+    tokens: Optional[int]  # what it adds to every session; None when not measured
+    ref: str  # what removing it names: the skill, the plugin id, or the server; "" for a plugin's skill
+    project: str  # the folder whose sessions load it; "" for every session
+    names: set  # the usage names a use of it counts under (counts_for)
+
+
+class Plugin(NamedTuple):
+    """One enabled plugin."""
+    name: str
+    kind: str  # plugin, plugin, project, or plugin, account (synced from claude.ai)
+    root: Path
+    id: str
+    project: str  # the folder a project plugin is installed for; "" for every session
 
 
 def front(file):
@@ -77,40 +103,29 @@ def plugin_tokens(root):
 
 
 def plugins():
-    """{name: (kind, tokens, id, project path or "")} of the enabled plugins: installed ones (project ones count as
-    enabled in their project) and the ones synced from claude.ai, unless enabledPlugins turns them off."""
-    return {name: (kind, plugin_tokens(root), plugin_id, project)
-            for name, kind, root, plugin_id, project in enabled_plugins()}
-
-
-def plugin_skills():
-    """[(skill, plugin name, tokens)] of the skills the enabled plugins bring, the ones that add to every session.
-    Their tokens are already part of their plugin's."""
-    return [(file.parent.name, name, tokens(file)) for name, _, root, _, _ in enabled_plugins()
-            for file in sorted(root.glob("skills/*/SKILL.md")) if tokens(file)]
-
-
-def enabled_plugins():
-    """[(name, kind, folder, id, project path or "")] of the enabled plugins, as plugins() describes them."""
+    """The enabled plugins: the installed ones that enabledPlugins turns on (a project one counts as enabled in its
+    project), then the ones synced from claude.ai, unless enabledPlugins turns them off."""
     enabled = load(SETTINGS).get("enabledPlugins", {})
-    found = installed_plugins(enabled)
-    for root in sorted(p for p in PLUGINS.glob("synced/*/*") if p.is_dir()):
-        name = root.name.split("~")[0]
-        if enabled.get(f"{name}@synced", True) and name not in found:
-            found[name] = ("plugin, account", root, f"{name}@synced", "")
-    return [(name, *rest) for name, rest in found.items()]
-
-
-def installed_plugins(enabled):
-    """{name: (kind, folder, id, project path or "")} of the enabled plugins in installed_plugins.json."""
     found = {}
     for plugin_id, installs in load(PLUGINS / "installed_plugins.json").get("plugins", {}).items():
         for install in installs:
-            project = install.get("projectPath")
+            project = install.get("projectPath") or ""
             if project or enabled.get(plugin_id):
-                where = f"plugin, project {short(project)}" if project else "plugin"
-                found[plugin_id.split("@")[0]] = (where, Path(install["installPath"]), plugin_id, project or "")
-    return found
+                name = plugin_id.split("@")[0]
+                found[name] = Plugin(name, "plugin, project" if project else "plugin", Path(install["installPath"]),
+                                     plugin_id, project)
+    for root in sorted(p for p in PLUGINS.glob("synced/*/*") if p.is_dir()):
+        name = root.name.split("~")[0]
+        if enabled.get(f"{name}@synced", True) and name not in found:
+            found[name] = Plugin(name, "plugin, account", root, f"{name}@synced", "")
+    return list(found.values())
+
+
+def plugin_skills():
+    """An Item per skill the enabled plugins bring that adds to every session, in its plugin's project. Its tokens
+    already count under its plugin, and it leaves only with the plugin, so items() leaves it out."""
+    return [Item(file.parent.name, VIA + p.name, tokens(file), "", p.project, {f"{p.name}:{file.parent.name}"})
+            for p in plugins() for file in sorted(p.root.glob("skills/*/SKILL.md")) if tokens(file)]
 
 
 def servers():
@@ -121,7 +136,7 @@ def servers():
     found = {name: ("user", "") for name in state.get("mcpServers", {})}
     for project, config in state.get("projects", {}).items():
         for name in config.get("mcpServers", {}):
-            found.setdefault(name, (f"local, {short(project)}", project))
+            found.setdefault(name, ("local", project))
     costs = loaded()
     for name in costs:
         found.setdefault(name, ("claude.ai" if name.startswith("claude_ai_") else "other", ""))
@@ -179,19 +194,16 @@ def load(file):
 
 
 def items(roots=()):
-    """[name, kind, tokens or None, ref, project path, usage names] per item that adds to the context. ref is what
-    removing it names (the skill, the plugin id, the server); usage names are the names a use of it is counted
-    under: a skill by its name (an account skill also as plugin:name), a plugin's items as plugin:item and its
-    servers as mcp:plugin_<plugin>_..., a server as mcp:<server>. A usage name ending in : or _ is a prefix."""
-    found = []
-    for name, (kind, cost) in skills(roots).items():
-        if cost:
-            found.append([name, kind, cost, name, "", {name} | ({":" + name} if kind == "account" else set())])
-    for name, (kind, cost, plugin_id, project) in plugins().items():
-        found.append([name, kind, cost, plugin_id, project, {name + ":", f"mcp:plugin_{name}_"}])
+    """An Item per skill, plugin and MCP server that adds to the context, in that order. Usage names: a skill by its
+    name (an account skill also as plugin:name), a plugin's items as plugin:item and its servers as
+    mcp:plugin_<plugin>_..., a server as mcp:<server>. A usage name ending in : or _ is a prefix."""
+    found = [Item(name, kind, cost, name, "", {name} | ({":" + name} if kind == "account" else set()))
+             for name, (kind, cost) in skills(roots).items() if cost]
+    found += [Item(p.name, p.kind, plugin_tokens(p.root), p.id, p.project, {p.name + ":", f"mcp:plugin_{p.name}_"})
+              for p in plugins()]
     for name, (scope, cost, project) in servers().items():
         title = "claude.ai " + name[len("claude_ai_"):].replace("_", " ") if scope == "claude.ai" else name
-        found.append([title, f"mcp, {scope}", cost, name, project, {"mcp:" + name}])
+        found.append(Item(title, f"mcp, {scope}", cost, name, project, {"mcp:" + name}))
     return found
 
 

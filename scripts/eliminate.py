@@ -16,14 +16,14 @@ plugin, so it cannot be chosen on its own, and its tokens count once, under the 
 
 Tokens and kinds come from skills/worklog/inventory.py, which worklog's Misc box reads too.
 
-Kinds, and how each is removed (REMOVE):
+Kinds, and how each is removed (plan):
   own, private, external   named in SKIP_SKILLS in ~/.zshrc, then update.sh unlinks it; the source stays
   local                    a real folder in ~/.claude/skills, moved to ~/.claude/skills.off
   account                  a claude.ai skill: switched off on claude.ai, one by one (printed, not done)
   plugin, plugin, account  false under enabledPlugins in claude/settings.json, then update.sh
-  plugin, project <path>   claude plugin disable --scope project, run in that project
+  plugin, project          claude plugin disable --scope project, run in its project
   mcp, user                claude mcp remove -s user
-  mcp, local, <path>       claude mcp remove -s local, run in that project
+  mcp, local               claude mcp remove -s local, run in its project
   mcp, claude.ai           a connector: claude.ai or /mcp (printed, not done)
   mcp, other               added by a plugin or mod: /mcp (printed, not done)
 """
@@ -42,16 +42,30 @@ HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE.parent / "skills" / "worklog"))
 # worklog's inventory.py: the skills, plugins and MCP servers that load into a session, and their tokens
 import inventory  # noqa: E402
-from inventory import HOME, PROJECTS, SKILLS, load, short  # noqa: E402
+from inventory import HOME, VIA, load, short  # noqa: E402
 
 MINE = HERE.parent  # this repo
 PRIVATE = Path(os.environ.get("PRIVATE_DIR", HOME / "dev" / "private-skills")).expanduser().resolve()
 ROOTS = ((MINE, "own"), (PRIVATE, "private"))
+PROFILE = HOME / ".zshrc"
 
-COMMAND = re.compile(r"<command-name>/([\w:.-]+)</command-name>")
-HINT = re.compile(r'"Skill"|"Agent"|"Task"|mcp__|<command-name>')  # lines worth parsing
+SECTIONS = ("Plugins", "MCP servers", "Skills")
 LINKED = ("own", "private", "external")  # skills update.sh links, so SKIP_SKILLS leaves them out
 SETTING = ("plugin", "plugin, account")  # plugins enabledPlugins turns off
+COMMAND = re.compile(r"<command-name>/([\w:.-]+)</command-name>")
+HINT = re.compile(r'"Skill"|"Agent"|"Task"|mcp__|<command-name>')  # lines worth parsing
+SKIP = re.compile(r'^export SKIP_SKILLS="([^"]*)"', re.M)
+
+HEAD = f"{'name':<30} {'kind':<36} {'scope':<34} {'tokens':>6} {'uses':>5}  last used"
+KEYS = "up/down move  space select  a all unused  n none  enter apply  q quit"
+MANUAL = {
+    "account": "switch it off on claude.ai (Settings, Capabilities); all of them at once: "
+               '"syncClaudeAiSkills": false in claude/settings.json',
+    "mcp, claude.ai": "disconnect it on claude.ai (Settings, Connectors), which also removes it from claude.ai "
+                      "chats; or /mcp in one folder; or every connector with "
+                      '"disableClaudeAiConnectors": true in claude/settings.json',
+    "mcp, other": "it comes from a plugin or mod: disable that, or /mcp in one folder",
+}
 
 
 class Row(NamedTuple):
@@ -75,9 +89,7 @@ class Row(NamedTuple):
         return self.kind.startswith(VIA)
 
 
-SECTIONS = ("Plugins", "MCP servers", "Skills")
-VIA = "via plugin "
-
+# ---- measuring
 
 def usage(days):
     """(uses, last day) per name, from the transcripts of the last days: skills by Skill call or slash command,
@@ -93,7 +105,8 @@ def usage(days):
 
 def entries(since):
     """The transcript entries, from files changed since that time, that may name a skill, agent or MCP tool."""
-    for file in PROJECTS.rglob("*.jsonl") if PROJECTS.is_dir() else []:
+    projects = inventory.PROJECTS
+    for file in projects.rglob("*.jsonl") if projects.is_dir() else []:
         if file.stat().st_mtime < since:
             continue
         for line in file.read_text(errors="replace").splitlines():
@@ -130,16 +143,15 @@ def rows(days):
     """A Row per item, by section; in each, unused first, then by tokens, the plugins' own skills last, by plugin."""
     uses, last = usage(days)
     found = []
-    every = list(inventory.items(ROOTS)) + [[skill, VIA + plugin, cost, "", "", {f"{plugin}:{skill}"}]
-                                            for skill, plugin, cost in inventory.plugin_skills()]
-    for name, kind, cost, ref, project, names in every:
-        hits = inventory.counts_for(names, uses)
-        found.append(Row(name, kind, cost, sum(uses[h] for h in hits), max((last[h] for h in hits), default=""),
-                         ref, project))
-    PLUGIN_SCOPES.update((r.name, scope(r)) for r in found if r.section == SECTIONS[0])
+    for item in inventory.items(ROOTS) + inventory.plugin_skills():
+        hits = inventory.counts_for(item.names, uses)
+        found.append(Row(item.name, item.kind, item.tokens, sum(uses[h] for h in hits),
+                         max((last[h] for h in hits), default=""), item.ref, item.project))
     return sorted(found, key=lambda r: (SECTIONS.index(r.section), r.fixed, r.kind if r.fixed else "", r.uses > 0,
                                      -(r.tokens or 0), r.name))
 
+
+# ---- showing
 
 def line(row):
     tokens = "?" if row.tokens is None else row.tokens
@@ -148,22 +160,14 @@ def line(row):
 
 
 def kind_label(row):
-    """The kind without the project path, which the scope column shows."""
-    return row.kind.split(", project ")[0].split(", local, ")[0] + (", local" if ", local, " in row.kind else "")
+    """The kind as the table shows it: a project plugin is a plugin, and the scope column says where."""
+    return "plugin" if row.kind == "plugin, project" else row.kind
 
 
 def scope(row):
     """global when it loads in every session; project <path> when only sessions started in that folder load it.
     A plugin's own skill has its plugin's scope."""
-    if row.fixed:
-        return PLUGIN_SCOPES.get(row.kind[len(VIA):], "global")
     return f"project {short(row.project)}" if row.project else "global"
-
-
-PLUGIN_SCOPES = {}  # plugin name: its scope, filled by rows() for the plugins' own skills
-
-
-HEAD = f"{'name':<30} {'kind':<36} {'scope':<34} {'tokens':>6} {'uses':>5}  last used"
 
 
 def summary(found, days):
@@ -187,13 +191,7 @@ def table(found, days):
     return "\n".join(out[1:] + ["", summary(found, days)])
 
 
-def numbered(found):
-    """The rows that can be chosen, in the order table numbers them."""
-    return [r for r in found if not r.fixed]
-
-
-KEYS = "up/down move  space select  a all unused  n none  enter apply  q quit"
-
+# ---- the checklist
 
 def pick(found, days):
     """The rows chosen in a full-screen checklist; [] when the user quits."""
@@ -248,17 +246,7 @@ def press(key, found, state, shown):
     return None
 
 
-PROFILE = HOME / ".zshrc"
-SKIP = re.compile(r'^export SKIP_SKILLS="([^"]*)"', re.M)
-MANUAL = {
-    "account": "switch it off on claude.ai (Settings, Capabilities); all of them at once: "
-               '"syncClaudeAiSkills": false in claude/settings.json',
-    "mcp, claude.ai": "disconnect it on claude.ai (Settings, Connectors), which also removes it from claude.ai "
-                      "chats; or /mcp in one folder; or every connector with "
-                      '"disableClaudeAiConnectors": true in claude/settings.json',
-    "mcp, other": "it comes from a plugin or mod: disable that, or /mcp in one folder",
-}
-
+# ---- removing
 
 def plan(row):
     """(what removing a row does, the undo, a function that does it or None when it is manual)."""
@@ -268,24 +256,25 @@ def plan(row):
     if kind in LINKED:
         return "add to SKIP_SKILLS in ~/.zshrc", "take it out of SKIP_SKILLS, run update.sh", None
     if kind == "local":
-        return f"move to {SKILLS.parent / 'skills.off' / name}", "move it back", lambda: shelve(name)
+        return f"move to {inventory.SKILLS.parent / 'skills.off' / name}", "move it back", lambda: shelve(name)
     if kind in SETTING:
         return f'"{ref}": false in claude/settings.json', "set it to true, run update.sh", None
-    if kind.startswith("plugin, project"):
+    if kind == "plugin, project":
         return (f"claude plugin disable {ref} --scope project (in {short(project)})", "claude plugin enable",
                 lambda: claude(["plugin", "disable", ref, "--scope", "project"], project))
     if kind == "mcp, user":
         return f"claude mcp remove {ref} -s user", "claude mcp add it again", \
             lambda: claude(["mcp", "remove", ref, "-s", "user"], str(HOME))
-    if kind.startswith("mcp, local"):
+    if kind == "mcp, local":
         return (f"claude mcp remove {ref} -s local (in {short(project)})", "claude mcp add it again",
                 lambda: claude(["mcp", "remove", ref, "-s", "local"], project))
     return "by hand: " + MANUAL[kind], "", None
 
 
 def shelve(name):
-    (SKILLS.parent / "skills.off").mkdir(exist_ok=True)
-    (SKILLS / name).rename(SKILLS.parent / "skills.off" / name)
+    off = inventory.SKILLS.parent / "skills.off"
+    off.mkdir(exist_ok=True)
+    (inventory.SKILLS / name).rename(off / name)
 
 
 def claude(args, cwd):

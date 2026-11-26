@@ -154,7 +154,8 @@ unless you run `/worklog share` and publish the link.
 
 ## Files
 
-`worklog.py` (commands, sorting, measures and tips), `ledger.py` (reads and prices sessions), `page.py` and
+`worklog.py` (commands, sorting, measures and tips), `configure.py` (the `setup` and `check` commands),
+`ledger.py` (reads and prices sessions), `page.py` and
 `report.html` (the page), `github.py` and `jira.py` (fetching; each runs on its own), `inventory.py` (the skills,
 plugins and MCP servers that load into a session, and their tokens), `settings.py` and `settings.json`
 (settings), `models.json` (models and prices), `test_worklog.py` (`python3 -m unittest test_worklog`).

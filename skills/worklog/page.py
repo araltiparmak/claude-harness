@@ -230,15 +230,17 @@ class Page:
         and time of its parts (tickets, the reviews, a repo's tooling or other work), which add up to the total, and
         a colour slot. A group with no parts is left out."""
         d = self.data
-        tickets, support, other, reviews = d["tickets"], d["support"], d["other"], d["reviews"]
-        tooling = d.get("tooling", {})
+        tickets, support, reviews = d["tickets"], d["support"], d["reviews"]
+        tooling, other = d["tooling"], d["other"]  # {repo: Work}
+
+        def by_cost(works):
+            """The repos of {repo: Work}, the most expensive first."""
+            return ", ".join(sorted(works, key=lambda repo: -works[repo].cost))
         rows = [("tickets", "Tickets", len(tickets), repos(tickets), tickets),
                 ("support", "Support tickets", len(support), repos(support), support),
                 ("reviews", "Code reviews", "-", "-", [reviews] if d["prs"]["reviewed"] or paid(reviews.cost) else []),
-                ("tooling", "Tooling", "-", ", ".join(sorted(tooling, key=lambda r: -tooling[r].cost)),
-                 list(tooling.values())),
-                ("other", "Other work", "-", ", ".join(sorted(other, key=lambda r: -other[r].cost)),
-                 list(other.values()))]
+                ("tooling", "Tooling", "-", by_cost(tooling), list(tooling.values())),
+                ("other", "Other work", "-", by_cost(other), list(other.values()))]
         found = {gid: {"name": name, "tickets": n, "repos": r, "cost": sum(p.cost for p in parts),
                        "minutes": sum(p.minutes for p in parts)}
                  for gid, name, n, r, parts in rows if parts}
@@ -268,21 +270,21 @@ class Page:
 
     def overview(self):
         """The groups as a table, after a bar and legend that split the cost between them."""
-        rows, basis = list(self.groups.values()), "cost"
-        top, total = max([g[basis] for g in rows] + [0.01]), sum(g[basis] for g in rows) or 0.01
+        rows = list(self.groups.values())
+        top, total = max([g["cost"] for g in rows] + [0.01]), sum(g["cost"] for g in rows) or 0.01
 
         def share(g):
-            if not g[basis]:
+            if not g["cost"]:
                 return "-"
-            part = g[basis] / total
+            part = g["cost"] / total
             return "<1%" if part < 0.005 else f"{part:.0%}"
 
         def spend(g):
-            bar = tag("div", [tag("span", "", class_=f"c{g['slot']}", style=f"width:{g[basis] / top * 100:.1f}%")],
+            bar = tag("div", [tag("span", "", class_=f"c{g['slot']}", style=f"width:{g['cost'] / top * 100:.1f}%")],
                       class_="bar")
             return [html.escape(money(g["cost"])) + bar]
-        shown = [g for g in rows if g[basis] and paid(g["cost"])]
-        split = tag("div", [tag("span", "", class_=f"c{g['slot']}", style=f"flex-grow:{g[basis] / total:.4f}",
+        shown = [g for g in rows if paid(g["cost"])]
+        split = tag("div", [tag("span", "", class_=f"c{g['slot']}", style=f"flex-grow:{g['cost'] / total:.4f}",
                                 title=f"{g['name']}: {share(g)}") for g in shown], class_="split")
         legend = tag("ul", [tag("li", [dot(g["slot"]) + html.escape(g["name"]) + " " + tag("strong", share(g))])
                             for g in shown], class_="legend")
@@ -295,8 +297,7 @@ class Page:
     def ticket_boxes(self, tickets, slot, name):
         """One box per ticket, the most expensive first, then one box for the tickets that cost less than SMALL."""
         typed = any(w.type for t in tickets for w in t.works)
-        head = (["Ticket"] + (["Type"] if typed else []) + ["Worked on", "Pull requests", "Models", "Time",
-                                                                               "Cost"])
+        head = ["Ticket"] + (["Type"] if typed else []) + ["Worked on", "Pull requests", "Models", "Time", "Cost"]
         ranked = sorted(tickets, key=lambda t: -t.cost)
         small = [t for t in ranked if t.cost < SMALL]
         boxes = [self.ticket_box(t, head, typed, slot) for t in ranked if t.cost >= SMALL]
@@ -309,8 +310,7 @@ class Page:
         indented, with its own time and cost."""
         notes = self.data["notes"]
         rows = [[ticket_cell(w.key, w.summary, w.mapped)] + ([w.type or "-"] if typed else [])
-                + [worked_on(w.days), pr_links(w.prs), self.model_split(w.models)]
-                + [hours(w.minutes), money(w.cost)]
+                + [worked_on(w.days), pr_links(w.prs), self.model_split(w.models), hours(w.minutes), money(w.cost)]
                 for w in t.works]
         label = f"{t.key} {t.own.summary}".strip()
         title = [tag("a", label, href=jira_link(t.key))] if JIRA_URL else label
@@ -336,8 +336,8 @@ class Page:
             rows.append([ticket_cell(t.key, summary, sum(w.mapped for w in t.works))]
                         + ([t.own.type or "-"] if typed else [])
                         + [worked_on(set().union(*(w.days for w in t.works))),
-                           pr_links([pr for w in t.works for pr in w.prs]), self.model_split(models)]
-                        + [hours(t.minutes), money(t.cost)])
+                           pr_links([pr for w in t.works for pr in w.prs]), self.model_split(models),
+                           hours(t.minutes), money(t.cost)])
         intro = f"{plural(len(small), name[:-1])} that cost less than {money(SMALL)} each, sub-tasks included."
         return self.section(f"Smaller {name}", intro, self.grid(head, rows), usd=sum(t.cost for t in small),
                             slot=slot)
@@ -350,6 +350,11 @@ class Page:
 
         def boxed(gid, title, intro, *parts):
             return self.section(title, intro, *parts, usd=g[gid]["cost"], slot=g[gid]["slot"])
+
+        def by_repo(works):
+            return self.grid(["Repo", "Worked on", "Time", "Cost"],
+                             [[repo, worked_on(o.days), hours(o.minutes), money(o.cost)]
+                              for repo, o in sorted(works.items(), key=lambda item: -item[1].cost)])
         body = [self.overview()]
         for gid in ("tickets", "support"):
             if d[gid]:
@@ -360,11 +365,7 @@ class Page:
                 ["Opened", "Pull request", "Status"],
                 [[day(pr["date"]), (pr["title"], pr["url"], pr["repo"]), status_cell(pr["status"])]
                  for pr in without_ticket])))
-        def by_repo(works):
-            return self.grid(["Repo", "Worked on", "Time", "Cost"],
-                             [[repo, worked_on(o.days), hours(o.minutes), money(o.cost)]
-                              for repo, o in sorted(works.items(), key=lambda item: -item[1].cost)])
-        if d.get("tooling"):
+        if d["tooling"]:
             body.append(boxed("tooling", "Tooling", "Sessions in the repos of your own tools (tooling_repos) with no "
                               "Jira ticket behind them, by repo.", by_repo(d["tooling"])))
         if d["other"]:

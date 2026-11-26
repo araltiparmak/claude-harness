@@ -13,12 +13,14 @@ import urllib.error
 from pathlib import Path
 from unittest import mock
 
+import configure
 import github
 import inventory
 import jira
 import ledger
 import page
 import worklog as w
+from settings import DEV
 
 ISSUES = {"ABC-1": {"summary": "Export", "type": "Story", "subtask": False, "parent": ""},
           "ABC-2": {"summary": "CSV", "type": "Sub-task", "subtask": True, "parent": "ABC-1"},
@@ -28,7 +30,7 @@ ISSUES = {"ABC-1": {"summary": "Export", "type": "Story", "subtask": False, "par
 
 
 def session(n, keys=(), cost=1.0, edits=True, review=False, branches=("main",), repo="api", **more):
-    return {"id": f"s{n}", "start": f"2026-11-{n:02d}T09:00:00Z", "cwd": str(w.DEV / repo), "title": f"Session {n}",
+    return {"id": f"s{n}", "start": f"2026-11-{n:02d}T09:00:00Z", "cwd": str(DEV / repo), "title": f"Session {n}",
             "prompt": "", "keys": list(keys), "branches": list(branches), "edits": edits, "review": review,
             "cost": cost, "models": {"Opus": cost}, "subagent_cost": 0.0,
             "context": {"peak": 50_000, "avg": 30_000, "compactions": 0},
@@ -206,9 +208,9 @@ class Sorting(Base):
             w.checked("XYZ-1")
 
     def test_check_runs_on_a_fresh_machine(self):
-        self.patch(w, FILE=self.tmp / "none.json", PREFIXES="", JIRA_PREFIXES=[],
+        self.patch(configure, FILE=self.tmp / "none.json", PREFIXES=[], JIRA_PREFIXES=[],
                    CLAUDE_SETTINGS=self.tmp / "settings.json", runs=lambda cmd: False)  # no git, gh or hook set up
-        out = quiet(w.check)
+        out = quiet(configure.check)
         for part in ("settings", "jira_prefixes", "SessionEnd hook", "ledger", "git user.email", "gh"):
             self.assertIn(f"warn  {part}", out)
 
@@ -217,24 +219,25 @@ class Sorting(Base):
         file, claude_file = self.tmp / "worklog.json", self.tmp / "claude.json"
         if claude is not None:
             claude_file.write_text(json.dumps(claude))
-        self.patch(w, FILE=file, CLAUDE_SETTINGS=claude_file, settings=dict(w.settings))
-        self.patch(w.subprocess, run=lambda *a, **k: None)  # the check that ends setup
-        self.patch(w.jira, myself=lambda: "Me", search=lambda condition: [{"key": key} for key in issues])
+        self.patch(configure, FILE=file, CLAUDE_SETTINGS=claude_file, settings=dict(configure.settings))
+        self.patch(configure.subprocess, run=lambda *a, **k: None)  # the check that ends setup
+        self.patch(configure.jira, myself=lambda: "Me", search=lambda condition: [{"key": key} for key in issues])
         with mock.patch.dict(os.environ):
             os.environ.pop("JIRA_API_TOKEN", None)
             if token:
                 os.environ["JIRA_API_TOKEN"] = token
             replies = iter(answers)
-            quiet(lambda: w.setup(ask=lambda q: next(replies), secret=lambda q: ""))
+            quiet(lambda: configure.setup("/x/worklog.py", ask=lambda q: next(replies), secret=lambda q: ""))
         return json.loads(file.read_text()), (json.loads(claude_file.read_text()) if claude_file.exists() else None)
 
     def test_setup_finds_the_prefixes_and_adds_the_hook(self):
         mine, claude = self.run_setup(["x.atlassian.net", "me@x.com", "", "", ""], claude={"model": "opus"})
         self.assertEqual(mine, {"jira_url": "https://x.atlassian.net", "jira_email": "me@x.com",
-                                "jira_prefixes": ["ABC", "XYZ"], "dev_dir": w.settings["dev_dir"]})
+                                "jira_prefixes": ["ABC", "XYZ"], "dev_dir": configure.settings["dev_dir"]})
         self.assertEqual(claude["model"], "opus")
         self.assertEqual(claude["cleanupPeriodDays"], 90)
-        self.assertTrue(w.has_hook(claude))
+        self.assertEqual(claude["hooks"]["SessionEnd"][0]["hooks"][0]["command"], "python3 /x/worklog.py record")
+        self.assertTrue(configure.has_hook(claude))
 
     def test_setup_without_jira_or_a_hook_keeps_the_rest(self):
         (self.tmp / "worklog.json").write_text(json.dumps({"exclude_repos": ["side"]}))
@@ -245,8 +248,11 @@ class Sorting(Base):
     def test_with_hook_leaves_settings_that_have_it(self):
         claude = {"cleanupPeriodDays": 120, "hooks": {"SessionEnd": [
             {"hooks": [{"type": "command", "command": "python3 /a/worklog.py record"}]}]}}
-        self.assertEqual(w.with_hook(claude), (claude, []))
-        self.assertTrue(w.has_hook(w.with_hook({})[0]))
+        hook = configure.hook_command("/b/worklog.py")
+        self.assertEqual(configure.with_hook(claude, hook), (claude, []))
+        self.assertTrue(configure.has_hook(configure.with_hook({}, hook)[0]))
+        self.assertEqual(configure.hook_command(str(Path.home() / "my skills" / "worklog.py")),
+                         'python3 "$HOME/my skills/worklog.py" record')  # $HOME, and quotes for the space
 
     def test_period_takes_empty_last_month_or_a_day(self):
         self.assertEqual(w.period("2026-11-01")[0], "2026-11-01")
