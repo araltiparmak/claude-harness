@@ -1,8 +1,7 @@
 """The HTML page of a report, from the data worklog.collect returns.
 
-Page(data) is the page for you: the work with time and cost, then what the sessions say about how you use
-Claude (tips, measures, the most expensive sessions, tokens, context, misc). Page(data, share=True) is the page
-for other readers: the work, outcomes, time and cost, with none of the Using Claude sections.
+Page(data) is the whole page: the work with time and cost, then what the sessions say about how you use Claude
+(tips, measures, the most expensive sessions, tokens, context, misc). /worklog share publishes this same page.
 """
 import html
 from collections import defaultdict
@@ -184,11 +183,10 @@ def peaks_chart(peaks):
 # ---- the page
 
 class Page:
-    """One report page. share=True is the page for other readers: the same work, time and cost, without the Using
-    Claude sections."""
+    """One report page: the work with time and cost, and every Using Claude section."""
 
-    def __init__(self, data, share=False):
-        self.data, self.share = data, share
+    def __init__(self, data):
+        self.data = data
         self.groups = self.grouped()
 
     # -- building blocks
@@ -405,8 +403,8 @@ class Page:
                           f"{r['context']['peak'] // 1000}k" if "context" in r else "-",
                           r.get("prompts", "-"), r.get("interrupts", "-"), r.get("errors", "-"), money(cost(r))]
                          for r in m["top"]])
-        intro = ("From your sessions alone, for your own learning; --share leaves this out. Rows recorded before a "
-                 "measure was kept do not count for it.")
+        intro = ("From your sessions alone, for your own learning. Rows recorded before a measure was kept do not "
+                 "count for it.")
         return self.section("Using Claude well", intro, tag("h3", "What to try"), advice,
                             tag("h3", "Measures"), self.grid(["Measure", "This period"], rows),
                             tag("h3", f"The {len(m['top'])} most expensive sessions"), top)
@@ -477,11 +475,7 @@ class Page:
                                tag("p", f"{day(d['since'])} to {day(d['until'])}", class_="period")]),
                 tag("div", [tag("div", [tag("strong", n), tag("span", label)], class_="tile")
                             for n, label in self.headline()], class_="tiles")]
-        if not self.share:
-            body.append(self.using_claude())
-        body += self.work()
-        if not self.share:
-            body += [self.tokens_and_context(), self.misc()]
+        body += [self.using_claude(), *self.work(), self.tokens_and_context(), self.misc()]
         body.append(tag("footer", "Sources: Jira, GitHub and the records Claude Code keeps on this computer. "
                         f"Time is active time in sessions: a gap over {IDLE} minutes counts as a break, and sessions "
                         "that ran side by side add up. "

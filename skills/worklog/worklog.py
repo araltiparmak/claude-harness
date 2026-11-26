@@ -2,10 +2,9 @@
 """Measures how you work with Claude Code and what the work was: sessions sorted into Jira tickets, pull requests
 and reviews, with time, cost and tips. Everything stays on this computer.
 
-  worklog.py report [period] [--share]
+  worklog.py report [period]
       Updates the ledger from the transcripts still on disk, writes <DEV_DIR>/worklog/report.html, opens it and
-      prints the headline. --share writes share.html instead: the work, outcomes, time and cost for other
-      readers, without the Using Claude sections.
+      prints the headline. It never publishes the page: /worklog share has Claude publish it as an Artifact.
       period: empty for this month, last-month, or a first day YYYY-MM-DD.
   worklog.py prepare [period]                  prints, as JSON, what /worklog needs: the sessions the rules gave
                                                no ticket, the period's tickets with their pull request and session
@@ -482,17 +481,16 @@ def period(arg):
 
 
 def report(args):
-    share = "--share" in args
     data = collect(*period(next((a for a in args if not a.startswith("--")), "")))
-    view = page.Page(data, share)
+    view = page.Page(data)
     shown = sum(g["cost"] for g in view.groups.values())
     if abs(shown - data["total"]) > 0.01:  # a session left off the page is a bug
         sys.exit(f"the page shows ${shown:.2f} but the sessions cost ${data['total']:.2f}")
-    file = view.write(DATA / ("share.html" if share else "report.html"))
+    file = view.write(DATA / "report.html")
     print(f"{data['since']} to {data['until']}: " + ", ".join(f"{n} {label}" for n, label in view.headline()))
     print(f"All {data['sessions']} sessions are on the page"
           + (f"; exclude_repos left out ${data['excluded']:.2f}" if data["excluded"] else ""))
-    if data["tips"] and not share:
+    if data["tips"]:
         print(f"Top tip: {data['tips'][0][0]} {data['tips'][0][1]}")
     print(f"Page: {file}")
     webbrowser.open(file.as_uri())

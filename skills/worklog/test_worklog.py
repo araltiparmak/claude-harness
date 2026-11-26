@@ -285,16 +285,12 @@ class Pages(Base):
         self.assertIn("that cost less than $2.00 each", boxes[1])
         self.assertTrue(all(usd in boxes[1] for usd in ("$1.80", "$1.50", "$0.30")))
 
-    def test_shared_page_shows_time_and_cost_and_no_usage(self):
+    def test_page_shows_time_and_cost_and_every_usage_section(self):
         data = self.collect([session(1, ["ABC-1"], 2.0), session(2, edits=False, repo="tools")])
-        mine = page.Page(data).write(self.tmp / "report.html").read_text()
-        shared = page.Page(data, share=True).write(self.tmp / "share.html").read_text()
-        self.assertIn("Using Claude well", mine)
-        self.assertIn("$2.00", mine)
-        self.assertNotIn("Using Claude well", shared)
-        for both in ("$2.00", "1.0h", "at API list prices"):
-            self.assertIn(both, shared)
-        self.assertNotIn("sessions that recorded it", shared)
+        text = page.Page(data).write(self.tmp / "report.html").read_text()
+        for part in ("Using Claude well", "Tokens and context", "$2.00", "1.0h", "at API list prices"):
+            self.assertIn(part, text)
+        self.assertNotIn("sessions that recorded it", text)
         del data["unmapped"][0]["active"]  # a session recorded before time was kept
         data.update(minutes=30, timed=1)
         self.assertIn("from the 1 of 2 sessions that recorded it", page.Page(data).write(self.tmp / "r.html").read_text())

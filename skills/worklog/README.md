@@ -20,8 +20,8 @@ estimate from message times, so both vary with how a person works, not only with
   being used (skills, plugins, MCP servers), with its tokens per session and its estimated cost in the period:
   its share of each session's average context, times what the session paid to read and write cached context.
 
-`/worklog share` writes `share.html` for other readers (a manager, a review document): the work, outcomes, time
-and cost, with none of the Using Claude sections. It can also publish it as a private Artifact link.
+`/worklog share` writes the same page, and Claude then publishes all of it as a private Artifact link for other
+readers (a manager, a review document). The script only writes the page; it never publishes it.
 
 ## Setup
 
@@ -87,7 +87,7 @@ the hook missed.
 | `/worklog` | `worklog.py report` | This month, your page |
 | `/worklog last-month` | `worklog.py report last-month` | Last month |
 | `/worklog 2026-09-01` | `worklog.py report 2026-09-01` | From that day to today |
-| `/worklog share` | `worklog.py report --share` | The page for other readers |
+| `/worklog share` | `worklog.py report`, without publishing | This month, your page, published as a private Artifact link |
 
 `/worklog` also asks Claude to sort the sessions the rules could not place, and to write the one-line outcome per
 ticket. It sends Claude only the titles and first prompts of those sessions and the titles of your pull requests.
@@ -149,7 +149,7 @@ session would show about half its cost. When a new model comes out, add its id a
 
 Everything stays in `<dev_dir>/worklog` on your computer: `sessions.jsonl` (one row per session, including the
 first 200 characters of your first prompt), `jira.json` (issue names), `commits.json` (the pull requests your
-commits belong to), `mapped.json` and `notes.json` (what Claude saved), and the pages. Nothing is sent anywhere
+commits belong to), `mapped.json` and `notes.json` (what Claude saved), and the page. Nothing is sent anywhere
 unless you run `/worklog share` and publish the link.
 
 ## Files
