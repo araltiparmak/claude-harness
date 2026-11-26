@@ -41,16 +41,16 @@ import inventory
 import jira
 import ledger
 import page
-from ledger import BACKGROUND, BIG_CONTEXT, SENT, TOKENS, cost, models_of, repo_of
+from ledger import BACKGROUND, BIG_CONTEXT, REVIEW_SKILLS, SENT, TOKENS, cost, models_of, repo_of
 from settings import DATA, DEV, FILE, settings
 
-JIRA_PREFIXES, SUPPORT_PREFIXES, EXCLUDE_REPOS = (
-    settings[k] for k in ("jira_prefixes", "support_prefixes", "exclude_repos"))
+JIRA_PREFIXES, SUPPORT_PREFIXES, EXCLUDE_REPOS, TOOLING_REPOS = (
+    settings[k] for k in ("jira_prefixes", "support_prefixes", "exclude_repos", "tooling_repos"))
 MAPPED = DATA / "mapped.json"
 NOTES = DATA / "notes.json"
 JIRA_CACHE = DATA / "jira.json"
 CLAUDE_SETTINGS = Path.home() / ".claude" / "settings.json"  # where check looks for the hook
-PREFIXES = "|".join(re.escape(p) for p in JIRA_PREFIXES)
+PREFIXES = "|".join(re.escape(p) for p in dict.fromkeys(JIRA_PREFIXES + SUPPORT_PREFIXES))  # support keys too
 KEY = re.compile(rf"\b(?:{PREFIXES})-\d+\b", re.I) if PREFIXES else re.compile(r"[^\s\S]")  # never matches
 SUPPORT = {p.upper() for p in SUPPORT_PREFIXES}
 TOP = 10  # the most expensive sessions listed
@@ -123,10 +123,32 @@ def is_support(key):
 
 
 def keys_of(row):
-    """The ticket keys a session names, filtered by the prefixes configured now; its branches are scanned
-    again, so a prefix added later also counts for sessions recorded before."""
-    found = [k.upper() for k in row["keys"] + KEY.findall(" ".join(row["branches"]))]
+    """The ticket keys a session names, filtered by the prefixes configured now; its branches and its title are
+    scanned again, so a prefix added later also counts for sessions recorded before."""
+    found = [k.upper() for k in row["keys"] + KEY.findall(" ".join(row["branches"] + [row.get("title") or ""]))]
     return [k for k in dict.fromkeys(found) if KEY.fullmatch(k)]
+
+
+def reviewed(row):
+    """Whether a session reviewed a pull request: the ledger says so, or it ran a review skill or slash command
+    (REVIEW_SKILLS), which also counts for sessions recorded before that skill was known."""
+    used = row.get("used", {})
+    return row["review"] or any(name.split(":")[-1] in REVIEW_SKILLS
+                                for kind in ("skill", "command") for name in used.get(kind, {}))
+
+
+def later_branches(row):
+    """The branches the session's branches became afterwards (github.successors), followed a few steps."""
+    if not row.get("cwd") or not Path(row["cwd"]).is_dir():
+        return []
+    after, found = github.successors(row["cwd"]), []
+    for b in row["branches"]:
+        for _ in range(5):  # a chain of renames; also stops a loop
+            b = after.get(b)
+            if not b or b in found or b in row["branches"]:
+                break
+            found.append(b)
+    return found
 
 
 def saved(file):
@@ -136,16 +158,17 @@ def saved(file):
 
 def ticket(row, by_branch, issues):
     """The key the rules give a session: a support key it names, else Jira.pick of its keys, else the ticket of a
-    pull request from one of its branches, else Jira.pick of the keys in the pull requests that hold the commits
-    you made in its repo while it ran. A branch name alone settles it when it names one ticket; otherwise the repo
-    must match too. collect falls back to the key saved with map."""
+    pull request from one of its branches or from a branch one of them became later (later_branches), else
+    Jira.pick of the keys in the pull requests that hold the commits you made in its repo while it ran. A branch
+    name alone settles it when it names one ticket; otherwise the repo must match too. collect falls back to the
+    key saved with map."""
     keys = keys_of(row)
     support = [k for k in keys if is_support(k)]
     if support:
         return support[0]
     if keys:
         return issues.pick(keys)
-    for b in row["branches"]:
+    for b in row["branches"] + later_branches(row):
         if (repo_of(row), b) in by_branch:
             return by_branch[repo_of(row), b]
         if len(by_branch.get(b, ())) == 1:
@@ -220,13 +243,14 @@ def in_period(rows, since, until):
 
 def collect(since, until):
     """Everything the report shows, as plain data. Every session lands in exactly one place: a ticket, code
-    reviews, or other work."""
+    reviews, tooling (a session in tooling_repos with no ticket), or other work."""
     rows, excluded = in_period(ledger.refresh(), since, until)
     if not rows:
         sys.exit(f"no sessions from {since} to {until}")
     prs = {kind: [pr for pr in found if pr["repo"] not in EXCLUDE_REPOS]
            for kind, found in github.pull_requests(since, until).items()}
-    issues, tickets, reviews, other, unmapped = Jira(), {}, Work(), defaultdict(Work), []  # other: {repo: Work}
+    issues, tickets, reviews, unmapped = Jira(), {}, Work(), []
+    other, tooling = defaultdict(Work), defaultdict(Work)  # {repo: Work}
     ticket_of = {}  # session id: the ticket its box shows, or ''
 
     def on(key):
@@ -245,7 +269,7 @@ def collect(since, until):
             by_branch.setdefault(pr["branch"], set()).add(pr["ticket"])
     for row in rows:
         rule = ticket(row, by_branch, issues)
-        review = row["review"] and not row["edits"]
+        review = reviewed(row) and not row["edits"]
         named = rule or ("" if review else chosen.get(row["id"], ""))  # map only places what would be Other work
         ticket_of[row["id"]] = ""
         if named:
@@ -255,6 +279,8 @@ def collect(since, until):
             t.repos[repo_of(row)] = None
         elif review:
             reviews.add(row)
+        elif repo_of(row) in TOOLING_REPOS:
+            tooling[repo_of(row)].add(row)
         else:
             other[repo_of(row)].add(row)
             unmapped.append(row)
@@ -265,8 +291,9 @@ def collect(since, until):
             t.repos[pr["repo"]] = None
     issues.save()
     measured = measures(rows)
-    return {"since": since, "until": until, "other": other, "unmapped": unmapped, "prs": prs,
-            "reviews": reviews, "sessions": len(rows), "total": sum(cost(r) for r in rows), "excluded": excluded,
+    return {"since": since, "until": until, "other": other, "tooling": tooling, "unmapped": unmapped,
+            "prs": prs, "reviews": reviews, "sessions": len(rows), "total": sum(cost(r) for r in rows),
+            "excluded": excluded,
             "minutes": sum(r.get("active", 0) for r in rows), "timed": sum("active" in r for r in rows),
             "notes": saved(NOTES), "jira": issues, "ticket_of": ticket_of,
             "usage": usage_of(rows), "measures": measured, "tips": tips(measured),

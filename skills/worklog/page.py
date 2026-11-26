@@ -258,14 +258,17 @@ class Page:
     # -- the work
 
     def grouped(self):
-        """The overview's rows, keyed by id: tickets, support, reviews and other work, each with the cost and time
-        of its parts (tickets, the reviews, a repo's other work), which add up to the total, and a colour slot. A
-        group with no parts is left out."""
+        """The overview's rows, keyed by id: tickets, support, reviews, tooling and other work, each with the cost
+        and time of its parts (tickets, the reviews, a repo's tooling or other work), which add up to the total, and
+        a colour slot. A group with no parts is left out."""
         d = self.data
         tickets, support, other, reviews = d["tickets"], d["support"], d["other"], d["reviews"]
+        tooling = d.get("tooling", {})
         rows = [("tickets", "Tickets", len(tickets), repos(tickets), tickets),
                 ("support", "Support tickets", len(support), repos(support), support),
                 ("reviews", "Code reviews", "-", "-", [reviews] if d["prs"]["reviewed"] or paid(reviews.cost) else []),
+                ("tooling", "Tooling", "-", ", ".join(sorted(tooling, key=lambda r: -tooling[r].cost)),
+                 list(tooling.values())),
                 ("other", "Other work", "-", ", ".join(sorted(other, key=lambda r: -other[r].cost)),
                  list(other.values()))]
         found = {gid: {"name": name, "tickets": n, "repos": r, "cost": sum(p.cost for p in parts),
@@ -381,7 +384,8 @@ class Page:
                             minutes=sum(t.minutes for t in small), slot=slot)
 
     def work(self):
-        """The overview, then the ticket boxes, pull requests without a ticket, other work and code reviews."""
+        """The overview, then the ticket boxes, pull requests without a ticket, tooling, other work and code
+        reviews."""
         d, g = self.data, self.groups
         prs = d["prs"]
 
@@ -398,11 +402,16 @@ class Page:
                 ["Opened", "Pull request", "Status"],
                 [[day(pr["date"]), (pr["title"], pr["url"], pr["repo"]), status_cell(pr["status"])]
                  for pr in without_ticket])))
+        def by_repo(works):
+            return self.grid(["Repo", "Worked on", "Time", "Cost"],
+                             [[repo, worked_on(o.days), hours(o.minutes), money(o.cost)]
+                              for repo, o in sorted(works.items(), key=lambda item: -item[1].cost)])
+        if d.get("tooling"):
+            body.append(boxed("tooling", "Tooling", "Sessions in the repos of your own tools (tooling_repos) with no "
+                              "Jira ticket behind them, by repo.", by_repo(d["tooling"])))
         if d["other"]:
             body.append(boxed("other", "Other work", "Sessions with no Jira ticket or review behind them, by repo.",
-                              self.grid(["Repo", "Worked on", "Time", "Cost"],
-                                        [[repo, worked_on(o.days), hours(o.minutes), money(o.cost)]
-                                         for repo, o in sorted(d["other"].items(), key=lambda item: -item[1].cost)])))
+                              by_repo(d["other"])))
         if "reviews" in g:
             intro = ("Pull requests by teammates that you reviewed." if prs["reviewed"]
                      else "GitHub listed no reviews in the period.")

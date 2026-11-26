@@ -28,7 +28,9 @@ BACKGROUND = "Background"  # Claude Code's own calls, on a model none of the ses
 LEDGER = DATA / "sessions.jsonl"
 PROJECTS = Path.home() / ".claude" / "projects"
 KEY_SHAPE = re.compile(r"\b[A-Za-z][A-Za-z0-9]{1,9}-\d+\b")  # the ledger keeps these; the report filters them
-REVIEW = re.compile(r"gh pr (diff|review|checkout)|<command-name>/code-review")
+REVIEW_SKILLS = ("code-review", "pr-review")  # a skill or slash command of these names reviews a pull request
+REVIEW = re.compile(r"gh pr (diff|review|checkout)|<command-name>/(?:[\w.-]+:)?(?:%s)</command-name>"
+                    % "|".join(REVIEW_SKILLS))
 COMMAND = re.compile(r"<command-name>/([\w:.-]+)</command-name>")
 INTERRUPT = "[Request interrupted by user"
 SYNTHETIC = "<synthetic>"  # the model of the replies Claude Code writes itself: API errors, usage limits
@@ -217,7 +219,7 @@ class Session:
         elif name == "Bash":
             self.commands.append(args.get("command", ""))
         row["edits"] |= name in ("Edit", "Write", "NotebookEdit")
-        row["review"] |= (name == "Skill" and args.get("skill") == "code-review"
+        row["review"] |= (name == "Skill" and str(args.get("skill", "")).split(":")[-1] in REVIEW_SKILLS
                           or name == "Bash" and bool(REVIEW.search(args.get("command", ""))))
 
     def result(self):

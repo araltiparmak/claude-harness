@@ -5,6 +5,7 @@ import io
 import json
 import os
 import re
+import subprocess
 import tempfile
 import time
 import unittest
@@ -59,7 +60,8 @@ class Base(unittest.TestCase):
         self.patch(ledger, DATA=tmp, LEDGER=tmp / "sessions.jsonl", PROJECTS=tmp / "projects",
                    CLAUDE_STATE=tmp / "claude.json")
         self.patch(w, DATA=tmp, MAPPED=tmp / "mapped.json", NOTES=tmp / "notes.json", JIRA_CACHE=tmp / "jira.json",
-                   KEY=re.compile(r"\b(?:ABC)-\d+\b", re.I), PREFIXES="ABC", SUPPORT=set(), EXCLUDE_REPOS=[])
+                   KEY=re.compile(r"\b(?:ABC)-\d+\b", re.I), PREFIXES="ABC", SUPPORT=set(), EXCLUDE_REPOS=[],
+                   TOOLING_REPOS=[])
         self.patch(inventory, SKILLS=tmp / "skills", PROJECTS=tmp / "projects", SETTINGS=tmp / "settings.json",
                    STATE=tmp / "claude-state.json", PLUGINS=tmp / "plugins")
         self.patch(page, JIRA_URL="")
@@ -118,6 +120,40 @@ class Sorting(Base):
         row = {**session(1, repo="tools"), "cwd": str(self.tmp), "end": "2026-11-01T10:00:00Z"}
         data = self.collect([row], commits=["Fix label\nfix-label\nCloses ABC-3"])
         self.assertEqual([t.key for t in data["tickets"]], ["ABC-3"])
+
+    def git_repo(self, *steps):
+        """A git repo in the test folder, after the git commands given (each a list of arguments)."""
+        repo = self.tmp / "repo"
+        repo.mkdir()
+        for step in [["init", "-q", "-b", "main"], ["commit", "-q", "--allow-empty", "-m", "start"], *steps]:
+            subprocess.run(["git", "-c", "user.name=t", "-c", "user.email=t@t", *step], cwd=repo, check=True,
+                           capture_output=True)
+        return repo
+
+    def test_a_branch_that_got_its_key_later_still_finds_its_pull_request(self):
+        repo = self.git_repo(["checkout", "-q", "-b", "mock"], ["checkout", "-q", "-b", "feat/ABC-1-export"],
+                             ["checkout", "-q", "-b", "side"], ["branch", "-m", "side", "fix-label"])
+        rows = [{**session(1, branches=["mock"]), "cwd": str(repo)}, {**session(2, branches=["side"]), "cwd": str(repo)},
+                {**session(3), "cwd": str(repo)}]
+        data = self.collect(rows, opened=[pr(4, "ABC-1 export", "feat/ABC-1-export"), pr(5, "ABC-4", "fix-label")])
+        self.assertEqual(data["ticket_of"], {"s1": "ABC-1", "s2": "ABC-4", "s3": ""})  # main leads to every branch
+
+    def test_a_key_in_the_session_title_counts(self):
+        (t,) = self.collect([{**session(1), "title": "ABC-3 typo on the page"}])["tickets"]
+        self.assertEqual(t.key, "ABC-3")
+
+    def test_a_pr_review_session_recorded_before_counts_as_a_review(self):
+        row = session(1, edits=False, cost=2.0, used={"command": {"pr-review": 1}})
+        data = self.collect([row], reviewed=[pr(7, "", "b", author="teammate")])
+        self.assertEqual((data["reviews"].cost, data["unmapped"]), (2.0, []))
+
+    def test_tooling_repos_get_their_own_group_and_a_key_still_wins(self):
+        self.patch(w, TOOLING_REPOS=["tools"])
+        data = self.collect([session(1, repo="tools"), session(2, ["ABC-1"], repo="tools"), session(3)])
+        self.assertEqual((list(data["tooling"]), data["tooling"]["tools"].cost, list(data["other"])),
+                         (["tools"], 1.0, ["api"]))
+        self.assertEqual([r["id"] for r in data["unmapped"]], ["s3"])  # prepare offers no tooling session
+        self.assertEqual(page.Page(data).groups["tooling"]["cost"], 1.0)
 
     def test_review_sessions_add_up_to_one_total(self):
         rows = [session(1, edits=False, review=True, cost=1.5), session(2, edits=False, review=True, cost=0.5)]
@@ -380,6 +416,18 @@ class Ledger(Base):
         path = folder / f"{name}.jsonl"
         path.write_text("".join(json.dumps(d) + "\n" for d in lines))
         return path
+
+    def test_a_review_skill_or_slash_command_marks_a_review(self):
+        def lines(text, tool=None):
+            reply = {"type": "assistant", "timestamp": "2026-11-01T09:01:00Z", "message": {
+                "id": "m1", "model": "claude-opus-5-5", "usage": {"input_tokens": 1, "output_tokens": 1},
+                "content": [tool] if tool else [{"type": "text", "text": "ok"}]}}
+            return [{"type": "user", "timestamp": "2026-11-01T09:00:00Z", "cwd": "/x",
+                     "message": {"role": "user", "content": text}}, reply]
+        skill = {"type": "tool_use", "name": "Skill", "input": {"skill": "pr-review"}}
+        found = [ledger.Session(self.transcript(t, f"t{i}")).result()["review"] for i, t in enumerate(
+            [lines("<command-name>/pr-review</command-name> 12"), lines("review 12", skill), lines("/pr-review-ish")])]
+        self.assertEqual(found, [True, True, False])
 
     def test_a_transcript_gives_prompts_interrupts_errors_and_active_time(self):
         def user(t, content, **more):

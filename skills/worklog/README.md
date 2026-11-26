@@ -55,7 +55,7 @@ has no pull requests or ticket names.
 
    ```json
    {"jira_url": "https://yourcompany.atlassian.net", "jira_email": "you@yourcompany.com", "jira_prefixes": ["ABC"], "support_prefixes": ["SUP"],
-    "exclude_repos": ["my-side-project"], "dev_dir": "~/code"}
+    "exclude_repos": ["my-side-project"], "tooling_repos": ["dotfiles"], "dev_dir": "~/code"}
    ```
 
    | Key | What it is |
@@ -63,8 +63,9 @@ has no pull requests or ticket names.
    | `jira_url` | Your Jira Cloud site; ticket keys link to `<jira_url>/browse/<key>` |
    | `jira_email` | The email you log in to Jira with |
    | `jira_prefixes` | Every Jira project whose keys you use, such as `ABC` for `ABC-123` |
-   | `support_prefixes` | The prefixes of support tickets |
+   | `support_prefixes` | The prefixes of support tickets; their keys count without a place in `jira_prefixes` |
    | `exclude_repos` | Repos (folder or GitHub name) the report leaves out |
+   | `tooling_repos` | Repos of your own tools, such as your Claude Code setup; their sessions with no ticket go to Tooling, not Other work |
    | `dev_dir` | The folder that holds your repos; the data goes to `<dev_dir>/worklog` |
    | `jira_in_progress` | The name of the status your Jira uses for work in progress |
 
@@ -90,13 +91,16 @@ The shell command reuses what Claude saved before and runs no model.
 
 The first rule that matches wins:
 
-1. A ticket key in the branch name, in what you typed, or in the shell commands Claude ran.
+1. A ticket key in the branch name, in what you typed, in the shell commands Claude ran, or in the session title.
 2. A pull request from the session's branch whose title, description or commits name a key (also pull requests
-   opened before the period).
+   opened before the period). A branch that you renamed later, or made a new branch from (`git checkout -b`),
+   also counts for the pull request from the new branch; `git reflog` tells. `main`, `master` and `develop` do
+   not count this way, because every branch starts from one of them.
 3. A pull request that holds the commits you made in that repo while the session ran (`git log`, then `gh`).
-4. A review session (`gh pr review`, `/code-review`) counts for code reviews.
+4. A review session (`gh pr review`, `/code-review`, `/pr-review`) counts for code reviews.
 5. A ticket Claude chose with `/worklog` (saved in `mapped.json`); the page marks these.
-6. Everything else is Other work.
+6. A session in one of the `tooling_repos` counts for Tooling.
+7. Everything else is Other work.
 
 A sub-task counts for its parent ticket. Naming the key in the branch, or in your first prompt, is the surest way.
 
