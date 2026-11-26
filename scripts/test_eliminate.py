@@ -77,7 +77,7 @@ class Eliminate(unittest.TestCase):
         self.addCleanup(patcher.stop)
 
     def test_every_item_with_its_kind_cost_and_uses_unused_first(self):
-        found = {r.name: [r.kind, r.tokens, r.uses, r.last] for r in e.rows(90)}
+        found = {r.name: [r.kind, r.tokens, r.uses, r.last] for r in e.rows(90) if not r.fixed}
         self.assertEqual(found, {
             "deck": ["own", 101, 0, ""], "coach": ["private", 12, 0, ""], "notes": ["local", 7, 0, ""],
             "cloudflare": ["plugin, project /dev/lab", 52, 0, ""], "productivity": ["plugin, account", 22, 0, ""],
@@ -85,7 +85,37 @@ class Eliminate(unittest.TestCase):
             "pr": ["external", 8, 2, self.day], "pdf": ["account", 26, 1, self.day],
             "frontend-design": ["plugin", 54, 1, self.day], "context": ["mcp, user", None, 1, self.day],
             "claude.ai Context7": ["mcp, claude.ai", 34, 0, ""], "easel": ["mcp, other", 5, 0, ""]})
-        self.assertEqual([r.name for r in e.rows(90)][:3], ["deck", "cloudflare", "claude.ai Context7"])
+        self.assertEqual([r.name for r in e.rows(90)][:3], ["cloudflare", "productivity", "frontend-design"])
+
+    def test_a_plugins_skills_are_listed_under_skills_and_go_only_with_the_plugin(self):
+        found = e.rows(90)
+        mine = [r for r in found if r.fixed]
+        self.assertEqual({(r.name, r.kind) for r in mine}, {("frontend-design", "via plugin frontend-design"),
+                                                          ("workers", "via plugin cloudflare"),
+                                                          ("standup", "via plugin productivity")})
+        self.assertEqual([r.section for r in found], sorted((r.section for r in found), key=e.SECTIONS.index))
+        listed = e.table(found, 90)
+        for section in e.SECTIONS:
+            self.assertIn(f"== {section}:", listed)
+        self.assertRegex(listed, r"\n  -  workers +via plugin cloudflare")
+        with self.assertRaisesRegex(SystemExit, "workers: comes via plugin cloudflare; remove that plugin instead"):
+            e.remove(found, ["deck", "workers"])  # nothing changes, deck included
+        self.assertFalse((self.tmp / ".zshrc").exists())
+
+    def test_remove_by_name_takes_the_plugin_not_its_skill_of_the_same_name(self):
+        done = []
+        self.patch(e, apply=done.extend)
+        e.remove(e.rows(90), ["frontend-design", "playwright"])
+        self.assertEqual([(r.name, r.kind) for r in done], [("frontend-design", "plugin"),
+                                                            ("playwright", "mcp, local, /dev/site")])
+
+    def test_each_row_says_whether_it_loads_everywhere_or_in_one_project(self):
+        found = {r.name + (" via" if r.fixed else ""): (e.kind_label(r), e.scope(r)) for r in e.rows(90)}
+        self.assertEqual(found["deck"], ("own", "global"))
+        self.assertEqual(found["cloudflare"], ("plugin", "project /dev/lab"))
+        self.assertEqual(found["workers via"], ("via plugin cloudflare", "project /dev/lab"))  # its plugin's
+        self.assertEqual(found["playwright"], ("mcp, local", "project /dev/site"))
+        self.assertEqual(found["context"], ("mcp, user", "global"))
 
     def test_a_folded_description_counts_whole(self):
         file = self.tmp / "SKILL.md"
@@ -111,7 +141,9 @@ class Eliminate(unittest.TestCase):
                          {"fd@official": False, "design@synced": False})
 
     def test_each_kind_has_its_way_out(self):
-        steps = {r.name: e.plan(r) for r in e.rows(90)}
+        steps = {r.name: e.plan(r) for r in e.rows(90) if not r.fixed}
+        self.assertEqual(e.plan(next(r for r in e.rows(90) if r.name == "workers"))[0],
+                         "remove the plugin cloudflare")
         self.assertEqual(steps["deck"][0], "add to SKIP_SKILLS in ~/.zshrc")
         self.assertEqual(steps["cloudflare"][0], "claude plugin disable cloudflare@cloudflare --scope project (in /dev/lab)")
         self.assertEqual(steps["playwright"][0], "claude mcp remove playwright -s local (in /dev/site)")

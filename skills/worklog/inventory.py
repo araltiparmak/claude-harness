@@ -79,25 +79,37 @@ def plugin_tokens(root):
 def plugins():
     """{name: (kind, tokens, id, project path or "")} of the enabled plugins: installed ones (project ones count as
     enabled in their project) and the ones synced from claude.ai, unless enabledPlugins turns them off."""
+    return {name: (kind, plugin_tokens(root), plugin_id, project)
+            for name, kind, root, plugin_id, project in enabled_plugins()}
+
+
+def plugin_skills():
+    """[(skill, plugin name, tokens)] of the skills the enabled plugins bring, the ones that add to every session.
+    Their tokens are already part of their plugin's."""
+    return [(file.parent.name, name, tokens(file)) for name, _, root, _, _ in enabled_plugins()
+            for file in sorted(root.glob("skills/*/SKILL.md")) if tokens(file)]
+
+
+def enabled_plugins():
+    """[(name, kind, folder, id, project path or "")] of the enabled plugins, as plugins() describes them."""
     enabled = load(SETTINGS).get("enabledPlugins", {})
     found = installed_plugins(enabled)
     for root in sorted(p for p in PLUGINS.glob("synced/*/*") if p.is_dir()):
         name = root.name.split("~")[0]
         if enabled.get(f"{name}@synced", True) and name not in found:
-            found[name] = ("plugin, account", plugin_tokens(root), f"{name}@synced", "")
-    return found
+            found[name] = ("plugin, account", root, f"{name}@synced", "")
+    return [(name, *rest) for name, rest in found.items()]
 
 
 def installed_plugins(enabled):
-    """plugins() for the plugins in installed_plugins.json."""
+    """{name: (kind, folder, id, project path or "")} of the enabled plugins in installed_plugins.json."""
     found = {}
     for plugin_id, installs in load(PLUGINS / "installed_plugins.json").get("plugins", {}).items():
         for install in installs:
             project = install.get("projectPath")
             if project or enabled.get(plugin_id):
                 where = f"plugin, project {short(project)}" if project else "plugin"
-                found[plugin_id.split("@")[0]] = (where, plugin_tokens(Path(install["installPath"])), plugin_id,
-                                                  project or "")
+                found[plugin_id.split("@")[0]] = (where, Path(install["installPath"]), plugin_id, project or "")
     return found
 
 

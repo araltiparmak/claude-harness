@@ -2,11 +2,17 @@
 """Eliminate the non-essential: what loads into every Claude Code session, how often you used it, and a checklist
 to take items out of Claude's context.
 
-  scripts/eliminate.py [DAYS]   a checklist of every skill, plugin and MCP server, unused ones first and the most
-                                expensive first, from the transcripts of the last DAYS days (default 90); pick
-                                items, confirm, and it removes them
+  scripts/eliminate.py [DAYS]   a checklist of every plugin, MCP server and skill, in that order, unused ones first
+                                and the most expensive first within each, from the transcripts of the last DAYS days
+                                (default 90); pick items, confirm, and it removes them
   scripts/eliminate.py --list [DAYS]
-                                prints the same rows as a table and changes nothing
+                                prints the same rows as a table in three sections and changes nothing
+  scripts/eliminate.py --remove NAME...
+                                removes the named rows (a name as --list prints it) without asking; the /eliminate
+                                skill runs this after asking
+
+A skill that a plugin brings is listed under Skills as "via plugin <name>", with no number: it leaves with its
+plugin, so it cannot be chosen on its own, and its tokens count once, under the plugin.
 
 Tokens and kinds come from skills/worklog/inventory.py, which worklog's Misc box reads too.
 
@@ -58,6 +64,20 @@ class Row(NamedTuple):
     ref: str  # what removing it names: the skill, the plugin id, or the server
     project: str  # the project it loads in; "" for every session
 
+    @property
+    def section(self):
+        return SECTIONS[0] if self.kind.startswith("plugin") else SECTIONS[1] if self.kind.startswith("mcp") \
+            else SECTIONS[2]
+
+    @property
+    def fixed(self):
+        """A skill a plugin brings: it goes with the plugin, not on its own."""
+        return self.kind.startswith(VIA)
+
+
+SECTIONS = ("Plugins", "MCP servers", "Skills")
+VIA = "via plugin "
+
 
 def usage(days):
     """(uses, last day) per name, from the transcripts of the last days: skills by Skill call or slash command,
@@ -107,30 +127,69 @@ def tool_name(tool, args):
 
 
 def rows(days):
-    """A Row per item, unused first, then by tokens."""
+    """A Row per item, by section; in each, unused first, then by tokens, the plugins' own skills last, by plugin."""
     uses, last = usage(days)
     found = []
-    for name, kind, cost, ref, project, names in inventory.items(ROOTS):
+    every = list(inventory.items(ROOTS)) + [[skill, VIA + plugin, cost, "", "", {f"{plugin}:{skill}"}]
+                                            for skill, plugin, cost in inventory.plugin_skills()]
+    for name, kind, cost, ref, project, names in every:
         hits = inventory.counts_for(names, uses)
         found.append(Row(name, kind, cost, sum(uses[h] for h in hits), max((last[h] for h in hits), default=""),
                          ref, project))
-    return sorted(found, key=lambda r: (r.uses > 0, -(r.tokens or 0), r.name))
+    PLUGIN_SCOPES.update((r.name, scope(r)) for r in found if r.section == SECTIONS[0])
+    return sorted(found, key=lambda r: (SECTIONS.index(r.section), r.fixed, r.kind if r.fixed else "", r.uses > 0,
+                                     -(r.tokens or 0), r.name))
 
 
 def line(row):
     tokens = "?" if row.tokens is None else row.tokens
-    return f"{row.name:<30.30} {row.kind:<36.36} {tokens:>6} {row.uses:>5}  {row.last or '-'}"
+    return (f"{row.name:<30.30} {kind_label(row):<36.36} {scope(row):<34.34} {tokens:>6} {row.uses:>5}  "
+            f"{row.last or '-'}")
+
+
+def kind_label(row):
+    """The kind without the project path, which the scope column shows."""
+    return row.kind.split(", project ")[0].split(", local, ")[0] + (", local" if ", local, " in row.kind else "")
+
+
+def scope(row):
+    """global when it loads in every session; project <path> when only sessions started in that folder load it.
+    A plugin's own skill has its plugin's scope."""
+    if row.fixed:
+        return PLUGIN_SCOPES.get(row.kind[len(VIA):], "global")
+    return f"project {short(row.project)}" if row.project else "global"
+
+
+PLUGIN_SCOPES = {}  # plugin name: its scope, filled by rows() for the plugins' own skills
+
+
+HEAD = f"{'name':<30} {'kind':<36} {'scope':<34} {'tokens':>6} {'uses':>5}  last used"
 
 
 def summary(found, days):
+    found = [r for r in found if not r.fixed]  # counted under their plugin
     unused = [r for r in found if not r.uses]
     return (f"{len(unused)} of {len(found)} unused in the last {days} days; removing them saves about "
             f"{sum(r.tokens or 0 for r in unused)} tokens per session (? is not measured; /context shows it).")
 
 
 def table(found, days):
-    head = f"{'#':>3}  {'name':<30} {'kind':<36} {'tokens':>6} {'uses':>5}  last used"
-    return "\n".join([head] + [f"{i:>3}  {line(r)}" for i, r in enumerate(found, 1)] + ["", summary(found, days)])
+    """The rows in three sections, numbered across them; a plugin's own skill gets no number."""
+    head = f"{'#':>3}  {HEAD}"
+    out, number = [], 0
+    for section in SECTIONS:
+        part = [r for r in found if r.section == section]
+        out += ["", f"== {section}: {sum(not r.uses for r in part if not r.fixed)} of "
+                    f"{sum(not r.fixed for r in part)} unused", head]
+        for r in part:
+            number += not r.fixed
+            out.append(f"{'-' if r.fixed else number:>3}  {line(r)}")
+    return "\n".join(out[1:] + ["", summary(found, days)])
+
+
+def numbered(found):
+    """The rows that can be chosen, in the order table numbers them."""
+    return [r for r in found if not r.fixed]
 
 
 KEYS = "up/down move  space select  a all unused  n none  enter apply  q quit"
@@ -158,7 +217,7 @@ def draw(screen, found, days, state):
     saved = sum(found[i].tokens or 0 for i in chosen)
     screen.erase()
     screen.addnstr(0, 0, f"eliminate: {summary(found, days)}", width - 1, curses.A_BOLD)
-    screen.addnstr(1, 0, f"      {'name':<30} {'kind':<36} {'tokens':>6} {'uses':>5}  last used  "
+    screen.addnstr(1, 0, f"      {HEAD}  "
                          f"(selected {len(chosen)}, saves {saved})", width - 1, curses.A_UNDERLINE)
     for y, i in enumerate(range(top, min(len(found), top + shown)), 2):
         mark = "[x]" if i in chosen else "[ ]"
@@ -176,10 +235,10 @@ def press(key, found, state, shown):
     if key in moves:
         state["at"] = min(last, max(0, state["at"] + moves[key]))
     elif key == ord(" "):
-        chosen ^= {state["at"]}
+        chosen ^= {state["at"]} if not found[state["at"]].fixed else set()  # it goes with its plugin
         state["at"] = min(last, state["at"] + 1)
     elif key == ord("a"):
-        chosen |= {i for i, r in enumerate(found) if not r.uses}
+        chosen |= {i for i, r in enumerate(found) if not r.uses and not r.fixed}
     elif key == ord("n"):
         chosen.clear()
     elif key in (curses.KEY_ENTER, 10, 13):
@@ -204,6 +263,8 @@ MANUAL = {
 def plan(row):
     """(what removing a row does, the undo, a function that does it or None when it is manual)."""
     name, kind, ref, project = row.name, row.kind, row.ref, row.project
+    if row.fixed:
+        return f"remove the plugin {kind[len(VIA):]}", "", None
     if kind in LINKED:
         return "add to SKIP_SKILLS in ~/.zshrc", "take it out of SKIP_SKILLS, run update.sh", None
     if kind == "local":
@@ -292,7 +353,27 @@ def apply(chosen):
     print("\nNew sessions start without what was removed; open shells see SKIP_SKILLS after: source ~/.zshrc")
 
 
+def remove(found, names):
+    """Removes the rows with these names; a plugin's own skill or an unknown name stops it before any change."""
+    chosen, wrong = [], []
+    for name in names:
+        match = [r for r in found if name in (r.name, r.ref)]
+        if not match:
+            wrong.append(f"{name}: no such row")
+        elif all(r.fixed for r in match):
+            wrong.append(f"{name}: comes {match[0].kind}; remove that plugin instead")
+        chosen += [r for r in match if not r.fixed and r not in chosen]
+    if wrong:
+        sys.exit("Nothing changed:\n  " + "\n  ".join(wrong))
+    apply(chosen)
+
+
 def main(args):
+    if args[:1] == ["--remove"]:
+        if len(args) < 2:
+            sys.exit(__doc__)
+        remove(rows(90), args[1:])
+        return
     listing = args[:1] == ["--list"]
     args = args[1:] if listing else args
     if len(args) > 1 or (args and not args[0].isdigit()):

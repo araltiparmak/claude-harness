@@ -68,12 +68,13 @@ Skills sit in group folders; `update.sh` links each one into `~/.claude/skills/`
 
 | Skill | What it does |
 |---|---|
-| [worklog](skills/worklog/SKILL.md) | Measures how you use Claude Code (tips, tokens, context, session quality, the most expensive sessions) and what the work was (Jira tickets with outcomes, time and cost, pull requests, reviews), from a `SessionEnd` ledger; `share` writes a page without costs (user-invoked: `/worklog`) |
+| [worklog](skills/worklog/SKILL.md) | Measures how you use Claude Code (tips, tokens, context, session quality, the most expensive sessions) and what the work was (Jira tickets with outcomes, time and cost, pull requests, reviews), from a `SessionEnd` ledger; `share` writes a page for other readers without the tips (user-invoked: `/worklog`) |
 
 ### Todo
 
 | Skill | What it does |
 |---|---|
+| [eliminate](skills/eliminate/SKILL.md) | Lists the plugins, MCP servers and skills that load into every session with their tokens and recent use, asks section by section which to remove, and removes them; a plugin's skills go only with the plugin (user-invoked: `/eliminate`) |
 | [todo](skills/todo/SKILL.md) | Adds an item to the current project's `todo.md` checklist, or ticks one off |
 
 ## Use these skills
@@ -100,7 +101,7 @@ A second skills repo is optional: point `PRIVATE_DIR` at a checkout (default `~/
 
 To leave skills off a machine, set `SKIP_SKILLS` to group or skill names separated by spaces, for example `export SKIP_SKILLS="dev mindmap"` in `~/.zshrc`. `update.sh` then links none of them, removes their old links, and prints a `skipped` line for each.
 
-To keep the context small, run [`scripts/eliminate.py`](scripts/eliminate.py). It lists every skill, plugin and MCP server that loads into each session, with its token cost and how often your sessions used it in the last 90 days (`eliminate.py 30` for 30). Unused items come first. Tick the ones to remove in the checklist, confirm, and it takes them out of Claude's context: skills through `SKIP_SKILLS`, plugins through `enabledPlugins`, MCP servers through `claude mcp remove`. It prints the undo for each, and the steps for claude.ai skills and connectors, which only claude.ai or `/mcp` can switch off one by one. `eliminate.py --list` prints the table and changes nothing. The worklog page's Misc box shows what the same unused items cost in a month.
+To keep the context small, type `/eliminate`, or run [`scripts/eliminate.py`](scripts/eliminate.py) yourself. It lists every plugin, MCP server and skill, in three sections, that loads into each session, with its token cost and how often your sessions used it in the last 90 days (`eliminate.py 30` for 30). Unused items come first. A skill that a plugin brings is listed as `via plugin <name>` and leaves only with its plugin. Tick the ones to remove in the checklist, confirm, and it takes them out of Claude's context: skills through `SKIP_SKILLS`, plugins through `enabledPlugins`, MCP servers through `claude mcp remove`. It prints the undo for each, and the steps for claude.ai skills and connectors, which only claude.ai or `/mcp` can switch off one by one. `eliminate.py --list` prints the table and changes nothing; `eliminate.py --remove <name>...` removes rows without the checklist. The worklog page's Misc box shows what the same unused items cost in a month.
 
 `scripts/check.sh` checks the repo's consistency and runs in CI on every push, where the deck examples are also built.
 
