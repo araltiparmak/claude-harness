@@ -1,6 +1,6 @@
 ---
 name: worklog
-description: Writes a one-page report of how the user works with Claude Code and what the work was - tips and measures on tokens, context and session quality, the most expensive sessions, then the Jira tickets, support tickets, pull requests and code reviews with a one-line outcome, active time and cost per ticket - or a page without costs to share. Runs only when typed as /worklog.
+description: Writes a one-page report of how the user works with Claude Code and what the work was - tips and measures on tokens, context and session quality, the most expensive sessions, then the Jira tickets, support tickets, pull requests and code reviews with a one-line outcome, active time and cost per ticket - or a page to share, without the tips and measures. Runs only when typed as /worklog.
 disable-model-invocation: true
 ---
 
@@ -20,6 +20,6 @@ Run these from this skill's folder.
 
 The report writes the page, opens it and prints a few lines, the top tip among them. Pass those lines on with how many sessions you mapped and to which tickets, and how many notes you wrote; do not read the page.
 
-Only when the arguments include `share`: the report writes `share.html`, the page for other readers (work, outcomes and time; no costs, no Using Claude sections). Read the page printed after `Page:` and publish it with the Artifact tool (icon `chart`), then give the link. Keep one link: `<DEV_DIR>/worklog/share.json` holds its artifact URL; when it has one, read that artifact and publish to its URL, otherwise publish a new one and write its URL there. It is private until the user shares it. Without `share`, only what `prepare` prints goes to the model; `worklog.py report` in a shell runs with no model and reuses the mappings and notes saved before.
+Only when the arguments include `share`: the report writes `share.html`, the page for other readers (work, outcomes, time and cost; no Using Claude sections). Read the page printed after `Page:` and publish it with the Artifact tool (icon `chart`), then give the link. Keep one link: `<DEV_DIR>/worklog/share.json` holds its artifact URL; when it has one, read that artifact and publish to its URL, otherwise publish a new one and write its URL there. It is private until the user shares it. Without `share`, only what `prepare` prints goes to the model; `worklog.py report` in a shell runs with no model and reuses the mappings and notes saved before.
 
-When the user asks about setup, or the page misses pull requests, tickets or sessions, run `python3 worklog.py check` and pass on its lines; `README.md` has the setup steps. When the user asks why a session landed where it did, read the docstrings of `collect`, `ticket` and `Jira.pick` in `worklog.py`; for what a measure or tip means, read `measures` and `TIPS` there.
+When the user asks about setup, or the page misses pull requests, tickets or sessions, run `python3 worklog.py check` and pass on its lines. To set up or change the settings, ask the user to type `! python3 ~/.claude/skills/worklog/worklog.py setup`; it asks questions, so it cannot run from the Bash tool. `README.md` has the setup steps. When the user asks why a session landed where it did, read the docstrings of `collect`, `ticket` and `Jira.pick` in `worklog.py`; for what a measure or tip means, read `measures` and `TIPS` there.

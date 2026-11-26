@@ -16,6 +16,7 @@ import os
 import sys
 import urllib.parse
 import urllib.request
+from collections import Counter
 from datetime import date, timedelta
 
 from settings import settings
@@ -73,6 +74,17 @@ def updated(since, until):
 
 def in_progress(day):
     return brief(search(f'status WAS "{IN_PROGRESS}" ON "{day}"'))
+
+
+def myself():
+    """The name Jira knows you by; raises like call when the login is refused."""
+    return call("/rest/api/3/myself").get("displayName", "")
+
+
+def prefixes(days=90):
+    """The project prefixes of the issues assigned to you and updated in the last days, most issues first."""
+    counts = Counter(i["key"].split("-")[0] for i in search(f"updated >= -{days}d"))
+    return [prefix for prefix, _ in counts.most_common()]
 
 
 if __name__ == "__main__":

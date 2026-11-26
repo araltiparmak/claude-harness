@@ -13,7 +13,6 @@ import urllib.error
 from pathlib import Path
 from unittest import mock
 
-import agentsview
 import github
 import inventory
 import jira
@@ -65,7 +64,6 @@ class Base(unittest.TestCase):
         self.patch(inventory, SKILLS=tmp / "skills", PROJECTS=tmp / "projects", SETTINGS=tmp / "settings.json",
                    STATE=tmp / "claude-state.json", PLUGINS=tmp / "plugins")
         self.patch(page, JIRA_URL="")
-        self.patch(agentsview, CLI=None, APP=False)
         self.patch(github, CACHE=tmp / "commits.json")
         self.patch(w.jira, issue=lambda key: ISSUES[key], search=lambda condition: [],
                    updated=lambda since, until: {k: {"summary": v["summary"], "type": v["type"]}
@@ -199,6 +197,10 @@ class Sorting(Base):
         data = self.collect(rows)
         self.assertEqual([(r["id"], r["day"]) for r in data["unmapped"]], [("s1", "2026-11-01")])
 
+    def test_a_sub_task_session_counts_for_its_parent(self):
+        data = self.collect([session(1, ["ABC-2"]), session(2), session(3, ["ABC-3"])])
+        self.assertEqual(data["ticket_of"], {"s1": "ABC-1", "s2": "", "s3": "ABC-3"})
+
     def test_map_refuses_a_key_outside_the_prefixes(self):
         with self.assertRaises(SystemExit):
             w.checked("XYZ-1")
@@ -209,6 +211,42 @@ class Sorting(Base):
         out = quiet(w.check)
         for part in ("settings", "jira_prefixes", "SessionEnd hook", "ledger", "git user.email", "gh"):
             self.assertIn(f"warn  {part}", out)
+
+    def run_setup(self, answers, claude=None, token="t", issues=("ABC-1", "XYZ-2", "ABC-3")):
+        """setup on made-up answers and a made-up Jira; returns the settings file and Claude Code's settings."""
+        file, claude_file = self.tmp / "worklog.json", self.tmp / "claude.json"
+        if claude is not None:
+            claude_file.write_text(json.dumps(claude))
+        self.patch(w, FILE=file, CLAUDE_SETTINGS=claude_file, settings=dict(w.settings))
+        self.patch(w.subprocess, run=lambda *a, **k: None)  # the check that ends setup
+        self.patch(w.jira, myself=lambda: "Me", search=lambda condition: [{"key": key} for key in issues])
+        with mock.patch.dict(os.environ):
+            os.environ.pop("JIRA_API_TOKEN", None)
+            if token:
+                os.environ["JIRA_API_TOKEN"] = token
+            replies = iter(answers)
+            quiet(lambda: w.setup(ask=lambda q: next(replies), secret=lambda q: ""))
+        return json.loads(file.read_text()), (json.loads(claude_file.read_text()) if claude_file.exists() else None)
+
+    def test_setup_finds_the_prefixes_and_adds_the_hook(self):
+        mine, claude = self.run_setup(["x.atlassian.net", "me@x.com", "", "", ""], claude={"model": "opus"})
+        self.assertEqual(mine, {"jira_url": "https://x.atlassian.net", "jira_email": "me@x.com",
+                                "jira_prefixes": ["ABC", "XYZ"], "dev_dir": w.settings["dev_dir"]})
+        self.assertEqual(claude["model"], "opus")
+        self.assertEqual(claude["cleanupPeriodDays"], 90)
+        self.assertTrue(w.has_hook(claude))
+
+    def test_setup_without_jira_or_a_hook_keeps_the_rest(self):
+        (self.tmp / "worklog.json").write_text(json.dumps({"exclude_repos": ["side"]}))
+        mine, claude = self.run_setup(["", "abc, sup", "~/code", "n"], token="")
+        self.assertEqual(mine, {"exclude_repos": ["side"], "jira_prefixes": ["ABC", "SUP"], "dev_dir": "~/code"})
+        self.assertIsNone(claude)
+
+    def test_with_hook_leaves_settings_that_have_it(self):
+        claude = {"cleanupPeriodDays": 120, "hooks": {"SessionEnd": [
+            {"hooks": [{"type": "command", "command": "python3 /a/worklog.py record"}]}]}}
+        self.assertEqual(w.with_hook(claude), (claude, []))
+        self.assertTrue(w.has_hook(w.with_hook({})[0]))
 
     def test_period_takes_empty_last_month_or_a_day(self):
         self.assertEqual(w.period("2026-11-01")[0], "2026-11-01")
@@ -241,15 +279,15 @@ class Pages(Base):
         self.assertIn("that cost less than $2.00 each", boxes[1])
         self.assertTrue(all(usd in boxes[1] for usd in ("$1.80", "$1.50", "$0.30")))
 
-    def test_shared_page_shows_time_and_no_cost_or_usage(self):
+    def test_shared_page_shows_time_and_cost_and_no_usage(self):
         data = self.collect([session(1, ["ABC-1"], 2.0), session(2, edits=False, repo="tools")])
         mine = page.Page(data).write(self.tmp / "report.html").read_text()
         shared = page.Page(data, share=True).write(self.tmp / "share.html").read_text()
         self.assertIn("Using Claude well", mine)
         self.assertIn("$2.00", mine)
         self.assertNotIn("Using Claude well", shared)
-        self.assertNotIn("$", re.sub(r"<style>.*?</style>", "", shared, flags=re.S))
-        self.assertIn("1.0h", shared)
+        for both in ("$2.00", "1.0h", "at API list prices"):
+            self.assertIn(both, shared)
         self.assertNotIn("sessions that recorded it", shared)
         del data["unmapped"][0]["active"]  # a session recorded before time was kept
         data.update(minutes=30, timed=1)
@@ -276,20 +314,6 @@ class Pages(Base):
         self.assertIn("<td>Cost per ticket</td><td>$1.50</td>", claude)  # $3.00 over 2 tickets
         for gone in ("resolved", "Failed tool calls per session", "not on Sonnet"):
             self.assertNotIn(gone, claude)
-
-    def test_sessions_and_tickets_link_to_agentsview_only_when_it_is_installed(self):
-        data = self.collect([session(1, ["ABC-1"], 2.0), session(2, ["ABC-3"], 1.0), session(3, ["ABC-1"], 0.5)],
-                            opened=[pr(7, "ABC-4", "abc-4")])  # ABC-4 has a pull request and no session
-        self.assertNotIn("agentsview", page.Page(data).write(self.tmp / "none.html").read_text().lower())
-        self.patch(agentsview, CLI="agentsview", APP=True)
-        mine = page.Page(data).write(self.tmp / "report.html").read_text()
-        self.assertIn('href="agentsview://sessions/s1"', mine)
-        for sid, key in (("s3", "ABC-1"), ("s2", "ABC-3")):  # its own box, a row of Smaller tickets; latest session
-            self.assertIn(f'href="http://127.0.0.1:8080/sessions/{sid}?label=ticket%3D{key}"', mine)
-        self.assertIn("ABC-4", mine)
-        self.assertNotIn("ticket%3DABC-4", mine)
-        shared = page.Page(data, share=True).write(self.tmp / "share.html").read_text()
-        self.assertNotIn("AgentsView", shared)
 
     def test_hours(self):
         self.assertEqual((page.hours(0), page.hours(3), page.hours(90)), ("-", "<0.1h", "1.5h"))
@@ -332,53 +356,6 @@ class Measures(Base):
     def test_most_expensive_sessions_come_first(self):
         m = w.measures([session(1, cost=1.0), session(2, cost=5.0), session(3, cost=2.0)])
         self.assertEqual([r["id"] for r in m["top"]], ["s2", "s3", "s1"])
-
-
-class AgentsView(Base):
-    def test_sessions_carry_their_tickets_label_only_changes_are_written_and_health_comes_back(self):
-        data = self.collect([session(1, ["ABC-2"]), session(2), session(3, ["ABC-3"]), session(4, ["ABC-4"])])
-        self.assertEqual(data["ticket_of"], {"s1": "ABC-1", "s2": "", "s3": "ABC-3", "s4": "ABC-4"})  # sub-task: parent
-        held = {"s2": ["ticket=ABC-3", "mine"], "s3": ["ticket=ABC-3"], "s4": ["ticket=ABC-1"]}  # s1 not synced yet
-
-        def found(sid, score):
-            return {"id": sid, "labels": held[sid], "health_score": score, "health_grade": "B", "outcome": "completed"}
-        pages = [{"sessions": [found("s2", 80)], "next_cursor": "c"},
-                 {"sessions": [found("s3", 90), found("s4", None)]}]  # s4 not scored yet
-        calls = []
-
-        def run(*args):
-            calls.append(args)
-            return json.dumps(pages.pop(0)) if args[1] == "list" else ""
-        self.patch(agentsview, CLI="agentsview", run=run)
-        health = agentsview.sync(data["ticket_of"], data["since"])
-        self.assertEqual(calls[1][-2:], ("--cursor", "c"))
-        self.assertEqual([c for c in calls if c[1] == "label"],
-                         [("session", "label", "s1", "ticket=ABC-1"),
-                          ("session", "label", "s2", "--remove", "ticket=ABC-3"),  # 'mine' stays
-                          ("session", "label", "s4", "ticket=ABC-4", "--remove", "ticket=ABC-1")])
-        self.assertEqual(health, {"s2": {"score": 80, "grade": "B", "outcome": "completed"},
-                                  "s3": {"score": 90, "grade": "B", "outcome": "completed"}})
-
-    def test_a_failing_agentsview_leaves_the_report_running(self):
-        def run(*args):
-            raise agentsview.subprocess.CalledProcessError(1, "agentsview")
-        self.patch(agentsview, CLI="agentsview", run=run)
-        out = io.StringIO()
-        with contextlib.redirect_stdout(out):
-            self.assertEqual(agentsview.sync({"s1": "ABC-1"}, "2026-11-01"), {})
-        self.assertIn("AgentsView not updated", out.getvalue())
-
-    def test_tickets_show_the_health_of_their_sessions_on_your_page_only(self):
-        data = self.collect([session(1, ["ABC-1"], 2.0), session(2, ["ABC-2"], 1.0), session(3, ["ABC-3"], 0.5)])
-        self.assertNotIn("<th>Health</th>", "".join(page.Page(data).work()))  # without AgentsView
-        data["health"] = {"s1": {"score": 100, "grade": "A", "outcome": "completed"},
-                          "s2": {"score": 71, "grade": "C", "outcome": "abandoned"}}
-        boxes = page.Page(data).ticket_boxes(data["tickets"], 1, "tickets")
-        self.assertIn("<th>Health</th>", boxes[0])
-        self.assertIn("<td>100<small>1 A</small></td>", boxes[0])  # ABC-1's own row
-        self.assertIn("<td>71<small>1 C · 1 abandoned</small></td>", boxes[0])  # its sub-task's row
-        self.assertIn("<td>-</td>", boxes[1])  # ABC-3 has no score
-        self.assertNotIn("Health", "".join(page.Page(data, share=True).work()))
 
 
 class JiraApi(unittest.TestCase):
