@@ -11,7 +11,7 @@ flowchart LR
   H["claude-harness<br/>(this repo, public)"]
   P["optional second<br/>skills repo"]
   S["repos listed in<br/>external-skills.yaml"]
-  U(["scripts/update.sh"])
+  U(["scripts/update/update.sh"])
   C["~/.claude<br/>skills/ · settings.json · CLAUDE.md"]
   H --> U
   P --> U
@@ -35,7 +35,7 @@ flowchart LR
 - **Skills:** symlinks every skill into `~/.claude/skills/`, so a pull is all an update needs.
 - **Settings:** builds `~/.claude/settings.json` from [`claude/settings.json`](claude/settings.json) plus an optional overlay from the second repo, so private values stay out of this one. If Claude Code or you changed the live file since the last run, the script prints the difference and leaves the file alone, so no setting is lost silently. The model and effort level are the exception: `/model` and `/effort` write them during normal use, so the next run puts the repo's values back.
 - **Global instructions:** links `~/.claude/CLAUDE.md` to [`claude/CLAUDE.md`](claude/CLAUDE.md).
-- **Skills from other repos:** [`external-skills.yaml`](external-skills.yaml) lists repo URLs and the skills to take from each. The script clones each repo into `~/.cache/claude-harness/repos`, pulls it on later runs, and links the listed skills. Delete a line and the next run unlinks that skill. `scripts/check.sh` checks the file's format.
+- **Skills from other repos:** [`external-skills.yaml`](external-skills.yaml) lists repo URLs and the skills to take from each. The script clones each repo into `~/.cache/claude-harness/repos`, pulls it on later runs, and links the listed skills. Delete a line and the next run unlinks that skill. `scripts/check/check.sh` checks the file's format.
 
 [`TOKEN-EFFICIENCY.md`](TOKEN-EFFICIENCY.md) records how plugins, MCP servers, skills and habits are kept cheap in tokens.
 
@@ -91,7 +91,7 @@ npx skills@latest add araltiparmak/claude-harness
 
 ```bash
 git clone https://github.com/araltiparmak/claude-harness.git
-claude-harness/scripts/update.sh
+claude-harness/scripts/update/update.sh
 npm i -g ccstatusline   # the status line command in claude/settings.json
 ```
 
@@ -101,9 +101,9 @@ A second skills repo is optional: point `PRIVATE_DIR` at a checkout (default `~/
 
 To leave skills off a machine, set `SKIP_SKILLS` to group or skill names separated by spaces, for example `export SKIP_SKILLS="dev mindmap"` in `~/.zshrc`. `update.sh` then links none of them, removes their old links, and prints a `skipped` line for each.
 
-To keep the context small, type `/eliminate`, or run [`scripts/eliminate.py`](scripts/eliminate.py) yourself. It lists every plugin, MCP server and skill, in three sections, that loads into each session, with its token cost and how often your sessions used it in the last 90 days (`eliminate.py 30` for 30). Unused items come first. A skill that a plugin brings is listed as `via plugin <name>` and leaves only with its plugin. Tick the ones to remove in the checklist, confirm, and it takes them out of Claude's context: skills through `SKIP_SKILLS`, plugins through `enabledPlugins`, MCP servers through `claude mcp remove`. It prints the undo for each, and the steps for claude.ai skills and connectors, which only claude.ai or `/mcp` can switch off one by one. `eliminate.py --list` prints the table and changes nothing; `eliminate.py --remove <name>...` removes rows without the checklist. The worklog page's Misc box shows what the same unused items cost in a month.
+To keep the context small, type `/eliminate`, or run [`skills/eliminate/eliminate.py`](skills/eliminate/eliminate.py) yourself. It lists every plugin, MCP server and skill, in three sections, that loads into each session, with its token cost and how often your sessions used it in the last 90 days (`eliminate.py 30` for 30). Unused items come first. A skill that a plugin brings is listed as `via plugin <name>` and leaves only with its plugin. Tick the ones to remove in the checklist, confirm, and it takes them out of Claude's context: skills through `SKIP_SKILLS`, plugins through `enabledPlugins`, MCP servers through `claude mcp remove`. It prints the undo for each, and the steps for claude.ai skills and connectors, which only claude.ai or `/mcp` can switch off one by one. `eliminate.py --list` prints the table and changes nothing; `eliminate.py --remove <name>...` removes rows without the checklist. The worklog page's Misc box shows what the same unused items cost in a month.
 
-`scripts/check.sh` checks the repo's consistency and runs in CI on every push, where the deck examples are also built.
+`scripts/check/check.sh` checks the repo's consistency and runs in CI on every push, where the deck examples are also built.
 
 ## License
 

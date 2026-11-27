@@ -15,7 +15,7 @@ The harness repo is the folder two levels above this skill: `cd -P ~/.claude/ski
 ## 1. Measure
 
 ```bash
-python3 <harness>/scripts/eliminate.py --list $ARGUMENTS
+python3 ~/.claude/skills/eliminate/eliminate.py --list $ARGUMENTS
 ```
 
 Show the three sections (Plugins, MCP servers, Skills) as printed, then add these short notes under them:
@@ -42,7 +42,7 @@ Read back the final list (name, kind, action) grouped by section, and go on once
 Pass the chosen rows by name, as `--list` printed them, in one call:
 
 ```bash
-python3 <harness>/scripts/eliminate.py --remove <name> [<name>...]
+python3 ~/.claude/skills/eliminate/eliminate.py --remove <name> [<name>...]
 ```
 
 It removes each with the action for its kind, runs `update.sh` when skills or plugins changed, and prints each step with its undo:
@@ -58,7 +58,7 @@ It removes each with the action for its kind, runs `update.sh` when skills or pl
 
 It prints, and does not do, the steps only claude.ai or `/mcp` can take: `account` skills (off on claude.ai one by one, or all at once with `"syncClaudeAiSkills": false` in `<harness>/claude/settings.json` and `update.sh`), `mcp, claude.ai` connectors and `mcp, other` servers. Pass those steps on.
 
-For a type-only row, add `disable-model-invocation: true` to the front matter of the skill's source `SKILL.md` (the real path of `~/.claude/skills/<name>`), then run that repo's `scripts/check.sh` when it has one. Undo: delete the line.
+For a type-only row, add `disable-model-invocation: true` to the front matter of the skill's source `SKILL.md` (the real path of `~/.claude/skills/<name>`), then run that repo's check script when it has one (`scripts/check/check.sh` in the harness). Undo: delete the line.
 
 Settings go through the harness repo: `update.sh` writes `~/.claude/settings.json`, so an edit there directly would be reported as drift.
 

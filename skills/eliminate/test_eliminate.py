@@ -27,6 +27,9 @@ class Eliminate(unittest.TestCase):
         self.patch(inventory, SKILLS=claude / "skills", PROJECTS=claude / "projects", SETTINGS=claude / "settings.json",
                    STATE=tmp / ".claude.json", PLUGINS=claude / "plugins")
         self.patch(e, MINE=mine, PRIVATE=private, PROFILE=tmp / ".zshrc", ROOTS=((mine, "own"), (private, "private")))
+        env = mock.patch.dict(os.environ, SKIP_SKILLS="")  # the machine's own list stays out of the tests
+        env.start()
+        self.addCleanup(env.stop)
         links = claude / "skills"
         links.mkdir(parents=True)
         for source in (skill(mine / "skills" / "deck", "x" * 400), skill(private / "skills" / "coach", "x" * 40),

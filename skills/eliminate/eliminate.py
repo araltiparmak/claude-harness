@@ -2,19 +2,19 @@
 """Eliminate the non-essential: what loads into every Claude Code session, how often you used it, and a checklist
 to take items out of Claude's context.
 
-  scripts/eliminate.py [DAYS]   a checklist of every plugin, MCP server and skill, in that order, unused ones first
+  eliminate.py [DAYS]           a checklist of every plugin, MCP server and skill, in that order, unused ones first
                                 and the most expensive first within each, from the transcripts of the last DAYS days
                                 (default 90); pick items, confirm, and it removes them
-  scripts/eliminate.py --list [DAYS]
+  eliminate.py --list [DAYS]
                                 prints the same rows as a table in three sections and changes nothing
-  scripts/eliminate.py --remove NAME...
+  eliminate.py --remove NAME...
                                 removes the named rows (a name as --list prints it) without asking; the /eliminate
                                 skill runs this after asking
 
 A skill that a plugin brings is listed under Skills as "via plugin <name>", with no number: it leaves with its
 plugin, so it cannot be chosen on its own, and its tokens count once, under the plugin.
 
-Tokens and kinds come from skills/worklog/inventory.py, which worklog's Misc box reads too.
+Tokens and kinds come from the worklog skill's inventory.py, which worklog's Misc box reads too.
 
 Kinds, and how each is removed (plan):
   own, private, external   named in SKIP_SKILLS in ~/.zshrc, then update.sh unlinks it; the source stays
@@ -38,13 +38,13 @@ from collections import Counter
 from pathlib import Path
 from typing import NamedTuple, Optional
 
-HERE = Path(__file__).resolve().parent
-sys.path.insert(0, str(HERE.parent / "skills" / "worklog"))
+HERE = Path(__file__).resolve().parent  # skills/eliminate in this repo, through the ~/.claude/skills link
+sys.path.insert(0, str(HERE.parent / "worklog"))
 # worklog's inventory.py: the skills, plugins and MCP servers that load into a session, and their tokens
 import inventory  # noqa: E402
 from inventory import HOME, VIA, load, short  # noqa: E402
 
-MINE = HERE.parent  # this repo
+MINE = HERE.parent.parent  # this repo
 PRIVATE = Path(os.environ.get("PRIVATE_DIR", HOME / "dev" / "private-skills")).expanduser().resolve()
 ROOTS = ((MINE, "own"), (PRIVATE, "private"))
 PROFILE = HOME / ".zshrc"
@@ -291,7 +291,7 @@ def skip_skills(names):
     if found:
         text = text[:found.start()] + new + text[found.end():]
     else:
-        text += f"\n# Skills update.sh leaves out of ~/.claude/skills (scripts/eliminate.py adds to it)\n{new}\n"
+        text += f"\n# Skills update.sh leaves out of ~/.claude/skills (the eliminate skill adds to it)\n{new}\n"
     PROFILE.write_text(text)
     return " ".join(words)
 
@@ -336,7 +336,7 @@ def apply(chosen):
               "(undo: set them to true, run update.sh)")
     if skills_out or plugins_out:
         print("\n== update.sh")
-        subprocess.run([str(MINE / "scripts" / "update.sh")], env=env, check=False)
+        subprocess.run([str(MINE / "scripts" / "update" / "update.sh")], env=env, check=False)
     if by_hand:
         print("\nLeft for you, which no command can do one by one:\n" + "\n".join(by_hand))
     print("\nNew sessions start without what was removed; open shells see SKIP_SKILLS after: source ~/.zshrc")

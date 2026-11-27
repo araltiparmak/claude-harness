@@ -1,6 +1,6 @@
 # Removed
 
-Things taken out of this repo that may come back. Each one is still in git at commit `cb72212`; the command under it brings the files back. After a restore, do the steps listed with it, then run `scripts/check.sh` and `scripts/update.sh`.
+Things taken out of this repo that may come back. Each one is still in git at commit `cb72212`; the command under it brings the files back. After a restore, do the steps listed with it, then run `scripts/check/check.sh` and `scripts/update/update.sh`.
 
 ## visual-check skill
 

@@ -10,7 +10,7 @@ is "plugin", "plugin, project" or "plugin, account"; an MCP server is "mcp, user
 or "mcp, other"; a skill a plugin brings is VIA + its plugin's name. A project plugin, a local server and a
 project plugin's skills name their folder in Item.project.
 
-worklog.py reads it for the Misc box; claude-harness's scripts/eliminate.py reads it to remove items.
+worklog.py reads it for the Misc box; the eliminate skill's eliminate.py reads it to remove items.
 """
 import json
 import re
