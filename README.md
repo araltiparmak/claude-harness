@@ -103,6 +103,8 @@ To leave skills off a machine, set `SKIP_SKILLS` to group or skill names separat
 
 To keep the context small, type `/eliminate`, or run [`skills/eliminate/eliminate.py`](skills/eliminate/eliminate.py) yourself. It lists every plugin, MCP server and skill, in three sections, that loads into each session, with its token cost and how often your sessions used it in the last 90 days (`eliminate.py 30` for 30). Unused items come first. A skill that a plugin brings is listed as `via plugin <name>` and leaves only with its plugin. Tick the ones to remove in the checklist, confirm, and it takes them out of Claude's context: skills through `SKIP_SKILLS`, plugins through `enabledPlugins`, MCP servers through `claude mcp remove`. It prints the undo for each, and the steps for claude.ai skills and connectors, which only claude.ai or `/mcp` can switch off one by one. `eliminate.py --list` prints the table and changes nothing; `eliminate.py --remove <name>...` removes rows without the checklist. The worklog page's Misc box shows what the same unused items cost in a month.
 
+[`scripts/ci-jobs/ci-jobs.py`](scripts/ci-jobs/ci-jobs.py) lists the CircleCI jobs of your open pull requests and approves the on-hold approval jobs that its config names, by number or at a prompt; `ci-jobs.py serve` opens the same list as a local dashboard with Approve buttons. Copy `ci-jobs.example.json` to `ci-jobs.json` in the same folder (git ignores it) and fill in the job names and, optionally, your Jira site. It needs `CIRCLECI_TOKEN` and a signed-in `gh`.
+
 `scripts/check/check.sh` checks the repo's consistency and runs in CI on every push, where the deck examples are also built.
 
 ## License

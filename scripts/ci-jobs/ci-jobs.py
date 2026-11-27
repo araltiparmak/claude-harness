@@ -83,6 +83,8 @@ def pr_jobs(pr):
             })
     except urllib.error.HTTPError as e:
         out["error"] = "not a CircleCI project (gh/ slug)" if e.code == 404 else f"CircleCI HTTP {e.code}"
+    except OSError as e:  # timeout, DNS, refused connection: this PR shows the error, the others still load
+        out["error"] = f"CircleCI not reachable: {getattr(e, 'reason', e)}"
     return out
 
 
@@ -177,10 +179,10 @@ class Dashboard(BaseHTTPRequestHandler):
             return self.reply(403, {"error": "forbidden"})
         if self.path != "/api/approve":
             return self.reply(404, {"error": "not found"})
-        body = json.loads(self.rfile.read(int(self.headers.get("Content-Length", 0))) or b"{}")
         try:
+            body = json.loads(self.rfile.read(int(self.headers.get("Content-Length", 0))) or b"{}")
             self.reply(200, {"approved": approve(body["workflow"], body["job"])})
-        except (KeyError, ValueError, urllib.error.HTTPError) as e:
+        except (KeyError, TypeError, ValueError, OSError) as e:  # a bad body, or CircleCI refused or unreachable
             self.reply(400, {"error": str(e)})
 
     def log_message(self, *args):
