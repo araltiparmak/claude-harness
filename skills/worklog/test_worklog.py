@@ -5,6 +5,7 @@ import io
 import json
 import os
 import re
+import subprocess
 import tempfile
 import time
 import unittest
@@ -12,12 +13,14 @@ import urllib.error
 from pathlib import Path
 from unittest import mock
 
+import configure
 import github
 import inventory
 import jira
 import ledger
 import page
 import worklog as w
+from settings import DEV
 
 ISSUES = {"ABC-1": {"summary": "Export", "type": "Story", "subtask": False, "parent": ""},
           "ABC-2": {"summary": "CSV", "type": "Sub-task", "subtask": True, "parent": "ABC-1"},
@@ -27,7 +30,7 @@ ISSUES = {"ABC-1": {"summary": "Export", "type": "Story", "subtask": False, "par
 
 
 def session(n, keys=(), cost=1.0, edits=True, review=False, branches=("main",), repo="api", **more):
-    return {"id": f"s{n}", "start": f"2026-11-{n:02d}T09:00:00Z", "cwd": str(w.DEV / repo), "title": f"Session {n}",
+    return {"id": f"s{n}", "start": f"2026-11-{n:02d}T09:00:00Z", "cwd": str(DEV / repo), "title": f"Session {n}",
             "prompt": "", "keys": list(keys), "branches": list(branches), "edits": edits, "review": review,
             "cost": cost, "models": {"Opus": cost}, "subagent_cost": 0.0,
             "context": {"peak": 50_000, "avg": 30_000, "compactions": 0},
@@ -58,7 +61,8 @@ class Base(unittest.TestCase):
         self.patch(ledger, DATA=tmp, LEDGER=tmp / "sessions.jsonl", PROJECTS=tmp / "projects",
                    CLAUDE_STATE=tmp / "claude.json")
         self.patch(w, DATA=tmp, MAPPED=tmp / "mapped.json", NOTES=tmp / "notes.json", JIRA_CACHE=tmp / "jira.json",
-                   KEY=re.compile(r"\b(?:ABC)-\d+\b", re.I), PREFIXES="ABC", SUPPORT=set(), EXCLUDE_REPOS=[])
+                   KEY=re.compile(r"\b(?:ABC)-\d+\b", re.I), PREFIXES="ABC", SUPPORT=set(), EXCLUDE_REPOS=[],
+                   TOOLING_REPOS=[])
         self.patch(inventory, SKILLS=tmp / "skills", PROJECTS=tmp / "projects", SETTINGS=tmp / "settings.json",
                    STATE=tmp / "claude-state.json", PLUGINS=tmp / "plugins")
         self.patch(page, JIRA_URL="")
@@ -117,6 +121,40 @@ class Sorting(Base):
         data = self.collect([row], commits=["Fix label\nfix-label\nCloses ABC-3"])
         self.assertEqual([t.key for t in data["tickets"]], ["ABC-3"])
 
+    def git_repo(self, *steps):
+        """A git repo in the test folder, after the git commands given (each a list of arguments)."""
+        repo = self.tmp / "repo"
+        repo.mkdir()
+        for step in [["init", "-q", "-b", "main"], ["commit", "-q", "--allow-empty", "-m", "start"], *steps]:
+            subprocess.run(["git", "-c", "user.name=t", "-c", "user.email=t@t", *step], cwd=repo, check=True,
+                           capture_output=True)
+        return repo
+
+    def test_a_branch_that_got_its_key_later_still_finds_its_pull_request(self):
+        repo = self.git_repo(["checkout", "-q", "-b", "mock"], ["checkout", "-q", "-b", "feat/ABC-1-export"],
+                             ["checkout", "-q", "-b", "side"], ["branch", "-m", "side", "fix-label"])
+        rows = [{**session(1, branches=["mock"]), "cwd": str(repo)}, {**session(2, branches=["side"]), "cwd": str(repo)},
+                {**session(3), "cwd": str(repo)}]
+        data = self.collect(rows, opened=[pr(4, "ABC-1 export", "feat/ABC-1-export"), pr(5, "ABC-4", "fix-label")])
+        self.assertEqual(data["ticket_of"], {"s1": "ABC-1", "s2": "ABC-4", "s3": ""})  # main leads to every branch
+
+    def test_a_key_in_the_session_title_counts(self):
+        (t,) = self.collect([{**session(1), "title": "ABC-3 typo on the page"}])["tickets"]
+        self.assertEqual(t.key, "ABC-3")
+
+    def test_a_pr_review_session_recorded_before_counts_as_a_review(self):
+        row = session(1, edits=False, cost=2.0, used={"command": {"pr-review": 1}})
+        data = self.collect([row], reviewed=[pr(7, "", "b", author="teammate")])
+        self.assertEqual((data["reviews"].cost, data["unmapped"]), (2.0, []))
+
+    def test_tooling_repos_get_their_own_group_and_a_key_still_wins(self):
+        self.patch(w, TOOLING_REPOS=["tools"])
+        data = self.collect([session(1, repo="tools"), session(2, ["ABC-1"], repo="tools"), session(3)])
+        self.assertEqual((list(data["tooling"]), data["tooling"]["tools"].cost, list(data["other"])),
+                         (["tools"], 1.0, ["api"]))
+        self.assertEqual([r["id"] for r in data["unmapped"]], ["s3"])  # prepare offers no tooling session
+        self.assertEqual(page.Page(data).groups["tooling"]["cost"], 1.0)
+
     def test_review_sessions_add_up_to_one_total(self):
         rows = [session(1, edits=False, review=True, cost=1.5), session(2, edits=False, review=True, cost=0.5)]
         data = self.collect(rows, reviewed=[pr(7, "", "b", author="teammate")])
@@ -161,16 +199,60 @@ class Sorting(Base):
         data = self.collect(rows)
         self.assertEqual([(r["id"], r["day"]) for r in data["unmapped"]], [("s1", "2026-11-01")])
 
+    def test_a_sub_task_session_counts_for_its_parent(self):
+        data = self.collect([session(1, ["ABC-2"]), session(2), session(3, ["ABC-3"])])
+        self.assertEqual(data["ticket_of"], {"s1": "ABC-1", "s2": "", "s3": "ABC-3"})
+
     def test_map_refuses_a_key_outside_the_prefixes(self):
         with self.assertRaises(SystemExit):
             w.checked("XYZ-1")
 
     def test_check_runs_on_a_fresh_machine(self):
-        self.patch(w, FILE=self.tmp / "none.json", PREFIXES="", JIRA_PREFIXES=[],
+        self.patch(configure, FILE=self.tmp / "none.json", PREFIXES=[], JIRA_PREFIXES=[],
                    CLAUDE_SETTINGS=self.tmp / "settings.json", runs=lambda cmd: False)  # no git, gh or hook set up
-        out = quiet(w.check)
+        out = quiet(configure.check)
         for part in ("settings", "jira_prefixes", "SessionEnd hook", "ledger", "git user.email", "gh"):
             self.assertIn(f"warn  {part}", out)
+
+    def run_setup(self, answers, claude=None, token="t", issues=("ABC-1", "XYZ-2", "ABC-3")):
+        """setup on made-up answers and a made-up Jira; returns the settings file and Claude Code's settings."""
+        file, claude_file = self.tmp / "worklog.json", self.tmp / "claude.json"
+        if claude is not None:
+            claude_file.write_text(json.dumps(claude))
+        self.patch(configure, FILE=file, CLAUDE_SETTINGS=claude_file, settings=dict(configure.settings))
+        self.patch(configure.subprocess, run=lambda *a, **k: None)  # the check that ends setup
+        self.patch(configure.jira, myself=lambda: "Me", search=lambda condition: [{"key": key} for key in issues])
+        with mock.patch.dict(os.environ):
+            os.environ.pop("JIRA_API_TOKEN", None)
+            if token:
+                os.environ["JIRA_API_TOKEN"] = token
+            replies = iter(answers)
+            quiet(lambda: configure.setup("/x/worklog.py", ask=lambda q: next(replies), secret=lambda q: ""))
+        return json.loads(file.read_text()), (json.loads(claude_file.read_text()) if claude_file.exists() else None)
+
+    def test_setup_finds_the_prefixes_and_adds_the_hook(self):
+        mine, claude = self.run_setup(["x.atlassian.net", "me@x.com", "", "", ""], claude={"model": "opus"})
+        self.assertEqual(mine, {"jira_url": "https://x.atlassian.net", "jira_email": "me@x.com",
+                                "jira_prefixes": ["ABC", "XYZ"], "dev_dir": configure.settings["dev_dir"]})
+        self.assertEqual(claude["model"], "opus")
+        self.assertEqual(claude["cleanupPeriodDays"], 90)
+        self.assertEqual(claude["hooks"]["SessionEnd"][0]["hooks"][0]["command"], "python3 /x/worklog.py record")
+        self.assertTrue(configure.has_hook(claude))
+
+    def test_setup_without_jira_or_a_hook_keeps_the_rest(self):
+        (self.tmp / "worklog.json").write_text(json.dumps({"exclude_repos": ["side"]}))
+        mine, claude = self.run_setup(["", "abc, sup", "~/code", "n"], token="")
+        self.assertEqual(mine, {"exclude_repos": ["side"], "jira_prefixes": ["ABC", "SUP"], "dev_dir": "~/code"})
+        self.assertIsNone(claude)
+
+    def test_with_hook_leaves_settings_that_have_it(self):
+        claude = {"cleanupPeriodDays": 120, "hooks": {"SessionEnd": [
+            {"hooks": [{"type": "command", "command": "python3 /a/worklog.py record"}]}]}}
+        hook = configure.hook_command("/b/worklog.py")
+        self.assertEqual(configure.with_hook(claude, hook), (claude, []))
+        self.assertTrue(configure.has_hook(configure.with_hook({}, hook)[0]))
+        self.assertEqual(configure.hook_command(str(Path.home() / "my skills" / "worklog.py")),
+                         'python3 "$HOME/my skills/worklog.py" record')  # $HOME, and quotes for the space
 
     def test_period_takes_empty_last_month_or_a_day(self):
         self.assertEqual(w.period("2026-11-01")[0], "2026-11-01")
@@ -203,16 +285,12 @@ class Pages(Base):
         self.assertIn("that cost less than $2.00 each", boxes[1])
         self.assertTrue(all(usd in boxes[1] for usd in ("$1.80", "$1.50", "$0.30")))
 
-    def test_shared_page_shows_time_and_no_cost_or_usage(self):
+    def test_page_shows_time_and_cost_and_every_usage_section(self):
         data = self.collect([session(1, ["ABC-1"], 2.0), session(2, edits=False, repo="tools")])
-        mine = page.Page(data).write(self.tmp / "report.html").read_text()
-        shared = page.Page(data, share=True).write(self.tmp / "share.html").read_text()
-        self.assertIn("Using Claude well", mine)
-        self.assertIn("$2.00", mine)
-        self.assertNotIn("Using Claude well", shared)
-        self.assertNotIn("$", re.sub(r"<style>.*?</style>", "", shared, flags=re.S))
-        self.assertIn("1.0h", shared)
-        self.assertNotIn("sessions that recorded it", shared)
+        text = page.Page(data).write(self.tmp / "report.html").read_text()
+        for part in ("Using Claude well", "Tokens and context", "$2.00", "1.0h", "at API list prices"):
+            self.assertIn(part, text)
+        self.assertNotIn("sessions that recorded it", text)
         del data["unmapped"][0]["active"]  # a session recorded before time was kept
         data.update(minutes=30, timed=1)
         self.assertIn("from the 1 of 2 sessions that recorded it", page.Page(data).write(self.tmp / "r.html").read_text())
@@ -317,6 +395,18 @@ class Ledger(Base):
         path = folder / f"{name}.jsonl"
         path.write_text("".join(json.dumps(d) + "\n" for d in lines))
         return path
+
+    def test_a_review_skill_or_slash_command_marks_a_review(self):
+        def lines(text, tool=None):
+            reply = {"type": "assistant", "timestamp": "2026-11-01T09:01:00Z", "message": {
+                "id": "m1", "model": "claude-opus-5-5", "usage": {"input_tokens": 1, "output_tokens": 1},
+                "content": [tool] if tool else [{"type": "text", "text": "ok"}]}}
+            return [{"type": "user", "timestamp": "2026-11-01T09:00:00Z", "cwd": "/x",
+                     "message": {"role": "user", "content": text}}, reply]
+        skill = {"type": "tool_use", "name": "Skill", "input": {"skill": "pr-review"}}
+        found = [ledger.Session(self.transcript(t, f"t{i}")).result()["review"] for i, t in enumerate(
+            [lines("<command-name>/pr-review</command-name> 12"), lines("review 12", skill), lines("/pr-review-ish")])]
+        self.assertEqual(found, [True, True, False])
 
     def test_a_transcript_gives_prompts_interrupts_errors_and_active_time(self):
         def user(t, content, **more):

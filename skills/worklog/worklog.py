@@ -2,16 +2,18 @@
 """Measures how you work with Claude Code and what the work was: sessions sorted into Jira tickets, pull requests
 and reviews, with time, cost and tips. Everything stays on this computer.
 
-  worklog.py report [period] [--share]
+  worklog.py report [period]
       Updates the ledger from the transcripts still on disk, writes <DEV_DIR>/worklog/report.html, opens it and
-      prints the headline. --share writes share.html instead: the work, outcomes and time for other readers,
-      without costs or the Using Claude sections.
+      prints the headline. It never publishes the page: /worklog share has Claude publish it as an Artifact.
       period: empty for this month, last-month, or a first day YYYY-MM-DD.
   worklog.py prepare [period]                  prints, as JSON, what /worklog needs: the sessions the rules gave
                                                no ticket, the period's tickets with their pull request and session
                                                titles, and the other Jira issues assigned to you and updated
   worklog.py map SESSION KEY [SESSION KEY...]  saves a ticket for a session the rules gave none
   worklog.py note KEY TEXT [KEY TEXT...]       saves a one-line outcome for a ticket, shown under its name
+  worklog.py setup                             asks for the Jira site, login and ticket prefixes (it finds them
+                                               from your Jira issues), writes the settings, offers to add the
+                                               SessionEnd hook, then runs check; run it in a terminal
   worklog.py check                             checks the setup: settings, hook, ledger, git, gh and Jira
   worklog.py record                            the SessionEnd hook: adds the session on stdin to the ledger
 
@@ -19,13 +21,11 @@ Settings: ~/.config/worklog.json over the defaults in settings.json; models and 
 describes both. Data: <DEV_DIR>/worklog, with sessions.jsonl (the ledger), jira.json (the issue cache),
 commits.json (the pull requests of your commits), mapped.json (the tickets chosen with map) and notes.json (the
 outcomes). ledger.py reads transcripts, page.py writes the HTML, github.py and jira.py fetch pull requests and
-issues, inventory.py finds what loads into every session.
+issues, inventory.py finds what loads into every session and configure.py runs setup and check.
 """
 import json
 import os
 import re
-import shutil
-import subprocess
 import sys
 import urllib.error
 import webbrowser
@@ -34,21 +34,21 @@ from datetime import date, timedelta
 from operator import ge, gt, lt
 from pathlib import Path
 
+import configure
 import github
 import inventory
 import jira
 import ledger
 import page
 from ledger import BACKGROUND, BIG_CONTEXT, SENT, TOKENS, cost, models_of, repo_of
-from settings import DATA, DEV, FILE, settings
+from settings import DATA, FILE, settings
 
-JIRA_PREFIXES, SUPPORT_PREFIXES, EXCLUDE_REPOS = (
-    settings[k] for k in ("jira_prefixes", "support_prefixes", "exclude_repos"))
+JIRA_PREFIXES, SUPPORT_PREFIXES, EXCLUDE_REPOS, TOOLING_REPOS = (
+    settings[k] for k in ("jira_prefixes", "support_prefixes", "exclude_repos", "tooling_repos"))
 MAPPED = DATA / "mapped.json"
 NOTES = DATA / "notes.json"
 JIRA_CACHE = DATA / "jira.json"
-CLAUDE_SETTINGS = Path.home() / ".claude" / "settings.json"  # where check looks for the hook
-PREFIXES = "|".join(re.escape(p) for p in JIRA_PREFIXES)
+PREFIXES = "|".join(re.escape(p) for p in dict.fromkeys(JIRA_PREFIXES + SUPPORT_PREFIXES))  # support keys too
 KEY = re.compile(rf"\b(?:{PREFIXES})-\d+\b", re.I) if PREFIXES else re.compile(r"[^\s\S]")  # never matches
 SUPPORT = {p.upper() for p in SUPPORT_PREFIXES}
 TOP = 10  # the most expensive sessions listed
@@ -121,10 +121,32 @@ def is_support(key):
 
 
 def keys_of(row):
-    """The ticket keys a session names, filtered by the prefixes configured now; its branches are scanned
-    again, so a prefix added later also counts for sessions recorded before."""
-    found = [k.upper() for k in row["keys"] + KEY.findall(" ".join(row["branches"]))]
+    """The ticket keys a session names, filtered by the prefixes configured now; its branches and its title are
+    scanned again, so a prefix added later also counts for sessions recorded before."""
+    found = [k.upper() for k in row["keys"] + KEY.findall(" ".join(row["branches"] + [row.get("title") or ""]))]
     return [k for k in dict.fromkeys(found) if KEY.fullmatch(k)]
+
+
+def reviewed(row):
+    """Whether a session reviewed a pull request: the ledger says so, or it ran a review skill or slash command
+    (REVIEW_SKILLS), which also counts for sessions recorded before that skill was known."""
+    used = row.get("used", {})
+    return row["review"] or any(ledger.is_review_skill(name) for kind in ("skill", "command")
+                                for name in used.get(kind, {}))
+
+
+def later_branches(row):
+    """The branches the session's branches became afterwards (github.successors), followed a few steps."""
+    if not row.get("cwd") or not Path(row["cwd"]).is_dir():
+        return []
+    after, found = github.successors(row["cwd"]), []
+    for b in row["branches"]:
+        for _ in range(5):  # a chain of renames; also stops a loop
+            b = after.get(b)
+            if not b or b in found or b in row["branches"]:
+                break
+            found.append(b)
+    return found
 
 
 def saved(file):
@@ -134,16 +156,17 @@ def saved(file):
 
 def ticket(row, by_branch, issues):
     """The key the rules give a session: a support key it names, else Jira.pick of its keys, else the ticket of a
-    pull request from one of its branches, else Jira.pick of the keys in the pull requests that hold the commits
-    you made in its repo while it ran. A branch name alone settles it when it names one ticket; otherwise the repo
-    must match too. collect falls back to the key saved with map."""
+    pull request from one of its branches or from a branch one of them became later (later_branches), else
+    Jira.pick of the keys in the pull requests that hold the commits you made in its repo while it ran. A branch
+    name alone settles it when it names one ticket; otherwise the repo must match too. collect falls back to the
+    key saved with map."""
     keys = keys_of(row)
     support = [k for k in keys if is_support(k)]
     if support:
         return support[0]
     if keys:
         return issues.pick(keys)
-    for b in row["branches"]:
+    for b in row["branches"] + later_branches(row):
         if (repo_of(row), b) in by_branch:
             return by_branch[repo_of(row), b]
         if len(by_branch.get(b, ())) == 1:
@@ -217,13 +240,15 @@ def in_period(rows, since, until):
 
 def collect(since, until):
     """Everything the report shows, as plain data. Every session lands in exactly one place: a ticket, code
-    reviews, or other work."""
+    reviews, tooling (a session in tooling_repos with no ticket), or other work."""
     rows, excluded = in_period(ledger.refresh(), since, until)
     if not rows:
         sys.exit(f"no sessions from {since} to {until}")
     prs = {kind: [pr for pr in found if pr["repo"] not in EXCLUDE_REPOS]
            for kind, found in github.pull_requests(since, until).items()}
-    issues, tickets, reviews, other, unmapped = Jira(), {}, Work(), defaultdict(Work), []  # other: {repo: Work}
+    issues, tickets, reviews, unmapped = Jira(), {}, Work(), []
+    other, tooling = defaultdict(Work), defaultdict(Work)  # {repo: Work}
+    ticket_of = {}  # session id: the ticket its box shows, or ''
 
     def on(key):
         top = issues.top(key)
@@ -241,14 +266,18 @@ def collect(since, until):
             by_branch.setdefault(pr["branch"], set()).add(pr["ticket"])
     for row in rows:
         rule = ticket(row, by_branch, issues)
-        review = row["review"] and not row["edits"]
+        review = reviewed(row) and not row["edits"]
         named = rule or ("" if review else chosen.get(row["id"], ""))  # map only places what would be Other work
+        ticket_of[row["id"]] = ""
         if named:
             t = on(named)
+            ticket_of[row["id"]] = t.key
             t.part(named).add(row, mapped=not rule)
             t.repos[repo_of(row)] = None
         elif review:
             reviews.add(row)
+        elif repo_of(row) in TOOLING_REPOS:
+            tooling[repo_of(row)].add(row)
         else:
             other[repo_of(row)].add(row)
             unmapped.append(row)
@@ -259,10 +288,11 @@ def collect(since, until):
             t.repos[pr["repo"]] = None
     issues.save()
     measured = measures(rows)
-    return {"since": since, "until": until, "other": other, "unmapped": unmapped, "prs": prs,
-            "reviews": reviews, "sessions": len(rows), "total": sum(cost(r) for r in rows), "excluded": excluded,
+    return {"since": since, "until": until, "other": other, "tooling": tooling, "unmapped": unmapped,
+            "prs": prs, "reviews": reviews, "sessions": len(rows), "total": sum(cost(r) for r in rows),
+            "excluded": excluded,
             "minutes": sum(r.get("active", 0) for r in rows), "timed": sum("active" in r for r in rows),
-            "notes": saved(NOTES), "jira": issues,
+            "notes": saved(NOTES), "jira": issues, "ticket_of": ticket_of,
             "usage": usage_of(rows), "measures": measured, "tips": tips(measured),
             "tickets": [t for t in tickets.values() if not is_support(t.key)],
             "support": [t for t in tickets.values() if is_support(t.key)]}
@@ -371,20 +401,15 @@ def skills_of(row, installed):
 
 RATES = {m["name"]: m["prices"] for m in ledger.MODELS.values()}  # model family: prices per million tokens
 DEFAULT_RATES = ledger.MODELS[ledger.PRICING["default_model"]]["prices"]
-KINDS = {"account": "claude.ai skill", "plugin, account": "claude.ai plugin", "mcp, claude.ai": "claude.ai connector"}
+KINDS = {"account": "claude.ai skill", "plugin": "plugin", "plugin, project": "plugin",
+         "plugin, account": "claude.ai plugin", "mcp, claude.ai": "claude.ai connector"}  # others: MCP server, skill
 
 
-def kind_name(kind):
-    """An inventory kind as the page names it: skill, plugin, MCP server, or its claude.ai variant."""
-    if kind in KINDS:
-        return KINDS[kind]
-    if kind.startswith("plugin, project "):
-        return "plugin, in " + kind[len("plugin, project "):]
-    if kind.startswith("mcp, local, "):
-        return "MCP server, in " + kind[len("mcp, local, "):]
-    if kind == "plugin":
-        return "plugin"
-    return "MCP server" if kind.startswith("mcp") else "skill"
+def kind_name(item):
+    """An inventory item's kind as the page names it (skill, plugin, MCP server, or its claude.ai variant), with
+    the folder it loads in when it loads in one project only."""
+    name = KINDS.get(item.kind) or ("MCP server" if item.kind.startswith("mcp") else "skill")
+    return f"{name}, in {inventory.short(item.project)}" if item.project else name
 
 
 def loaded_cost(row, tokens):
@@ -406,12 +431,12 @@ def unused_of(rows, uses):
     {name, kind, tokens, usd}, the most expensive first. usd covers the sessions the item loaded into: all of
     them, or those in its project for a project plugin or local server; None when the tokens are not known."""
     found = []
-    for name, kind, tokens, _, project, usage_names in inventory.items():
-        if inventory.counts_for(usage_names, uses):
+    for item in inventory.items():
+        if inventory.counts_for(item.names, uses):
             continue
-        sessions = [r for r in rows if not project or Path(r["cwd"] or "/").is_relative_to(project)]
-        usd = None if tokens is None else sum(loaded_cost(r, tokens) for r in sessions)
-        found.append({"name": name, "kind": kind_name(kind), "tokens": tokens, "usd": usd})
+        sessions = [r for r in rows if not item.project or Path(r["cwd"] or "/").is_relative_to(item.project)]
+        usd = None if item.tokens is None else sum(loaded_cost(r, item.tokens) for r in sessions)
+        found.append({"name": item.name, "kind": kind_name(item), "tokens": item.tokens, "usd": usd})
     return sorted(found, key=lambda u: (u["usd"] is None, -(u["usd"] or 0), -(u["tokens"] or 0), u["name"]))
 
 
@@ -456,17 +481,16 @@ def period(arg):
 
 
 def report(args):
-    share = "--share" in args
     data = collect(*period(next((a for a in args if not a.startswith("--")), "")))
-    view = page.Page(data, share)
+    view = page.Page(data)
     shown = sum(g["cost"] for g in view.groups.values())
     if abs(shown - data["total"]) > 0.01:  # a session left off the page is a bug
         sys.exit(f"the page shows ${shown:.2f} but the sessions cost ${data['total']:.2f}")
-    file = view.write(DATA / ("share.html" if share else "report.html"))
+    file = view.write(DATA / "report.html")
     print(f"{data['since']} to {data['until']}: " + ", ".join(f"{n} {label}" for n, label in view.headline()))
     print(f"All {data['sessions']} sessions are on the page"
-          + (f"; exclude_repos left out ${data['excluded']:.2f}" if data["excluded"] and not share else ""))
-    if data["tips"] and not share:
+          + (f"; exclude_repos left out ${data['excluded']:.2f}" if data["excluded"] else ""))
+    if data["tips"]:
         print(f"Top tip: {data['tips'][0][0]} {data['tips'][0][1]}")
     print(f"Page: {file}")
     webbrowser.open(file.as_uri())
@@ -523,65 +547,6 @@ def pairs(args, usage):
     return list(zip(args[::2], args[1::2]))
 
 
-LABELS = {True: "ok  ", None: "warn", False: "FAIL"}
-
-
-def runs(cmd):
-    try:
-        return subprocess.run(cmd, capture_output=True, text=True, timeout=30).returncode == 0
-    except (OSError, subprocess.TimeoutExpired):
-        return False
-
-
-def check_claude(line):
-    """The SessionEnd hook and how long Claude Code keeps transcripts."""
-    try:
-        claude = json.loads(CLAUDE_SETTINGS.read_text()) if CLAUDE_SETTINGS.exists() else {}
-    except ValueError:
-        claude = {}
-        line(False, str(CLAUDE_SETTINGS), "not valid JSON")
-    hooked = "worklog.py record" in json.dumps(claude.get("hooks", {}).get("SessionEnd", []))
-    line(hooked or None, "SessionEnd hook", "missing; README.md shows the lines to add")
-    keep = claude.get("cleanupPeriodDays", 30)
-    line(keep >= 60 or None, f"transcripts kept {keep} days", 'set "cleanupPeriodDays": 90 so report catches '
-                                                              "sessions the hook missed")
-
-
-def check_sources(line):
-    """git, gh and Jira, which the report asks for pull requests and issues."""
-    line(runs(["git", "config", "user.email"]) or None, "git user.email", "not set; commits cannot find their pull requests")
-    line(bool(shutil.which("gh")) and runs(["gh", "auth", "status"]) or None, "gh",
-         "not installed or not logged in (gh auth login); no pull requests or reviews")
-    if PREFIXES:
-        try:
-            jira.search("updated >= -1d")
-            line(True, "Jira search")
-        except Exception as err:  # not set up, not reachable, login refused
-            line(None, "Jira search", f"failed ({err}); set jira_url, jira_email and JIRA_API_TOKEN; tickets show "
-                                      "by key only")
-
-
-def check():
-    """One line per part of the setup: ok, warn (the report runs but misses something) or FAIL; exits 1 on a FAIL."""
-    found = []
-
-    def line(ok, what, fix=""):
-        found.append(ok)
-        print(f"{LABELS[ok]}  {what}" + (f": {fix}" if fix and ok is not True else ""))
-    line(FILE.exists() or None, f"settings {FILE}", "not found; README.md lists the keys")
-    line(bool(PREFIXES) or None, f"jira_prefixes {', '.join(JIRA_PREFIXES)}".strip(), "empty, so no session finds a ticket")
-    line(DEV.is_dir() or None, f"dev_dir {DEV}", "not a folder; sessions are named by their own folder")
-    check_claude(line)
-    if ledger.LEDGER.exists():
-        with ledger.LEDGER.open() as rows:
-            line(True, f"ledger {ledger.LEDGER}, {sum(1 for _ in rows)} sessions")
-    else:
-        line(None, f"ledger {ledger.LEDGER}", "none yet; the first report builds it from the transcripts")
-    check_sources(line)
-    if False in found:
-        sys.exit(1)
-
-
 def main():
     command, args = (sys.argv[1] if len(sys.argv) > 1 else ""), sys.argv[2:]
     if command == "record":
@@ -599,7 +564,9 @@ def main():
     elif command == "note":
         save(NOTES, {checked(k): text for k, text in pairs(args, "note KEY TEXT [KEY TEXT...]")})
     elif command == "check":
-        check()
+        configure.check()
+    elif command == "setup":
+        configure.setup(os.path.abspath(__file__))  # keeps the link it runs through, for the hook
     else:
         sys.exit(__doc__)
 

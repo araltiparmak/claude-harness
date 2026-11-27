@@ -37,7 +37,7 @@ Each skill puts its `description` into every session.
 
 - Keep one trigger phrase per distinct case and cut the synonyms. A description too short to fire costs more than its tokens.
 - Add `disable-model-invocation: true` only to skills you always type by name: their description stays out of context, and Claude never starts them on its own.
-- List only the skills you use in `external-skills.yaml`, and delete the line of a skill that never fires. `scripts/eliminate.py` lists the skills, plugins and MCP servers no session used, and removes the ones you pick.
+- List only the skills you use in `external-skills.yaml`, and delete the line of a skill that never fires. `/eliminate` (or `skills/eliminate/eliminate.py`) lists the skills, plugins and MCP servers no session used, and removes the ones you pick.
 
 ## Instructions
 

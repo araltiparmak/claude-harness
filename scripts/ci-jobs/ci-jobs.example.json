@@ -1,0 +1,7 @@
+{
+  "approval_jobs": ["deploy-dev-approval", "deploy-test-approval"],
+  "jira": {
+    "url": "https://yourcompany.atlassian.net",
+    "prefixes": ["ABC"]
+  }
+}

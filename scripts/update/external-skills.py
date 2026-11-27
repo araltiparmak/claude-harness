@@ -21,7 +21,7 @@ import shutil
 import sys
 from pathlib import Path
 
-LIST = Path(__file__).resolve().parent.parent / "external-skills.yaml"
+LIST = Path(__file__).resolve().parents[2] / "external-skills.yaml"
 # Same folder as CACHE in update.sh.
 CACHE = Path(os.environ.get("XDG_CACHE_HOME") or Path.home() / ".cache") / "claude-harness" / "repos"
 REPO = re.compile(r"(https://[^\s/]+/[^\s/]+/[^\s/:]+?)(\.git)?:")

@@ -1,10 +1,10 @@
 # CLAUDE.md
 
-This repo holds a Claude Code setup: general-purpose skills (`skills/<group>/<name>/`), settings and global instructions (`claude/`), and `scripts/update.sh`, which installs all of it into `~/.claude`. The repo is public. Anything tied to private projects, accounts or data goes in an optional second skills repo instead (`PRIVATE_DIR`, see the README): skills in its `skills/`, settings in its `claude/settings.json` overlay. Third-party skills are not copied here: `update.sh` links the ones listed in `external-skills.yaml`.
+This repo holds a Claude Code setup: general-purpose skills (`skills/<group>/<name>/`), settings and global instructions (`claude/`), and `scripts/update/update.sh`, which installs all of it into `~/.claude`. The repo is public. Anything tied to private projects, accounts or data goes in an optional second skills repo instead (`PRIVATE_DIR`, see the README): skills in its `skills/`, settings in its `claude/settings.json` overlay. Third-party skills are not copied here: `update.sh` links the ones listed in `external-skills.yaml`.
 
 ## Language
 
-Everything in this repo is English: skills (every file inside them), docs, scripts, comments and commit messages. `scripts/check.sh` fails on any letter outside ASCII.
+Everything in this repo is English: skills (every file inside them), docs, scripts, comments and commit messages. `scripts/check/check.sh` fails on any letter outside ASCII.
 
 ## Skill layout
 
@@ -20,14 +20,14 @@ Related skills share a group folder, such as `visuals/` or `dev/`. A folder with
 
 ## Settings
 
-Change settings in `claude/settings.json` (or the private overlay), then run `scripts/update.sh`. Never edit `~/.claude/settings.json` directly: it is generated, and when the live file has drifted from what `update.sh` last wrote, the script prints the diff and leaves the file alone. When that happens, move the change into the repo, then re-run. `model`, `effortLevel` and `modelSettings` never count as drift; the repo's values come back on each run. Write paths as `$HOME/...`, never `/Users/...`.
+Change settings in `claude/settings.json` (or the private overlay), then run `scripts/update/update.sh`. Never edit `~/.claude/settings.json` directly: it is generated, and when the live file has drifted from what `update.sh` last wrote, the script prints the diff and leaves the file alone. When that happens, move the change into the repo, then re-run. `model`, `effortLevel` and `modelSettings` never count as drift; the repo's values come back on each run. Write paths as `$HOME/...`, never `/Users/...`.
 
 Global instructions live in `claude/CLAUDE.md`; `~/.claude/CLAUDE.md` is a link to it, so an edit to either one changes the repo file.
 
 ## Before finishing a change
 
 1. Keep the skill table in `README.md` listing exactly the skills in `skills/`.
-2. Run `scripts/check.sh`; CI runs the same script.
-3. Run `scripts/update.sh` so `~/.claude` matches.
+2. Run `scripts/check/check.sh`; CI runs the same script.
+3. Run `scripts/update/update.sh` so `~/.claude` matches.
 
 To take a skill from another repo, or drop one, edit `external-skills.yaml`; plugins are listed in the README. Before adding a plugin, MCP server or skill, read `TOKEN-EFFICIENCY.md`: whatever loads at session start costs tokens on every turn.

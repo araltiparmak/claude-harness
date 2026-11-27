@@ -10,7 +10,7 @@ set -euo pipefail
 # - SKIP_SKILLS names skills or groups this machine does not use ("dev mindmap"); they are
 #   not linked, and their old links are removed.
 
-MINE="$(cd "$(dirname "$0")/.." && pwd)"
+MINE="$(cd "$(dirname "$0")/../.." && pwd)"
 PRIVATE="${PRIVATE_DIR:-$HOME/dev/private-skills}"
 PRIVATE_URL="${PRIVATE_URL:-}"
 DEST="$HOME/.claude/skills"
@@ -58,7 +58,7 @@ main() {
   sync_repo "$MINE" ""
 
   echo "== settings"
-  python3 "$MINE/scripts/build-settings.py" \
+  python3 "$MINE/scripts/update/build-settings.py" \
     "$MINE/claude/settings.json" "$PRIVATE/claude/settings.json" \
     "$HOME/.claude/settings.json" "$HOME/.claude/.harness/settings.last.json" \
     || echo "warn: settings.json not updated (see above)" >&2
@@ -97,7 +97,7 @@ main() {
   ext_ok=0
   if [[ -f "$EXTERNAL" ]]; then
     echo "== link external skills"
-    if pairs="$(python3 -I "$MINE/scripts/external-skills.py")"; then
+    if pairs="$(python3 -I "$MINE/scripts/update/external-skills.py")"; then
       ext_ok=1
       while IFS= read -r url; do
         mkdir -p "$(dirname "$CACHE/${url#https://}")"
@@ -111,7 +111,7 @@ main() {
         esac
         ext_names+="$name "
         link "$src" "$name" && echo "linked  $name (external)"
-      done < <(python3 -I "$MINE/scripts/external-skills.py" resolve)
+      done < <(python3 -I "$MINE/scripts/update/external-skills.py" resolve)
     else
       echo "warn: external-skills.yaml has problems; external links left as they were" >&2
     fi

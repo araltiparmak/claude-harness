@@ -2,9 +2,9 @@
 set -euo pipefail
 
 # Checks the repo is consistent. Runs in CI on every push and pull request, and
-# locally with scripts/check.sh. Prints every problem, then exits 1 if any.
+# locally with scripts/check/check.sh. Prints every problem, then exits 1 if any.
 
-cd "$(dirname "$0")/.."
+cd "$(dirname "$0")/../.."
 fail=0
 problem() { echo "FAIL: $*"; fail=1; }
 
@@ -36,9 +36,9 @@ while IFS= read -r path; do
   [[ -f "$path" ]] || problem "README links to a missing file: $path"
 done < <(grep -oE 'skills/[a-z0-9/-]+/SKILL\.md' README.md | sort -u)
 
-# external-skills.yaml has the one shape scripts/external-skills.py reads.
+# external-skills.yaml has the one shape scripts/update/external-skills.py reads.
 if [[ -f external-skills.yaml ]]; then
-  python3 -I scripts/external-skills.py >/dev/null || problem "external-skills.yaml has the problems above"
+  python3 -I scripts/update/external-skills.py >/dev/null || problem "external-skills.yaml has the problems above"
 fi
 
 # Settings are valid JSON, and the public file carries no machine-specific paths.
@@ -50,7 +50,7 @@ if grep -q '/Users/' claude/settings.json; then problem "claude/settings.json co
 scripts_sh=()
 while IFS= read -r f; do scripts_sh+=("$f"); done < <(find scripts skills -name '*.sh' | sort)
 for script in ${scripts_sh[@]+"${scripts_sh[@]}"}; do bash -n "$script" || problem "$script: syntax error"; done
-for py in scripts/*.py; do python3 -m py_compile "$py" || problem "$py: syntax error"; done
+while IFS= read -r py; do python3 -m py_compile "$py" || problem "$py: syntax error"; done < <(find scripts skills -name '*.py' | sort)
 while IFS= read -r mjs; do node --check "$mjs" || problem "$mjs: syntax error"; done < <(find skills -name '*.mjs' | sort)
 # Python tests (test_*.py) of skills and scripts run from their own folder.
 while IFS= read -r t; do

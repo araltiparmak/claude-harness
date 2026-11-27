@@ -11,10 +11,12 @@ the ones that hold your commits.
 Each pull request: date, repo, title, url, status (open, draft, merged, closed), author, branch, and text (its
 title, branch, description and commit messages, where the report looks for ticket keys).
 """
+import functools
 import json
 import re
 import subprocess
 import sys
+from collections import defaultdict
 from datetime import date, timedelta
 
 from ledger import local_day, moment
@@ -93,6 +95,39 @@ def output(cmd, cwd=None):
 
 
 CACHE = DATA / "commits.json"  # {sha: [texts of its pull requests]}; a commit in a pull request stays there
+DEFAULT_BRANCHES = {"main", "master", "develop", "HEAD"}  # every branch starts from one; successors leaves them out
+REFLOG = re.compile(r"(.+)@\{(\d+)\} (.*)")  # a reflog line as --date=unix --format='%gd %gs' prints it
+MOVED = re.compile(r"checkout: moving from (\S+) to (\S+)")
+RENAMED = re.compile(r"Branch: renamed refs/heads/(\S+) to refs/heads/(\S+)")
+
+
+@functools.lru_cache(maxsize=None)
+def successors(repo_dir):
+    """{branch: the branch it became} in the repo at repo_dir, read from its reflogs: a branch renamed, or a
+    branch created and checked out while on it (git checkout -b, git switch -c), so work done on a branch before it
+    got its ticket key still finds the pull request. A branch that became several, and the DEFAULT_BRANCHES, are
+    left out. {} when git fails."""
+    try:
+        lines = output(["git", "log", "-g", "--all", "--date=unix", "--format=%gd %gs"], repo_dir).splitlines()
+    except Exception:  # not a git repo, no reflog, git missing
+        return {}
+    created, moves, found = defaultdict(set), [], defaultdict(set)  # created: {branch: the times it was created}
+    for line in lines:
+        entry = REFLOG.fullmatch(line)
+        if not entry:
+            continue
+        ref, when, what = entry[1], int(entry[2]), entry[3]
+        moved, renamed = MOVED.fullmatch(what), RENAMED.fullmatch(what)
+        if what.startswith("branch: Created from"):
+            created[ref].add(when)
+        elif moved and ref == "HEAD":
+            moves.append((moved[1], moved[2], when))
+        elif renamed:
+            found[renamed[1]].add(renamed[2])
+    for old, new, when in moves:
+        if any(abs(when - t) <= 1 for t in created[new]):  # the checkout that created the branch
+            found[old].add(new)
+    return {old: next(iter(new)) for old, new in found.items() if len(new) == 1 and old not in DEFAULT_BRANCHES}
 
 
 def commit_pulls(repo_dir, start, end):

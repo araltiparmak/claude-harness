@@ -1,8 +1,7 @@
 """The HTML page of a report, from the data worklog.collect returns.
 
-Page(data) is the page for you: the work with time and cost, then what the sessions say about how you use
-Claude (tips, measures, the most expensive sessions, tokens, context, misc). Page(data, share=True) is the page
-for other readers: the work, outcomes and time, with no costs and none of the Using Claude sections.
+Page(data) is the whole page: the work with time and cost, then what the sessions say about how you use Claude
+(tips, measures, the most expensive sessions, tokens, context, misc). /worklog share publishes this same page.
 """
 import html
 from collections import defaultdict
@@ -107,8 +106,7 @@ def repos(tickets):
 
 def ticket_cell(key, summary, mapped):
     """A ticket's link, with its summary and how many of its sessions came from map in the small print."""
-    marked = f" · {plural(mapped, 'session')} mapped by /worklog" if mapped else ""
-    return key, jira_link(key), summary + marked
+    return key, jira_link(key), summary + (f" · {plural(mapped, 'session')} mapped by /worklog" if mapped else "")
 
 
 def bar_cell(shown, value, top):
@@ -185,21 +183,17 @@ def peaks_chart(peaks):
 # ---- the page
 
 class Page:
-    """One report page. share=True is the page for other readers: time instead of cost everywhere, and no
-    Using Claude sections."""
+    """One report page: the work with time and cost, and every Using Claude section."""
 
-    def __init__(self, data, share=False):
-        self.data, self.share = data, share
+    def __init__(self, data):
+        self.data = data
         self.groups = self.grouped()
 
-    # -- building blocks that depend on who reads the page
+    # -- building blocks
 
     def grid(self, head, rows, classes=None):
         """An HTML table. A cell that is a (text, url, small print) tuple becomes a link (when there is a url)
-        with a line under it. The Cost column is left out of a shared page."""
-        if self.share and "Cost" in head:
-            i = head.index("Cost")
-            head, rows = head[:i] + head[i + 1:], [r[:i] + r[i + 1:] for r in rows]
+        with a line under it."""
 
         def cell(c):
             if not isinstance(c, tuple):
@@ -211,39 +205,40 @@ class Page:
             tag("tr", [cell(c) for c in row], **({"class_": cls} if cls else {}))
             for row, cls in zip(rows, classes or [""] * len(rows))])], class_="scroll")
 
-    def section(self, title, intro, *parts, usd=None, minutes=None, slot=None):
-        """A boxed section with its total at the right of the title: cost on your page, time on a shared one."""
-        total = ""
-        if self.share and minutes:
-            total = hours(minutes)
-        elif not self.share and usd and paid(usd):
-            total = money(usd)
+    def section(self, title, intro, *parts, usd=None, slot=None):
+        """A boxed section with its cost at the right of the title."""
+        total = money(usd) if usd and paid(usd) else ""
         name = [(dot(slot) if slot is not None else "") + (title[0] if isinstance(title, list) else html.escape(title))]
         head = tag("div", [tag("h2", name)] + ([tag("span", total, class_="total")] if total else []), class_="head")
         return tag("section", [head] + ([tag("p", intro, class_="intro")] if intro else []) + list(parts),
                    class_="box")
 
     def model_split(self, models):
-        """'Opus $4.10 (80%), Sonnet $1.02 (20%)', the most used first; only the percentages when shared."""
+        """'Opus $4.10 (80%), Sonnet $1.02 (20%)', the most used first."""
         total = sum(models.values())
         if not paid(total):
             return "-"
         parts = sorted(((m, usd) for m, usd in models.items() if paid(usd)), key=lambda item: -item[1])
-        return ", ".join(f"{m} {'' if self.share else money(usd) + ' '}({usd / total:.0%})" for m, usd in parts)
+        return ", ".join(f"{m} {money(usd)} ({usd / total:.0%})" for m, usd in parts)
 
     # -- the work
 
     def grouped(self):
-        """The overview's rows, keyed by id: tickets, support, reviews and other work, each with the cost and time
-        of its parts (tickets, the reviews, a repo's other work), which add up to the total, and a colour slot. A
-        group with no parts is left out."""
+        """The overview's rows, keyed by id: tickets, support, reviews, tooling and other work, each with the cost
+        and time of its parts (tickets, the reviews, a repo's tooling or other work), which add up to the total, and
+        a colour slot. A group with no parts is left out."""
         d = self.data
-        tickets, support, other, reviews = d["tickets"], d["support"], d["other"], d["reviews"]
+        tickets, support, reviews = d["tickets"], d["support"], d["reviews"]
+        tooling, other = d["tooling"], d["other"]  # {repo: Work}
+
+        def by_cost(works):
+            """The repos of {repo: Work}, the most expensive first."""
+            return ", ".join(sorted(works, key=lambda repo: -works[repo].cost))
         rows = [("tickets", "Tickets", len(tickets), repos(tickets), tickets),
                 ("support", "Support tickets", len(support), repos(support), support),
                 ("reviews", "Code reviews", "-", "-", [reviews] if d["prs"]["reviewed"] or paid(reviews.cost) else []),
-                ("other", "Other work", "-", ", ".join(sorted(other, key=lambda r: -other[r].cost)),
-                 list(other.values()))]
+                ("tooling", "Tooling", "-", by_cost(tooling), list(tooling.values())),
+                ("other", "Other work", "-", by_cost(other), list(other.values()))]
         found = {gid: {"name": name, "tickets": n, "repos": r, "cost": sum(p.cost for p in parts),
                        "minutes": sum(p.minutes for p in parts)}
                  for gid, name, n, r, parts in rows if parts}
@@ -268,36 +263,33 @@ class Page:
             part = ("" if d["timed"] == d["sessions"]
                     else f", from the {d['timed']} of {d['sessions']} sessions that recorded it")
             tiles.append((hours(d["minutes"]), "of active time in Claude Code" + part))
-        if not self.share:
-            tiles.append((money(d["total"]), "at API list prices"))
+        tiles.append((money(d["total"]), "at API list prices"))
         return tiles
 
     def overview(self):
-        """The groups as a table, after a bar and legend that split the whole between them: cost on your page,
-        time on a shared one."""
-        rows, basis = list(self.groups.values()), "minutes" if self.share else "cost"
-        top, total = max([g[basis] for g in rows] + [0.01]), sum(g[basis] for g in rows) or 0.01
+        """The groups as a table, after a bar and legend that split the cost between them."""
+        rows = list(self.groups.values())
+        top, total = max([g["cost"] for g in rows] + [0.01]), sum(g["cost"] for g in rows) or 0.01
 
         def share(g):
-            if not g[basis]:
+            if not g["cost"]:
                 return "-"
-            part = g[basis] / total
+            part = g["cost"] / total
             return "<1%" if part < 0.005 else f"{part:.0%}"
 
         def spend(g):
-            bar = tag("div", [tag("span", "", class_=f"c{g['slot']}", style=f"width:{g[basis] / top * 100:.1f}%")],
+            bar = tag("div", [tag("span", "", class_=f"c{g['slot']}", style=f"width:{g['cost'] / top * 100:.1f}%")],
                       class_="bar")
-            return [html.escape(hours(g["minutes"]) if self.share else money(g["cost"])) + bar]
-        shown = [g for g in rows if g[basis] and (self.share or paid(g["cost"]))]
-        split = tag("div", [tag("span", "", class_=f"c{g['slot']}", style=f"flex-grow:{g[basis] / total:.4f}",
+            return [html.escape(money(g["cost"])) + bar]
+        shown = [g for g in rows if paid(g["cost"])]
+        split = tag("div", [tag("span", "", class_=f"c{g['slot']}", style=f"flex-grow:{g['cost'] / total:.4f}",
                                 title=f"{g['name']}: {share(g)}") for g in shown], class_="split")
         legend = tag("ul", [tag("li", [dot(g["slot"]) + html.escape(g["name"]) + " " + tag("strong", share(g))])
                             for g in shown], class_="legend")
-        head = ["Group", "Tickets", "Repos"] + (["Share", "Time"] if self.share else ["Time", "Share", "Cost"])
-        body = [[[dot(g["slot"]) + html.escape(g["name"])], g["tickets"], g["repos"]]
-                + ([share(g), spend(g)] if self.share else [hours(g["minutes"]), share(g), spend(g)]) for g in rows]
-        intro = ("Where the time went, by kind." if self.share else
-                 "Where the work went, by kind. A share is the group's part of the session cost.")
+        head = ["Group", "Tickets", "Repos", "Time", "Share", "Cost"]
+        body = [[[dot(g["slot"]) + html.escape(g["name"])], g["tickets"], g["repos"], hours(g["minutes"]), share(g),
+                 spend(g)] for g in rows]
+        intro = "Where the work went, by kind. A share is the group's part of the session cost."
         return self.section("Overview", intro, split + legend + self.grid(head, body))
 
     def ticket_boxes(self, tickets, slot, name):
@@ -326,7 +318,7 @@ class Page:
         intro += f" Pull requests: {'; '.join(titles)}." if titles else ""
         intro += " The total includes the sub-tasks." if t.subs else ""
         return self.section(title, intro.strip(), self.grid(head, rows, [""] + ["sub"] * len(t.subs)),
-                            usd=t.cost, minutes=t.minutes, slot=slot)
+                            usd=t.cost, slot=slot)
 
     def small_box(self, small, head, typed, slot, name):
         """The tickets that cost less than SMALL in one box, a row each with its sub-tasks included and its note in
@@ -344,19 +336,23 @@ class Page:
                         + [worked_on(set().union(*(w.days for w in t.works))),
                            pr_links([pr for w in t.works for pr in w.prs]), self.model_split(models),
                            hours(t.minutes), money(t.cost)])
-        intro = (f"{plural(len(small), name[:-1])} with little session time." if self.share else
-                 f"{plural(len(small), name[:-1])} that cost less than {money(SMALL)} each, sub-tasks included.")
+        intro = f"{plural(len(small), name[:-1])} that cost less than {money(SMALL)} each, sub-tasks included."
         return self.section(f"Smaller {name}", intro, self.grid(head, rows), usd=sum(t.cost for t in small),
-                            minutes=sum(t.minutes for t in small), slot=slot)
+                            slot=slot)
 
     def work(self):
-        """The overview, then the ticket boxes, pull requests without a ticket, other work and code reviews."""
+        """The overview, then the ticket boxes, pull requests without a ticket, tooling, other work and code
+        reviews."""
         d, g = self.data, self.groups
         prs = d["prs"]
 
         def boxed(gid, title, intro, *parts):
-            return self.section(title, intro, *parts, usd=g[gid]["cost"], minutes=g[gid]["minutes"],
-                                slot=g[gid]["slot"])
+            return self.section(title, intro, *parts, usd=g[gid]["cost"], slot=g[gid]["slot"])
+
+        def by_repo(works):
+            return self.grid(["Repo", "Worked on", "Time", "Cost"],
+                             [[repo, worked_on(o.days), hours(o.minutes), money(o.cost)]
+                              for repo, o in sorted(works.items(), key=lambda item: -item[1].cost)])
         body = [self.overview()]
         for gid in ("tickets", "support"):
             if d[gid]:
@@ -367,11 +363,12 @@ class Page:
                 ["Opened", "Pull request", "Status"],
                 [[day(pr["date"]), (pr["title"], pr["url"], pr["repo"]), status_cell(pr["status"])]
                  for pr in without_ticket])))
+        if d["tooling"]:
+            body.append(boxed("tooling", "Tooling", "Sessions in the repos of your own tools (tooling_repos) with no "
+                              "Jira ticket behind them, by repo.", by_repo(d["tooling"])))
         if d["other"]:
             body.append(boxed("other", "Other work", "Sessions with no Jira ticket or review behind them, by repo.",
-                              self.grid(["Repo", "Worked on", "Time", "Cost"],
-                                        [[repo, worked_on(o.days), hours(o.minutes), money(o.cost)]
-                                         for repo, o in sorted(d["other"].items(), key=lambda item: -item[1].cost)])))
+                              by_repo(d["other"])))
         if "reviews" in g:
             intro = ("Pull requests by teammates that you reviewed." if prs["reviewed"]
                      else "GitHub listed no reviews in the period.")
@@ -406,8 +403,8 @@ class Page:
                           f"{r['context']['peak'] // 1000}k" if "context" in r else "-",
                           r.get("prompts", "-"), r.get("interrupts", "-"), r.get("errors", "-"), money(cost(r))]
                          for r in m["top"]])
-        intro = ("From your sessions alone, for your own learning; --share leaves this out. Rows recorded before a "
-                 "measure was kept do not count for it.")
+        intro = ("From your sessions alone, for your own learning. Rows recorded before a measure was kept do not "
+                 "count for it.")
         return self.section("Using Claude well", intro, tag("h3", "What to try"), advice,
                             tag("h3", "Measures"), self.grid(["Measure", "This period"], rows),
                             tag("h3", f"The {len(m['top'])} most expensive sessions"), top)
@@ -478,15 +475,11 @@ class Page:
                                tag("p", f"{day(d['since'])} to {day(d['until'])}", class_="period")]),
                 tag("div", [tag("div", [tag("strong", n), tag("span", label)], class_="tile")
                             for n, label in self.headline()], class_="tiles")]
-        if not self.share:
-            body.append(self.using_claude())
-        body += self.work()
-        if not self.share:
-            body += [self.tokens_and_context(), self.misc()]
+        body += [self.using_claude(), *self.work(), self.tokens_and_context(), self.misc()]
         body.append(tag("footer", "Sources: Jira, GitHub and the records Claude Code keeps on this computer. "
                         f"Time is active time in sessions: a gap over {IDLE} minutes counts as a break, and sessions "
                         "that ran side by side add up. "
-                        + ("" if self.share else "Costs are what the sessions would cost at Claude API list prices. ")
+                        + "Costs are what the sessions would cost at Claude API list prices. "
                         + f"Generated on {day(date.today())}."))
         file.parent.mkdir(parents=True, exist_ok=True)
         file.write_text(Template(TEMPLATE.read_text()).substitute(

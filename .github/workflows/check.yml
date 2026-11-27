@@ -18,7 +18,7 @@ jobs:
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@v4
-      - run: scripts/check.sh
+      - run: scripts/check/check.sh
       - name: Build the deck examples
         run: |
           for deck in skills/visuals/deck/examples/*.json; do

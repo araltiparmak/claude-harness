@@ -4,6 +4,7 @@
   "jira_prefixes": [],
   "support_prefixes": [],
   "exclude_repos": [],
+  "tooling_repos": [],
   "dev_dir": "~/dev",
   "jira_in_progress": "In Progress"
 }
