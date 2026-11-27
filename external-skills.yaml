@@ -5,29 +5,17 @@
 # that skill's SKILL.md. scripts/check.sh rejects any other shape.
 
 https://github.com/mattpocock/skills:
-  - code-review
-  - codebase-design
-  - diagnosing-bugs
-  - domain-modeling
   - grill-me
   - grill-with-docs
   - grilling
   - handoff
-  - implement
-  - improve-codebase-architecture
-  - pr
-  - prototype
-  - research
+#  - pr
   - retro
   - teach
-  - to-questionnaire
-  - wait-what
-  - wayfinder
-  - wizard
   - writing-for-agents
 
 https://github.com/AminBlg/SimpleEnglish:
   - simple-english
 
-https://github.com/yetone/kill-ai-slop:
-  - kill-ai-slop
+#https://github.com/yetone/kill-ai-slop:
+#  - kill-ai-slop

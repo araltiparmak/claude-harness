@@ -21,7 +21,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 # The approval jobs that may be approved from here. Put your config's job names here.
-JOBS = ["hold-deploy-dev", "hold-deploy-test"]
+JOBS = ["deploy-dev-approval", "deploy-test-approval"]
 
 API = "https://circleci.com/api/v2"
 PRS_QUERY = """{ search(query: "is:pr is:open author:@me archived:false", type: ISSUE, first: 100) {
@@ -170,8 +170,11 @@ def main():
     args = sys.argv[1:]
     if args[:1] == ["serve"]:
         port = int(args[1]) if len(args) > 1 else 8765
-        print(f"dashboard at http://localhost:{port} (Ctrl-C to stop)")
-        ThreadingHTTPServer(("127.0.0.1", port), Dashboard).serve_forever()
+        url = f"http://localhost:{port}"
+        server = ThreadingHTTPServer(("127.0.0.1", port), Dashboard)
+        print(f"dashboard at {url} (Ctrl-C to stop)")
+        subprocess.run(["open", "-a", "Google Chrome", url], check=False)
+        server.serve_forever()
         return
     prs = snapshot()
     if not prs:

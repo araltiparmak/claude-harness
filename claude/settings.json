@@ -1,8 +1,4 @@
 {
-  "attribution": {
-    "commit": "",
-    "pr": ""
-  },
   "autoCompactWindow": 250000,
   "cleanupPeriodDays": 90,
   "permissions": {
@@ -152,7 +148,8 @@
     "design@synced": false,
     "engineering@synced": false,
     "productivity@synced": false,
-    "cowork-plugin-management@synced": false
+    "cowork-plugin-management@synced": false,
+    "postman@claude-plugins-official": false
   },
   "effortLevel": "medium",
   "modelSettings": {
