@@ -6,51 +6,115 @@
 <title>CI Jobs</title>
 <style>
   :root {
-    --bg: #f6f6f4; --card: #ffffff; --text: #1d1d1b; --muted: #6b6b66; --line: #e3e3de;
-    --ok: #1f7a3d; --fail: #b42318; --run: #1d5fbf; --hold: #a15c00; --idle: #8a8a84;
-    --button: #1d1d1b; --button-text: #ffffff;
+    --bg: #f4f6fa; --card: #ffffff; --text: #0f172a; --muted: #64748b; --line: #e2e8f0; --soft: #f1f5f9;
+    --ok: #15803d; --fail: #dc2626; --run: #0284c7; --hold: #4f46e5; --idle: #cbd5e1;
+    --hold-bg: #eef2ff; --fail-bg: #fef2f2; --accent: #4f46e5; --accent-text: #ffffff; --jira: #0c66e4;
+    --dev: #4a8c63; --dev-bg: #eef6f0; --test: #c2410c; --test-bg: #fff1e8;
+    --staging: #1d4ed8; --staging-bg: #eaf0fe; --prod: #be123c; --prod-bg: #fdecf0;
   }
   @media (prefers-color-scheme: dark) {
     :root {
-      --bg: #151514; --card: #1e1e1c; --text: #ececea; --muted: #9a9a94; --line: #2f2f2c;
-      --ok: #4cc27a; --fail: #f0705f; --run: #6ea6f5; --hold: #e5a64a; --idle: #85857f;
-      --button: #ececea; --button-text: #151514;
+      --bg: #0b1120; --card: #111a2e; --text: #e2e8f0; --muted: #94a3b8; --line: #1e293b; --soft: #1a2540;
+      --ok: #4ade80; --fail: #f87171; --run: #38bdf8; --hold: #a5b4fc; --idle: #334155;
+      --hold-bg: #1e1b4b; --fail-bg: #2a1418; --accent: #6366f1; --accent-text: #ffffff; --jira: #579dff;
+      --dev: #8fd4a8; --dev-bg: #13261c; --test: #fb923c; --test-bg: #2d1a0e;
+      --staging: #60a5fa; --staging-bg: #13213f; --prod: #fb7185; --prod-bg: #2e1219; --env-text: #0b1120;
     }
   }
   * { box-sizing: border-box; }
   body { margin: 0; background: var(--bg); color: var(--text);
          font: 14px/1.45 ui-sans-serif, -apple-system, "Segoe UI", sans-serif; }
   main { max-width: 900px; margin: 0 auto; padding: 24px 16px 48px; }
-  header { display: flex; align-items: baseline; gap: 12px; margin-bottom: 20px; flex-wrap: wrap; }
+  a { color: inherit; }
+  .mono { font-family: ui-monospace, Menlo, monospace; font-size: 12.5px; }
+
+  header { display: flex; align-items: center; gap: 12px; margin-bottom: 16px; flex-wrap: wrap; }
   h1 { font-size: 20px; margin: 0; }
-  #stamp { color: var(--muted); flex: 1; }
+  #stamp { color: var(--muted); flex: 1; font-size: 13px; }
   button { font: inherit; border: 1px solid var(--line); background: var(--card); color: var(--text);
            border-radius: 6px; padding: 4px 12px; cursor: pointer; }
-  button.approve { background: var(--button); color: var(--button-text); border-color: var(--button); }
-  button:disabled { opacity: .5; cursor: default; }
+  button:hover { border-color: var(--muted); }
+  button.approve { background: var(--accent); color: var(--accent-text); border-color: var(--accent); font-weight: 600; }
+  button.approve:hover { filter: brightness(1.08); }
+  button:disabled { opacity: .5; cursor: default; filter: none; }
+
+  #summary { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 16px; }
+  .chip { display: inline-flex; align-items: center; gap: 6px; padding: 4px 10px; border-radius: 999px;
+          background: var(--card); border: 1px solid var(--line); font-size: 13px; }
+  .chip b { font-variant-numeric: tabular-nums; }
+  .chip.hold { color: var(--hold); border-color: var(--hold); }
+  .chip.fail { color: var(--fail); border-color: var(--fail); }
+  .chip.run { color: var(--run); border-color: var(--run); }
+  #error { color: var(--fail); margin-bottom: 12px; }
+  #error:empty { display: none; }
+
   section { background: var(--card); border: 1px solid var(--line); border-radius: 8px;
             padding: 14px 16px; margin-bottom: 12px; }
-  .pr { display: flex; gap: 8px; align-items: baseline; flex-wrap: wrap; }
-  .pr a { color: var(--text); font-weight: 600; text-decoration: none; }
-  .pr a:hover { text-decoration: underline; }
-  .branch { color: var(--muted); font-family: ui-monospace, Menlo, monospace; font-size: 12px; }
-  .note { color: var(--muted); margin-top: 6px; }
-  .wf { margin-top: 12px; }
-  .wf-head { display: flex; gap: 8px; align-items: baseline; }
-  .wf-head a { color: var(--muted); font-size: 13px; }
-  table { width: 100%; border-collapse: collapse; margin-top: 4px; }
-  td { padding: 5px 0; border-top: 1px solid var(--line); vertical-align: middle; }
-  td.name { font-family: ui-monospace, Menlo, monospace; font-size: 13px; overflow-wrap: anywhere; }
-  td.act { text-align: right; width: 1%; white-space: nowrap; padding-left: 12px; }
+  section.needs { border-left: 3px solid var(--hold); }
+  section.broken { border-left: 3px solid var(--fail); }
+  .pr-head { display: flex; gap: 8px; align-items: baseline; flex-wrap: wrap; }
+  .pr-head .ref { font-weight: 600; text-decoration: none; white-space: nowrap; }
+  .pr-head .ref:hover { text-decoration: underline; }
+  .pr-head .owner { color: var(--muted); font-weight: 400; }
+  .title { overflow-wrap: anywhere; }
+  .ticket { font-size: 12px; font-weight: 600; text-decoration: none; white-space: nowrap; color: var(--jira);
+            border: 1px solid currentColor; border-radius: 999px; padding: 0 8px; }
+  .ticket:hover { background: var(--soft); }
+  .branch { color: var(--muted); margin-top: 2px; overflow-wrap: anywhere; }
+  .note { color: var(--muted); margin-top: 8px; }
+
+  .wf { margin-top: 12px; padding-top: 10px; border-top: 1px solid var(--line); }
+  .wf-head { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+  .wf-head .link { color: var(--muted); font-size: 12.5px; margin-left: auto; }
+  .strip { display: flex; gap: 3px; margin-top: 8px; }
+  .strip span { flex: 1; height: 6px; border-radius: 3px; background: var(--idle); min-width: 0; }
+  section, .wf, .rows { min-width: 0; }
+
+  .rows { margin-top: 8px; display: grid; gap: 4px; }
+  .row { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; gap: 12px; align-items: center;
+         padding: 6px 10px; border-radius: 6px; }
+  .row.hold { background: var(--hold-bg); }
+  .row.fail { background: var(--fail-bg); }
+  .row .name { overflow-wrap: anywhere; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+  .env-dev { --env: var(--dev); --env-bg: var(--dev-bg); }
+  .env-test { --env: var(--test); --env-bg: var(--test-bg); }
+  .env-staging { --env: var(--staging); --env-bg: var(--staging-bg); }
+  .env-prod { --env: var(--prod); --env-bg: var(--prod-bg); }
+  .env { font: 700 10.5px/1 ui-sans-serif, -apple-system, "Segoe UI", sans-serif; letter-spacing: .06em;
+         text-transform: uppercase; color: var(--env); border: 1px solid var(--env); border-radius: 4px;
+         padding: 3px 5px; }
+  .row.hold[class*="env-"] { background: var(--env-bg); box-shadow: inset 3px 0 0 var(--env); }
+  .row.hold[class*="env-"] .status { color: var(--env); }
+  .row[class*="env-"] button.approve { background: var(--env); border-color: var(--env);
+                                       color: var(--env-text, #ffffff); }
+  .row .msg { grid-column: 1 / -1; color: var(--fail); font-size: 12.5px; }
+  .row .act { min-width: 0; }
+
+  details { margin-top: 6px; }
+  summary { cursor: pointer; color: var(--muted); font-size: 12.5px; padding: 2px 0; user-select: none; }
+  summary:hover { color: var(--text); }
+  details .rows { gap: 0; }
+  details .row { border-radius: 0; border-top: 1px solid var(--line); padding: 4px 10px; }
+
   .status { font-size: 12px; font-weight: 600; white-space: nowrap; }
   .status::before { content: ""; display: inline-block; width: 8px; height: 8px; border-radius: 50%;
-                    background: currentColor; margin-right: 6px; }
+                    background: currentColor; margin-right: 6px; vertical-align: 0; }
   .s-success { color: var(--ok); }
   .s-failed, .s-error, .s-infrastructure_fail, .s-timedout, .s-failing, .s-unauthorized { color: var(--fail); }
   .s-running, .s-queued { color: var(--run); }
   .s-on_hold { color: var(--hold); }
-  .s-blocked, .s-not_run, .s-canceled, .s-not_running { color: var(--idle); }
-  #error { color: var(--fail); margin-bottom: 12px; }
+  .s-blocked, .s-not_run, .s-canceled, .s-not_running { color: var(--muted); }
+  .strip .s-success { background: var(--ok); }
+  .strip .s-failed, .strip .s-error, .strip .s-infrastructure_fail, .strip .s-timedout,
+  .strip .s-unauthorized { background: var(--fail); }
+  .strip .s-running, .strip .s-queued { background: var(--run); }
+  .strip .s-on_hold { background: var(--hold); }
+
+  @media (max-width: 560px) {
+    .row { grid-template-columns: minmax(0, 1fr) auto; }
+    .row .act { grid-column: 1 / -1; }
+    .row .act button { width: 100%; }
+  }
 </style>
 </head>
 <body>
@@ -60,17 +124,26 @@
     <span id="stamp">loading...</span>
     <button id="refresh">Refresh</button>
   </header>
+  <div id="summary"></div>
   <div id="error"></div>
   <div id="list"></div>
 </main>
 <script>
 const list = document.getElementById("list");
 const stamp = document.getElementById("stamp");
+const summary = document.getElementById("summary");
 const errorBox = document.getElementById("error");
+
+const FAILED = new Set(["failed", "error", "infrastructure_fail", "timedout", "unauthorized"]);
+const RUNNING = new Set(["running", "queued"]);
+const openJobs = new Set();   // workflow ids whose full job list is open; kept across refreshes
+const rowErrors = new Map();  // job id -> last approve error; kept across refreshes
+let busy = 0;                 // approvals in flight; auto refresh waits for them
+let lastLoad = 0;
 
 function el(tag, props = {}, ...children) {
   const node = Object.assign(document.createElement(tag), props);
-  node.append(...children.filter(c => c !== null && c !== undefined));
+  node.append(...children.filter(c => c !== null && c !== undefined && c !== false));
   return node;
 }
 
@@ -78,62 +151,138 @@ function status(s) {
   return el("span", { className: `status s-${s}`, textContent: s.replace(/_/g, " ") });
 }
 
+function chip(kind, n, label) {
+  return el("span", { className: `chip ${kind}` }, el("b", { textContent: n }), label);
+}
+
 async function approve(button, workflow, job) {
   button.disabled = true;
   button.textContent = "Approving...";
-  const res = await fetch("/api/approve", {
-    method: "POST", headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ workflow, job }),
-  });
-  const body = await res.json();
-  if (!res.ok) {
-    errorBox.textContent = `Approve failed: ${body.error}`;
-    button.disabled = false;
-    button.textContent = "Approve";
-    return;
+  busy++;
+  try {
+    const res = await fetch("/api/approve", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ workflow, job }),
+    });
+    const body = await res.json();
+    if (!res.ok) throw new Error(body.error);
+    rowErrors.delete(job);
+  } catch (e) {
+    rowErrors.set(job, `Approve failed: ${e.message}`);
+  } finally {
+    busy--;
   }
-  load();
+  load(true);
 }
 
-function render(prs) {
+// The environment a deploy job targets, from a dev/test/staging/prod part of its name.
+const ENVS = ["dev", "test", "staging", "prod"];
+function envOf(name) {
+  if (!/deploy/i.test(name)) return null;
+  const parts = name.toLowerCase().split(/[-_.\s]+/);
+  return ENVS.find(e => parts.includes(e)) || null;
+}
+
+function jobRow(wf, job, withAction) {
+  const kind = job.approvable ? "hold" : FAILED.has(job.status) ? "fail" : "";
+  const env = envOf(job.name);
+  let action = null;
+  if (withAction && job.approvable) {
+    action = el("button", { className: "approve", textContent: "Approve" });
+    action.onclick = () => approve(action, wf.id, job.id);
+  }
+  const msg = withAction && rowErrors.get(job.id);
+  return el("div", { className: `row ${withAction ? kind : ""} ${env ? `env-${env}` : ""}` },
+    el("span", { className: "name mono" },
+      env && el("span", { className: "env", textContent: env }), job.name),
+    status(job.status),
+    el("span", { className: "act" }, action),
+    msg && el("span", { className: "msg", textContent: msg }));
+}
+
+function workflow(wf) {
+  const notable = wf.jobs.filter(j => j.approvable || FAILED.has(j.status) || RUNNING.has(j.status));
+  const done = wf.jobs.filter(j => j.status === "success").length;
+  const strip = el("div", { className: "strip" },
+    ...wf.jobs.map(j => el("span", { className: `s-${j.status}`, title: `${j.name}: ${j.status.replace(/_/g, " ")}` })));
+  const all = el("details", { open: openJobs.has(wf.id) },
+    el("summary", { textContent: `All ${wf.jobs.length} jobs (${done} succeeded)` }),
+    el("div", { className: "rows" }, ...wf.jobs.map(j => jobRow(wf, j, false))));
+  all.ontoggle = () => all.open ? openJobs.add(wf.id) : openJobs.delete(wf.id);
+  return el("div", { className: "wf" },
+    el("div", { className: "wf-head" },
+      el("strong", { textContent: wf.name }), status(wf.status),
+      el("a", { className: "link", href: wf.url, target: "_blank", rel: "noopener", textContent: "Open in CircleCI ↗" })),
+    strip,
+    notable.length > 0 && el("div", { className: "rows" }, ...notable.map(j => jobRow(wf, j, true))),
+    all);
+}
+
+// The Jira keys (ABC-123) in a PR's title and branch, in order, without repeats.
+function tickets(pr, jira) {
+  if (!jira || !jira.url || !jira.prefixes.length) return [];
+  const escaped = jira.prefixes.map(p => p.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"));
+  const re = new RegExp(`\\b(?:${escaped.join("|")})-\\d+\\b`, "gi");
+  const keys = `${pr.title} ${pr.branch}`.match(re) || [];
+  return [...new Set(keys.map(k => k.toUpperCase()))];
+}
+
+function ticketLinks(pr, jira) {
+  return tickets(pr, jira).map(key => el("a", {
+    className: "ticket", href: `${jira.url}/browse/${key}`, target: "_blank", rel: "noopener",
+    title: `Open ${key} in Jira`, textContent: `${key} ↗`,
+  }));
+}
+
+function render(prs, jira) {
+  const jobs = prs.flatMap(pr => pr.workflows.flatMap(wf => wf.jobs));
+  const waiting = jobs.filter(j => j.approvable).length;
+  const failed = jobs.filter(j => FAILED.has(j.status)).length;
+  const running = jobs.filter(j => RUNNING.has(j.status)).length;
+  document.title = waiting ? `(${waiting}) CI Jobs` : "CI Jobs";
+
+  summary.replaceChildren(...[
+    chip("", prs.length, prs.length === 1 ? "open PR" : "open PRs"),
+    waiting > 0 && chip("hold", waiting, waiting === 1 ? "approval waits" : "approvals wait"),
+    failed > 0 && chip("fail", failed, failed === 1 ? "job failed" : "jobs failed"),
+    running > 0 && chip("run", running, "running"),
+  ].filter(Boolean));
+
   if (!prs.length) {
     list.replaceChildren(el("section", { textContent: "No open pull requests." }));
     return;
   }
+  const owners = new Set(prs.map(pr => pr.repo.split("/")[0]));
+  const oneOwner = owners.size === 1;
   list.replaceChildren(...prs.map(pr => {
-    const section = el("section", {},
-      el("div", { className: "pr" },
-        el("a", { href: pr.url, target: "_blank", textContent: `${pr.repo}#${pr.number}` }),
-        el("span", { textContent: pr.title }),
-        el("span", { className: "branch", textContent: pr.branch })));
-    if (pr.error || !pr.workflows.length) {
-      section.append(el("div", { className: "note", textContent: pr.error || "No pipeline for this branch." }));
-    }
-    for (const wf of pr.workflows) {
-      const rows = wf.jobs.map(job => {
-        let action = null;
-        if (job.approvable) {
-          action = el("button", { className: "approve", textContent: "Approve" });
-          action.onclick = () => approve(action, wf.id, job.id);
-        }
-        return el("tr", {},
-          el("td", { className: "name", textContent: job.name }),
-          el("td", {}, status(job.status)),
-          el("td", { className: "act" }, action));
-      });
-      section.append(el("div", { className: "wf" },
-        el("div", { className: "wf-head" },
-          el("strong", { textContent: wf.name }), status(wf.status),
-          el("a", { href: wf.url, target: "_blank", textContent: "CircleCI" })),
-        el("table", {}, el("tbody", {}, ...rows))));
-    }
-    return section;
+    const [owner, name] = pr.repo.split("/");
+    const prJobs = pr.workflows.flatMap(wf => wf.jobs);
+    const kind = prJobs.some(j => FAILED.has(j.status)) || pr.error ? "broken"
+               : prJobs.some(j => j.approvable) ? "needs" : "";
+    return el("section", { className: kind },
+      el("div", { className: "pr-head" },
+        el("a", { className: "ref", href: pr.url, target: "_blank", rel: "noopener" },
+          !oneOwner && el("span", { className: "owner", textContent: `${owner}/` }),
+          `${name}#${pr.number}`),
+        el("span", { className: "title", textContent: pr.title }),
+        ...ticketLinks(pr, jira)),
+      el("div", { className: "branch mono", textContent: pr.branch }),
+      (pr.error || !pr.workflows.length) &&
+        el("div", { className: "note", textContent: pr.error || "No pipeline for this branch." }),
+      ...pr.workflows.map(workflow));
   }));
 }
 
+function ago() {
+  if (!lastLoad) return;
+  const s = Math.round((Date.now() - lastLoad) / 1000);
+  stamp.textContent = `updated ${s < 5 ? "just now" : s < 60 ? `${s} s ago` : `${Math.floor(s / 60)} min ago`}`
+                    + " · auto refresh every 30 s";
+}
+
 let loading = false;
-async function load() {
-  if (loading) return;
+async function load(force = false) {
+  if (loading || (busy && !force)) return;
   loading = true;
   stamp.textContent = "refreshing...";
   try {
@@ -141,19 +290,20 @@ async function load() {
     const body = await res.json();
     if (!res.ok) throw new Error(body.error);
     errorBox.textContent = "";
-    render(body.prs);
-    stamp.textContent = `updated ${new Date().toLocaleTimeString()}`;
+    render(body.prs, body.jira);
+    lastLoad = Date.now();
   } catch (e) {
     errorBox.textContent = `Could not load: ${e.message}`;
-    stamp.textContent = "";
   } finally {
     loading = false;
+    ago();
   }
 }
 
-document.getElementById("refresh").onclick = load;
+document.getElementById("refresh").onclick = () => load(true);
 load();
 setInterval(load, 30000);
+setInterval(ago, 5000);
 </script>
 </body>
 </html>

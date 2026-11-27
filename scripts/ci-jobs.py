@@ -7,6 +7,10 @@ Usage:
   ci-jobs.py approve 1 3      approve the jobs numbered 1 and 3 in the list ('all' for every one)
   ci-jobs.py serve [port]     dashboard at http://localhost:8765 (ci-jobs.html), refreshed every 30 s
 
+Config: ci-jobs.json next to this script (git ignores it), or the file that CI_JOBS_CONFIG
+names. Copy ci-jobs.example.json to ci-jobs.json and fill it in. It holds the approval job names and, optionally, the Jira
+site and key prefixes that link ticket keys in PR titles and branch names.
+
 Env: CIRCLECI_TOKEN, a CircleCI personal API token. Needs gh, signed in.
 """
 import json
@@ -20,8 +24,27 @@ from concurrent.futures import ThreadPoolExecutor
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
-# The approval jobs that may be approved from here. Put your config's job names here.
-JOBS = ["deploy-dev-approval", "deploy-test-approval"]
+CONFIG = Path(os.environ.get("CI_JOBS_CONFIG", Path(__file__).with_name("ci-jobs.json")))
+EXAMPLE = Path(__file__).with_name("ci-jobs.example.json")
+
+
+def load_config():
+    """The approval jobs that may be approved from here, and the Jira link settings."""
+    if not CONFIG.is_file():
+        sys.exit(f"no config at {CONFIG}; copy {EXAMPLE} there and fill it in")
+    try:
+        cfg = json.loads(CONFIG.read_text())
+    except json.JSONDecodeError as e:
+        sys.exit(f"{CONFIG} is not valid JSON: {e}")
+    jobs = cfg.get("approval_jobs")
+    if not isinstance(jobs, list) or not all(isinstance(j, str) for j in jobs):
+        sys.exit(f"{CONFIG}: approval_jobs must be a list of job names")
+    jira = cfg.get("jira") or {}
+    return jobs, {"url": str(jira.get("url", "")).rstrip("/"),
+                  "prefixes": [str(p) for p in jira.get("prefixes", []) if str(p).strip()]}
+
+
+JOBS, JIRA = [], {"url": "", "prefixes": []}
 
 API = "https://circleci.com/api/v2"
 PRS_QUERY = """{ search(query: "is:pr is:open author:@me archived:false", type: ISSUE, first: 100) {
@@ -144,7 +167,7 @@ class Dashboard(BaseHTTPRequestHandler):
             return self.reply(200, self.page.read_bytes(), "text/html; charset=utf-8")
         if self.path == "/api/prs":
             try:
-                return self.reply(200, {"prs": snapshot(), "jobs": JOBS})
+                return self.reply(200, {"prs": snapshot(), "jobs": JOBS, "jira": JIRA})
             except Exception as e:  # noqa: BLE001 - shown on the page
                 return self.reply(502, {"error": str(e)})
         self.reply(404, {"error": "not found"})
@@ -165,6 +188,8 @@ class Dashboard(BaseHTTPRequestHandler):
 
 
 def main():
+    global JOBS, JIRA
+    JOBS, JIRA = load_config()
     if "CIRCLECI_TOKEN" not in os.environ:
         sys.exit("CIRCLECI_TOKEN is not set; create one at https://app.circleci.com/settings/user/tokens")
     args = sys.argv[1:]
